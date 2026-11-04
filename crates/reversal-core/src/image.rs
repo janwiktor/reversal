@@ -55,6 +55,17 @@ impl NRect {
         y1: 1.0,
     };
 
+    /// Centred rectangle covering `share` (0.1…1) of each side.
+    pub fn centred(share: f32) -> NRect {
+        let margin = (1.0 - share.clamp(0.1, 1.0)) / 2.0;
+        NRect {
+            x0: margin,
+            y0: margin,
+            x1: 1.0 - margin,
+            y1: 1.0 - margin,
+        }
+    }
+
     /// Pixel rectangle in an image of the given size (at least 1×1).
     pub fn to_pixels(self, width: usize, height: usize) -> Rect {
         let (w, h) = (width as f32, height as f32);

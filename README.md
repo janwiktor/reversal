@@ -7,7 +7,7 @@ Reversal takes a camera scan of a negative and writes a positive, losslessly com
 ## How it works
 
 1. **Reads the raw scan** through LibRaw, as linear camera data with no colour rendering applied.
-2. **Inverts in density.** It reads the film base from the unexposed edge of the film and finds how grey runs through the dye layers in each frame, so neutrals stay neutral from shadows to highlights. Exposure comes from the frame's highlights and average density, ignoring the holder around the film.
+2. **Inverts in density.** It reads the film base from the unexposed edge of the film and finds how grey runs through the dye layers in each frame, so neutrals stay neutral from shadows to highlights. Colour and exposure are measured on the centre of the scan (85% of each side by default), which stays clear of the holder and rebate; you can change the size or draw the area.
 3. **Writes a scene-linear positive** as a 16-bit LinearRaw DNG in linear Rec.2020, with spare highlight range that a raw editor can recover.
 
 Your source files are never changed. Each DNG stores its conversion settings in its metadata, and the web UI also saves them in a settings file next to the DNG, so a frame reopens as you left it.
@@ -41,16 +41,19 @@ Open the web UI on a folder of scans. It runs locally at http://127.0.0.1:8787 a
 Or convert from the command line:
 
 ```bash
-./target/release/reversal convert scan.NEF --flip --rotate 3 --crop-frame
+./target/release/reversal convert scan.NEF --flip --rotate 3 --crop-area
 ```
 
 | Option | What it does |
 | --- | --- |
 | `--exposure`, `--contrast` | Tone, −100 to +100 |
+| `--highlights`, `--shadows`, `--whites`, `--blacks` | Tone curve, −100 to +100. Saved in the profile, so the stored image keeps everything |
+| `--profile` | `neutral` (default), `flat` (low contrast, no clipping) or `vivid`. The DNG opens with this one and carries the others |
 | `--temperature`, `--tint`, `--saturation` | Colour, −100 to +100 |
 | `--flip` | Mirror left-right, for scans made emulsion side up |
 | `--rotate`, `--straighten` | Quarter turns (0–3), and fine rotation in degrees |
-| `--crop-frame` | Crop to the detected image frame; the default keeps the whole scan |
+| `--area-percent` | Size of the centred area that colour and exposure are measured on, default 85 |
+| `--crop-area` | Crop to that area; the default keeps the whole scan |
 | `--compression` | `ljpeg` (default) or `none` |
 | `-o` | Output file or folder; the default is `<name>-positive.dng` next to the input |
 
@@ -60,7 +63,7 @@ Early and in active development.
 
 - Only tested with Nikon D5100 NEF and DNG scans of colour negative film. Other cameras that LibRaw reads should open, but the colour correction was fitted to this camera and one light source.
 - Colour negative only. Black and white and slide film aren't handled yet.
-- Frame detection for cropping is unreliable on film strips and full-frame scans, so draw the crop there. Film-stock presets and roll-wide settings aren't there yet.
+- The centred image area doesn't suit full film strips, so draw the area and crop there. Film-stock presets and roll-wide settings aren't there yet.
 - Camera EXIF isn't copied to the DNG.
 
 ## Development

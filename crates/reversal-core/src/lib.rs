@@ -39,18 +39,16 @@ pub fn xmp_packet(source_name: &str, settings: &Settings) -> String {
     )
 }
 
-/// Profiles written into every positive: the contrast chosen at conversion is
-/// the main profile; Neutral (the raw editor's own default curve) is selectable.
-pub fn profiles(contrast: f32) -> (dng::Profile, Vec<dng::Profile>) {
-    let main = dng::Profile {
-        name: "Reversal Print".into(),
-        tone_curve: Some(render::tone_curve(contrast, 64)),
-    };
-    let neutral = dng::Profile {
-        name: "Reversal Neutral".into(),
-        tone_curve: None,
-    };
-    (main, vec![neutral])
+/// Profiles written into every positive, all under the same tone sliders: the chosen look
+/// is the main profile, the others are selectable in a raw editor.
+pub fn profiles(adjust: &invert::Adjust) -> (dng::Profile, Vec<dng::Profile>) {
+    let tone = adjust.tone();
+    let others = render::Look::ALL
+        .into_iter()
+        .filter(|&look| look != adjust.look)
+        .map(|look| render::profile(look, tone))
+        .collect();
+    (render::profile(adjust.look, tone), others)
 }
 
 /// Convert a decoded scan and write the DNG; returns the file size in bytes.
@@ -63,7 +61,7 @@ pub fn write_positive(
     software: &str,
 ) -> io::Result<u64> {
     let positive = invert::convert(scan, settings);
-    let (profile, extra_profiles) = profiles(settings.adjust.contrast);
+    let (profile, extra_profiles) = profiles(&settings.adjust);
     let xmp = xmp_packet(source_name, settings);
     let opts = dng::DngOptions {
         compression,
@@ -96,6 +94,18 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_chosen_look_is_the_main_profile_and_the_others_stay_selectable() {
+        let adjust = invert::Adjust {
+            look: render::Look::Vivid,
+            ..invert::Adjust::default()
+        };
+        let (main, others) = profiles(&adjust);
+        assert_eq!(main.name, "Reversal Vivid");
+        let names: Vec<_> = others.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Reversal Neutral", "Reversal Flat"]);
+    }
 
     #[test]
     fn write_atomic_replaces_and_leaves_no_temp_file() {

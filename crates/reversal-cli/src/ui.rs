@@ -336,7 +336,12 @@ impl State {
         };
         Ok(json_resp(
             200,
-            &json!({ "auto": auto, "settings": current, "warning": warning }),
+            &json!({
+                "auto": auto,
+                "settings": current,
+                "warning": warning,
+                "defaultAreaPercent": invert::DEFAULT_AREA_PERCENT,
+            }),
         ))
     }
 
@@ -355,7 +360,8 @@ impl State {
             &job.settings,
             Some(picture),
         ));
-        let jpeg = render::preview_jpeg(&img, job.settings.adjust.contrast, 88);
+        let (profile, _) = reversal_core::profiles(&job.settings.adjust);
+        let jpeg = render::preview_jpeg(&img, &profile, 88);
         Ok(Response::from_data(jpeg)
             .with_header(header("Content-Type", "image/jpeg"))
             .with_header(header("Cache-Control", "no-store"))

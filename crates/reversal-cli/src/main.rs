@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use reversal_core::invert::{self, Adjust, Hints, Settings};
+use reversal_core::render::Look;
 
 #[derive(Parser)]
 #[command(
@@ -39,6 +40,13 @@ enum CompressionArg {
     None,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum LookArg {
+    Neutral,
+    Flat,
+    Vivid,
+}
+
 #[derive(clap::Args)]
 struct ConvertArgs {
     /// Raw files (NEF, CR2, ARW, DNG, …).
@@ -53,6 +61,21 @@ struct ConvertArgs {
     /// Contrast, −100…+100.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     contrast: f32,
+    /// Blacks, −100 (crush) … +100 (lift).
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    blacks: f32,
+    /// Shadows, −100…+100.
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    shadows: f32,
+    /// Highlights, −100…+100.
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    highlights: f32,
+    /// Whites, −100 (roll off, bringing back clipped highlights) … +100 (clip sooner).
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    whites: f32,
+    /// Profile the DNG opens with; the others stay selectable in a raw editor.
+    #[arg(long, value_enum, default_value_t = LookArg::Neutral)]
+    profile: LookArg,
     /// Temperature, −100 (cooler) … +100 (warmer).
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     temperature: f32,
@@ -65,9 +88,12 @@ struct ConvertArgs {
     /// Fine rotation in degrees, clockwise positive.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     straighten: f32,
-    /// Crop to the detected image frame (default keeps the whole scan).
+    /// Size of the centred image area that colour and exposure are measured on, in percent.
+    #[arg(long, default_value_t = invert::DEFAULT_AREA_PERCENT)]
+    area_percent: f32,
+    /// Crop to the image area (default keeps the whole scan).
     #[arg(long)]
-    crop_frame: bool,
+    crop_area: bool,
     /// Mirror left-right (emulsion-up scans).
     #[arg(long)]
     flip: bool,
@@ -94,6 +120,15 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     let adjust = Adjust {
         exposure: args.exposure,
         contrast: args.contrast,
+        blacks: args.blacks,
+        shadows: args.shadows,
+        highlights: args.highlights,
+        whites: args.whites,
+        look: match args.profile {
+            LookArg::Neutral => Look::Neutral,
+            LookArg::Flat => Look::Flat,
+            LookArg::Vivid => Look::Vivid,
+        },
         temperature: args.temperature,
         tint: args.tint,
         saturation: args.saturation,
@@ -110,10 +145,14 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     for (input, out) in args.inputs.iter().zip(&outs) {
         let t = Instant::now();
         let scan = reversal_core::decode::decode(input)?;
-        let mut settings =
-            Settings::new(invert::estimate(&scan, &Hints::default()), adjust.clone());
-        if args.crop_frame {
-            settings.adjust.crop = Some(settings.estimate.frame);
+        let hints = Hints {
+            area_percent: Some(args.area_percent),
+            ..Hints::default()
+        };
+        let mut settings = Settings::new(invert::estimate(&scan, &hints), adjust.clone());
+        settings.hints = hints;
+        if args.crop_area {
+            settings.adjust.crop = Some(settings.estimate.area);
         }
         let bytes = pipeline::export(input, &scan, &settings, compression, out)?;
         println!(

@@ -122,6 +122,16 @@
     <h2 id="h-tone">Tone</h2>
     <div class="slider"><label for="exposure">Exposure</label><output for="exposure">0</output><input id="exposure" type="range" min="-100" max="100" step="1" value="0"></div>
     <div class="slider"><label for="contrast">Contrast</label><output for="contrast">0</output><input id="contrast" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="highlights">Highlights</label><output for="highlights">0</output><input id="highlights" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="shadows">Shadows</label><output for="shadows">0</output><input id="shadows" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="whites">Whites</label><output for="whites">0</output><input id="whites" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="blacks">Blacks</label><output for="blacks">0</output><input id="blacks" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="group-label">Profile</div>
+    <div class="buttons">
+      <button type="button" id="look-neutral" aria-pressed="true">Neutral</button>
+      <button type="button" id="look-flat" aria-pressed="false">Flat</button>
+      <button type="button" id="look-vivid" aria-pressed="false">Vivid</button>
+    </div>
   </section>
 
   <section aria-labelledby="h-color">
@@ -142,7 +152,7 @@
     <div class="group-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</div>
     <div class="buttons">
       <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
-      <button type="button" id="crop-frame" aria-pressed="false">Image frame</button>
+      <button type="button" id="crop-frame" aria-pressed="false">Image area</button>
       <button type="button" id="crop-draw" aria-pressed="false">Draw</button>
     </div>
   </section>
@@ -152,9 +162,10 @@
     <p class="hint">Where the conversion measures the image and the film base. Change these if colours look off.</p>
     <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Image area</div>
     <div class="buttons">
-      <button type="button" id="area-auto" aria-pressed="true">Detect</button>
+      <button type="button" id="area-auto" aria-pressed="true">Centre</button>
       <button type="button" id="area-draw" aria-pressed="false">Draw</button>
     </div>
+    <div class="slider" style="margin-top:10px"><label for="area-percent">Centre size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
     <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
     <div class="buttons">
       <button type="button" id="base-auto" aria-pressed="true">Detect</button>
@@ -172,7 +183,8 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const SLIDERS = ["exposure", "contrast", "temperature", "tint", "saturation"];
+const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "saturation"];
+const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
   crop: "Drag over the image to set the crop.",
   area: "Drag over the part of the scan that is picture (no rebate, no holder).",
@@ -238,7 +250,7 @@ async function open(name) {
   setBusy(true);
   try {
     const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
-    current = { file: name, auto: data.auto, settings: data.settings };
+    current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent };
     current.settings.hints ??= {};
     syncControls();
     await refresh();
@@ -268,8 +280,12 @@ function syncControls() {
     $(id).value = a[id];
     document.querySelector(`output[for=${id}]`).textContent = fmt(id, a[id]);
   }
+  for (const look of LOOKS) $(`look-${look}`).setAttribute("aria-pressed", String(a.look === look));
+  const percent = hints().area_percent ?? current.defaultAreaPercent;
+  $("area-percent").value = percent;
+  document.querySelector("output[for=area-percent]").textContent = `${Math.round(percent)}%`;
   $("flip").setAttribute("aria-pressed", String(a.flip_h));
-  const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.frame) ? "frame" : "draw";
+  const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.area) ? "frame" : "draw";
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
   $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
   $("area-draw").setAttribute("aria-pressed", String(!!hints().analysis || tool === "area"));
@@ -292,6 +308,21 @@ for (const id of [...SLIDERS, "straighten"]) {
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
 }
 
+for (const look of LOOKS) {
+  $(`look-${look}`).addEventListener("click", () => { if (current) { adj().look = look; changed(0); } });
+}
+
+let areaTimer = null;
+function setAreaPercent(percent) {
+  if (!current) return;
+  hints().area_percent = percent;
+  syncControls();
+  clearTimeout(areaTimer);
+  areaTimer = setTimeout(() => setHint("analysis", null), 150);
+}
+$("area-percent").addEventListener("input", (e) => setAreaPercent(Number(e.target.value)));
+$("area-percent").addEventListener("dblclick", () => setAreaPercent(null));
+
 // Mirror the image as it is shown now: with an odd quarter turn the stored
 // "mirror, then rotate" order needs the opposite rotation.
 $("flip").addEventListener("click", () => {
@@ -304,7 +335,7 @@ $("flip").addEventListener("click", () => {
 $("rotate").addEventListener("click", () => { if (current) { adj().rotate = (adj().rotate + 1) % 4; changed(0); } });
 
 $("crop-full").addEventListener("click", () => { if (current) { adj().crop = null; setTool(null); changed(0); } });
-$("crop-frame").addEventListener("click", () => { if (current) { adj().crop = { ...current.settings.estimate.frame }; setTool(null); changed(0); } });
+$("crop-frame").addEventListener("click", () => { if (current) { adj().crop = { ...current.settings.estimate.area }; setTool(null); changed(0); } });
 $("crop-draw").addEventListener("click", () => setTool(tool === "crop" ? null : "crop"));
 $("area-draw").addEventListener("click", () => setTool(tool === "area" ? null : "area"));
 $("base-draw").addEventListener("click", () => setTool(tool === "base" ? null : "base"));
@@ -317,6 +348,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tool) se
 $("reset").addEventListener("click", () => {
   if (!current) return;
   for (const id of SLIDERS) adj()[id] = 0;
+  adj().look = "neutral";
   changed(0);
   status("Tone and colour are back to the automatic conversion.");
 });
@@ -338,14 +370,14 @@ $("export").addEventListener("click", async () => {
 
 async function setHint(key, rect) {
   if (!current) return;
-  const wasFrameCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.frame);
+  const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
   hints()[key] = rect;
   status("Measuring…");
   try {
     current.settings.estimate = await (await api("/api/estimate", { file: current.file, hints: hints() })).json();
-    if (wasFrameCrop) adj().crop = { ...current.settings.estimate.frame };
+    if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
     status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
-                          : (rect ? "Image area set from your selection." : "Image area detected automatically."));
+                          : (rect ? "Image area set from your selection." : "Measuring the centre of the scan."));
   } catch (e) {
     status(`Could not measure: ${e.message}`);
   }
@@ -497,6 +529,7 @@ function histogram(img, storedClipped) {
   $("clip-high").textContent = `Highlights clipped ${pct(high)}`;
   $("clip-low").classList.toggle("over", low / n > 0.005);
   $("clip-high").classList.toggle("over", high / n > 0.005);
+  $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
   $("stored").hidden = storedClipped < 0.0005;
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
 }
