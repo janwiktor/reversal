@@ -54,7 +54,8 @@ Rules:
 - **Grey curves.** The dye layers have different contrast, and it varies with density:
   map red and blue onto green with a per-frame grey curve (not a black/white point per
   channel), so neutrals stay neutral at every density. Scene analysis must exclude the
-  holder around the film and light through holes.
+  holder around the film and light through holes: it measures a centred share of the scan
+  unless the user draws an area.
 - **Inputs** include camera RAW (DNG, CR2/CR3, NEF, ARW, RAF…) and scanner TIFFs.
   Preserve and write metadata (EXIF, ICC profile) where possible.
 - **Non-destructive.** Never overwrite source files. Output to new files or, in the

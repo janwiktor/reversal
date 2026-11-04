@@ -31,11 +31,16 @@ pub enum Compression {
     LosslessJpeg,
 }
 
-/// A DNG camera profile: name plus optional tone curve (linear (x, y) pairs).
+/// A DNG camera profile.
 #[derive(Clone, Debug)]
 pub struct Profile {
     pub name: String,
-    pub tone_curve: Option<Vec<(f32, f32)>>,
+    /// Linear (x, y) pairs.
+    pub tone_curve: Vec<(f32, f32)>,
+    /// EV added to `BaselineExposure` under this profile.
+    pub exposure_offset: f32,
+    /// Saturation applied by the profile's look table; 1 = none.
+    pub saturation: f32,
 }
 
 pub struct DngOptions<'a> {
@@ -185,10 +190,24 @@ fn profile_tags(p: &Profile) -> Vec<Tag> {
         Tag(50941, Val::Long(vec![3])),                 // ProfileEmbedPolicy: no restrictions
         Tag(50964, Val::SRational(flat(forward))),      // ForwardMatrix1: -> XYZ D50
     ];
-    if let Some(curve) = &p.tone_curve {
+    tags.push(Tag(
+        50940, // ProfileToneCurve
+        Val::Float(p.tone_curve.iter().flat_map(|&(x, y)| [x, y]).collect()),
+    ));
+    if p.exposure_offset != 0.0 {
         tags.push(Tag(
-            50940,
-            Val::Float(curve.iter().flat_map(|&(x, y)| [x, y]).collect()),
+            51109, // BaselineExposureOffset
+            Val::SRational(vec![p.exposure_offset as f64]),
+        ));
+    }
+    if p.saturation != 1.0 {
+        // A uniform table: no hue shift, the same saturation scale everywhere, value as is.
+        let (hues, sats, vals) = (6u32, 2u32, 1u32);
+        let entry = [0.0, p.saturation, 1.0];
+        tags.push(Tag(50981, Val::Long(vec![hues, sats, vals]))); // ProfileLookTableDims
+        tags.push(Tag(
+            50982, // ProfileLookTableData
+            Val::Float(entry.repeat((hues * sats * vals) as usize)),
         ));
     }
     tags
@@ -283,16 +302,9 @@ pub fn encode(img: &Rgb32, opts: &DngOptions) -> Vec<u8> {
     ]);
     let main_ifd = buf.ifd(main);
 
-    // Previews: same tone curve as the main profile, so thumbnails match the opened file.
-    let curve = opts
-        .profile
-        .tone_curve
-        .clone()
-        .unwrap_or_else(|| render::tone_curve(0.0, 64));
+    // Previews: rendered with the main profile, so thumbnails match the opened file.
     let preview = img.fit(PREVIEW_LONG_SIDE);
-    let mut lifted = preview.clone();
-    lifted.data.iter_mut().for_each(|v| *v *= DISPLAY_LIFT);
-    let preview_px = render::to_srgb8(&lifted, &curve);
+    let preview_px = render::to_srgb8(&preview, &opts.profile);
     let jpeg = render::jpeg(&preview_px, preview.width, preview.height, 90);
     let jpeg_off = buf.blob(&jpeg);
     let preview_ifd = buf.ifd(vec![
@@ -310,8 +322,8 @@ pub fn encode(img: &Rgb32, opts: &DngOptions) -> Vec<u8> {
         Tag(50970, Val::Long(vec![2])),   // PreviewColorSpace: sRGB
     ]);
 
-    let thumb = lifted.fit(THUMB_LONG_SIDE);
-    let thumb_px = render::to_srgb8(&thumb, &curve);
+    let thumb = img.fit(THUMB_LONG_SIDE);
+    let thumb_px = render::to_srgb8(&thumb, &opts.profile);
     let thumb_off = buf.blob(&thumb_px);
 
     let extra: Vec<u32> = opts
@@ -371,6 +383,18 @@ pub fn clipped_share(positive: &Rgb32) -> f64 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn profile_tags_carry_only_what_the_look_needs() {
+        let has = |p: &Profile, id: u16| profile_tags(p).iter().any(|t| t.0 == id);
+        let tone = render::Tone::default();
+        let neutral = render::profile(render::Look::Neutral, tone);
+        let flat = render::profile(render::Look::Flat, tone);
+        let vivid = render::profile(render::Look::Vivid, tone);
+        assert!(has(&neutral, 50940) && !has(&neutral, 51109) && !has(&neutral, 50982));
+        assert!(has(&flat, 51109) && !has(&flat, 50982));
+        assert!(has(&vivid, 50981) && has(&vivid, 50982) && !has(&vivid, 51109));
+    }
+
     fn u16_at(b: &[u8], o: usize) -> u16 {
         u16::from_le_bytes([b[o], b[o + 1]])
     }
@@ -387,14 +411,8 @@ mod tests {
             .for_each(|(i, v)| *v = (i % 997) as f32 / 997.0);
         let opts = DngOptions {
             compression: Compression::LosslessJpeg,
-            profile: Profile {
-                name: "Reversal Test".into(),
-                tone_curve: Some(render::tone_curve(0.0, 16)),
-            },
-            extra_profiles: vec![Profile {
-                name: "Reversal Neutral".into(),
-                tone_curve: None,
-            }],
+            profile: render::profile(render::Look::Neutral, render::Tone::default()),
+            extra_profiles: vec![render::profile(render::Look::Flat, render::Tone::default())],
             xmp: Some("<x/>"),
             software: "test",
         };
@@ -419,10 +437,7 @@ mod tests {
     fn preview_ifd_declares_no_chroma_subsampling() {
         let opts = DngOptions {
             compression: Compression::None,
-            profile: Profile {
-                name: "Reversal Test".into(),
-                tone_curve: None,
-            },
+            profile: render::profile(render::Look::Neutral, render::Tone::default()),
             extra_profiles: vec![],
             xmp: None,
             software: "test",

@@ -16,6 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::image::{NRect, Rgb32};
+use crate::render::{Look, Tone};
 
 /// Film gamma assumed when turning density into scene log exposure; sets scene contrast.
 pub const GAMMA_REF: f32 = 0.7;
@@ -35,11 +36,10 @@ const LOG10_2: f32 = std::f32::consts::LOG10_2;
 
 /// Pixels at or above this are light through holes or gaps, not film.
 const CLIPPED: f32 = 0.9;
-/// Holder or gap around the film: rows/columns with this share of pixels denser than
-/// `SURROUND_DENSITY`, running in from a scan edge, at most `SURROUND_MAX_SHARE` deep.
-const SURROUND_DENSITY: f32 = 1.1;
-const SURROUND_FILL: f32 = 0.6;
-const SURROUND_MAX_SHARE: f32 = 0.06;
+/// Share of each side of the scan, centred, measured when nobody draws an area: clear of
+/// holders and rebates on a framed scan. Tested at 70–95% against reference scans; 95%
+/// takes in holders.
+pub const DEFAULT_AREA_PERCENT: f32 = 85.0;
 
 /// Starting grey curves (bend, slope) for red and blue: the average across rolls.
 /// Each frame's fit is pulled toward these by `GREY_PULL`.
@@ -71,12 +71,14 @@ const TOE_AMOUNT: f32 = 0.3;
 const TOE_SCALE: f32 = 0.35;
 const TOE_FLOOR: f32 = -0.3;
 
-/// Manual overrides for the automatic analysis. `None` = detect automatically.
+/// Manual overrides for the automatic analysis. `None` = the automatic choice.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Hints {
     /// Image area used to measure density range and balance.
     pub analysis: Option<NRect>,
+    /// Size of the centred image area when `analysis` isn't drawn, in percent of each side.
+    pub area_percent: Option<f32>,
     /// Unexposed film (rebate) to read the film base from.
     pub base: Option<NRect>,
 }
@@ -127,8 +129,6 @@ pub struct Estimate {
     pub base_rgb: [f32; 3],
     /// Where the base was read from.
     pub base_area: NRect,
-    /// Detected image frame, offered as a crop.
-    pub frame: NRect,
     /// Part of the scan the grey curves and exposure were measured on.
     pub area: NRect,
     /// Grey curves of the red and blue layers.
@@ -143,6 +143,13 @@ pub struct Estimate {
 pub struct Adjust {
     pub exposure: f32,
     pub contrast: f32,
+    /// Tone curve sliders, see [`Tone`].
+    pub blacks: f32,
+    pub shadows: f32,
+    pub highlights: f32,
+    pub whites: f32,
+    /// Profile the DNG opens with.
+    pub look: Look,
     /// + warmer (yellow), − cooler (blue).
     pub temperature: f32,
     /// + magenta, − green.
@@ -164,6 +171,11 @@ impl Default for Adjust {
         Adjust {
             exposure: 0.0,
             contrast: 0.0,
+            blacks: 0.0,
+            shadows: 0.0,
+            highlights: 0.0,
+            whites: 0.0,
+            look: Look::default(),
             temperature: 0.0,
             tint: 0.0,
             saturation: 0.0,
@@ -182,6 +194,16 @@ impl Adjust {
         let t = self.temperature / 100.0 * BALANCE_EV_RANGE;
         let g = self.tint / 100.0 * BALANCE_EV_RANGE;
         [e + t + g / 2.0, e - g, e - t + g / 2.0]
+    }
+
+    pub fn tone(&self) -> Tone {
+        Tone {
+            contrast: self.contrast,
+            blacks: self.blacks,
+            shadows: self.shadows,
+            highlights: self.highlights,
+            whites: self.whites,
+        }
     }
 
     pub fn saturation_gain(&self) -> f32 {
@@ -353,57 +375,6 @@ fn detect_base(small: &Rgb32) -> ([f32; 3], NRect) {
     (base, area)
 }
 
-/// Image frame: rows/columns clearly denser than the base, edges trimmed of bare base.
-fn detect_frame(small: &Rgb32, base: [f32; 3]) -> NRect {
-    let (w, h) = (small.width, small.height);
-    let lum: Vec<f32> = small.pixels().map(|p| (p[0] + p[1] + p[2]) / 3.0).collect();
-    let base_mean = (base[0] + base[1] + base[2]) / 3.0;
-    let dense = |x: usize, y: usize| lum[y * w + x] < 0.6 * base_mean;
-    let row_dense: Vec<bool> = (0..h)
-        .map(|y| (w / 4..3 * w / 4).filter(|&x| dense(x, y)).count() as f32 > 0.9 * (w / 2) as f32)
-        .collect();
-    let col_dense: Vec<bool> = (0..w)
-        .map(|x| (h / 4..3 * h / 4).filter(|&y| dense(x, y)).count() as f32 > 0.9 * (h / 2) as f32)
-        .collect();
-    let span = |v: &[bool]| match (v.iter().position(|&d| d), v.iter().rposition(|&d| d)) {
-        (Some(a), Some(b)) => (a, b + 1),
-        _ => (0, v.len()),
-    };
-    let (mut top, mut bottom) = span(&row_dense);
-    let (mut left, mut right) = span(&col_dense);
-    let (iy, ix) = (h / 100, w / 100);
-    if bottom - top > 2 * iy + 2 && right - left > 2 * ix + 2 {
-        (top, bottom, left, right) = (top + iy, bottom - iy, left + ix, right - ix);
-    }
-
-    let d_g = |x: usize, y: usize| density_above_base(small.get(x, y)[1], base[1]);
-    let col_med: Vec<f32> = (left..right)
-        .map(|x| median(&mut (top..bottom).map(|y| d_g(x, y)).collect::<Vec<_>>()))
-        .collect();
-    let row_med: Vec<f32> = (top..bottom)
-        .map(|y| median(&mut (left..right).map(|x| d_g(x, y)).collect::<Vec<_>>()))
-        .collect();
-    let keep = |v: &[f32]| {
-        let r = 0.3 * median(&mut v.to_vec());
-        match (
-            v.iter().position(|&m| m > r),
-            v.iter().rposition(|&m| m > r),
-        ) {
-            (Some(a), Some(b)) => (a, b + 1),
-            _ => (0, v.len()),
-        }
-    };
-    let (c0, c1) = keep(&col_med);
-    let (r0, r1) = keep(&row_med);
-    let rect = crate::image::Rect {
-        top: top + r0,
-        bottom: top + r1,
-        left: left + c0,
-        right: left + c1,
-    };
-    NRect::from_pixels(rect, w, h)
-}
-
 /// Estimate film base, image area, density points and balance from a full-res scan.
 pub fn estimate(scan: &Rgb32, hints: &Hints) -> Estimate {
     estimate_on(&analysis_image(scan), hints)
@@ -412,41 +383,6 @@ pub fn estimate(scan: &Rgb32, hints: &Hints) -> Estimate {
 /// The downsampled copy estimates are computed on; callers may cache it.
 pub fn analysis_image(scan: &Rgb32) -> Rgb32 {
     scan.downsample(ANALYSIS_FACTOR)
-}
-
-/// The scan without the holder or gap around the film.
-fn film_area(small: &Rgb32, base: [f32; 3]) -> NRect {
-    let (w, h) = (small.width, small.height);
-    let dark: Vec<bool> = small
-        .pixels()
-        .map(|p| density_above_base(p[1], base[1]) > SURROUND_DENSITY)
-        .collect();
-    let row_full =
-        |y: usize| (0..w).filter(|&x| dark[y * w + x]).count() as f32 >= SURROUND_FILL * w as f32;
-    let col_full =
-        |x: usize| (0..h).filter(|&y| dark[y * w + x]).count() as f32 >= SURROUND_FILL * h as f32;
-    let depth = |n: usize, full: &dyn Fn(usize) -> bool| {
-        (0..(n as f32 * SURROUND_MAX_SHARE) as usize)
-            .take_while(|&i| full(i))
-            .count()
-    };
-    // The holder's edge is soft, so step a little further in.
-    let pad = w.max(h) / 300;
-    let edge = |d: usize| if d > 0 { d + pad } else { 0 };
-    let top = edge(depth(h, &row_full));
-    let bottom = edge(depth(h, &|i| row_full(h - 1 - i)));
-    let left = edge(depth(w, &col_full));
-    let right = edge(depth(w, &|i| col_full(w - 1 - i)));
-    if top + bottom >= h || left + right >= w {
-        return NRect::FULL;
-    }
-    let rect = crate::image::Rect {
-        top,
-        bottom: h - bottom,
-        left,
-        right: w - right,
-    };
-    NRect::from_pixels(rect, w, h)
 }
 
 fn in_band(px: &[f32; 3], grey: &[GreyCurve; 2], band: f32) -> bool {
@@ -566,8 +502,9 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         Some(area) => (channel_medians(&small.crop(area.to_pixels(w, h))), area),
         None => detect_base(small),
     };
-    let frame = detect_frame(small, base_rgb);
-    let area = hints.analysis.unwrap_or_else(|| film_area(small, base_rgb));
+    let area = hints.analysis.unwrap_or_else(|| {
+        NRect::centred(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
+    });
 
     let density: Vec<[f32; 3]> = small
         .crop(area.to_pixels(w, h))
@@ -579,7 +516,6 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
     Estimate {
         base_rgb,
         base_area,
-        frame,
         area,
         grey,
         anchor: fit_anchor(&density, &grey),
@@ -648,7 +584,6 @@ mod tests {
         Estimate {
             base_rgb: BASE,
             base_area: NRect::FULL,
-            frame: NRect::FULL,
             area: NRect::FULL,
             grey: CURVES,
             anchor: 0.7,
@@ -793,17 +728,20 @@ mod tests {
     }
 
     #[test]
-    fn estimate_finds_base_and_frame_on_synthetic_scan() {
+    fn estimate_finds_base_and_measures_the_centre_on_synthetic_scan() {
         let e = estimate(&synthetic_scan(), &Hints::default());
         for (got, want) in e.base_rgb.iter().zip(BASE) {
             assert!((got - want).abs() < 0.01, "base {:?}", e.base_rgb);
         }
-        let f = e.frame;
-        assert!(
-            f.x0 >= 0.1 - 1e-3 && f.x1 <= 0.9 + 1e-3 && f.y0 >= 0.1 - 1e-3 && f.y1 <= 0.9 + 1e-3,
-            "{f:?}"
+        assert_eq!(e.area, NRect::centred(DEFAULT_AREA_PERCENT / 100.0));
+        let hints = Hints {
+            area_percent: Some(60.0),
+            ..Hints::default()
+        };
+        assert_eq!(
+            estimate(&synthetic_scan(), &hints).area,
+            NRect::centred(0.6)
         );
-        assert!(f.x1 - f.x0 > 0.6);
     }
 
     #[test]
@@ -884,8 +822,6 @@ mod tests {
             }
         }
         let e = estimate(&held, &Hints::default());
-        assert!(e.area.x0 >= 0.04 && e.area.x0 < 0.08, "{:?}", e.area);
-        assert_eq!((e.area.y0, e.area.x1, e.area.y1), (0.0, 1.0, 1.0));
         let want = estimate(&clean, &Hints::default()).anchor;
         assert!((e.anchor - want).abs() < 0.05, "{} {want}", e.anchor);
     }
@@ -932,6 +868,7 @@ mod tests {
             &Hints {
                 analysis: Some(area),
                 base: Some(corner),
+                ..Hints::default()
             },
         );
         assert_eq!(e.area, area);
