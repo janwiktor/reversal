@@ -1,5 +1,5 @@
-//! Display rendering: tone curve + Rec.2020 → sRGB. Used for UI previews and the
-//! previews embedded in the DNG. Raw editors render the DNG themselves; this only
+//! Display rendering: linear Rec.2020 → tone curve in ProPhoto → sRGB. Used for UI previews
+//! and the previews embedded in the DNG. Raw editors render the DNG themselves; this only
 //! approximates them with the same tone curve the DNG's main profile carries.
 
 use serde::{Deserialize, Serialize};
@@ -169,23 +169,23 @@ fn srgb_encode(v: f32) -> f32 {
 }
 
 /// Render a positive (frame white = 1) to 8-bit sRGB as a raw editor would open it under
-/// `profile`, interleaved.
+/// `profile`, interleaved. The curve applies in ProPhoto, the space raw editors use.
 pub fn to_srgb8(img: &Rgb32, profile: &dng::Profile) -> Vec<u8> {
-    let m = color::REC2020_TO_SRGB;
+    let to_prophoto = color::rec2020_to_prophoto();
+    let to_srgb = color::prophoto_to_srgb();
     let lift = dng::DISPLAY_LIFT * 2f32.powf(profile.exposure_offset);
-    // Lookup for curve + transfer function, fine enough for curves steep near black.
+    // Lookup for the curve, fine enough for curves steep near black.
     const N: usize = 16384;
-    let lut: Vec<u8> = (0..N)
-        .map(|i| {
-            let y = interp(&profile.tone_curve, i as f32 / (N - 1) as f32);
-            (srgb_encode(y) * 255.0 + 0.5) as u8
-        })
+    let lut: Vec<f32> = (0..N)
+        .map(|i| interp(&profile.tone_curve, i as f32 / (N - 1) as f32))
         .collect();
     img.pixels()
         .flat_map(|p| {
             let p = invert::saturate(p.map(|v| v * lift), profile.saturation);
-            let s = color::apply(&m, p);
-            s.map(|v| lut[((v.clamp(0.0, 1.0)) * (N - 1) as f32) as usize])
+            let p = color::apply(&to_prophoto, p);
+            let toned = p.map(|v| lut[(v.clamp(0.0, 1.0) * (N - 1) as f32) as usize]);
+            let s = color::apply(&to_srgb, toned);
+            s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8)
         })
         .collect()
 }
@@ -338,6 +338,24 @@ mod tests {
         // Vivid separates the channels further than Flat.
         let spread = |p: Vec<u8>| p[0] as i32 - p[2] as i32;
         assert!(spread(px(Look::Vivid)) > spread(px(Look::Flat)));
+    }
+
+    #[test]
+    fn previews_keep_neutrals_on_the_curve() {
+        let p = profile(Look::Neutral, Tone::default());
+        for grey in [0.05, 0.3, 0.8] {
+            let img = Rgb32 {
+                width: 1,
+                height: 1,
+                data: vec![grey; 3],
+            };
+            let out = to_srgb8(&img, &p);
+            let want = srgb_encode(interp(&p.tone_curve, grey * dng::DISPLAY_LIFT)) * 255.0;
+            assert!(
+                out.iter().all(|&v| (v as f32 - want).abs() <= 2.0),
+                "{grey}"
+            );
+        }
     }
 
     #[test]

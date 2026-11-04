@@ -23,6 +23,20 @@ pub const REC2020_TO_SRGB: Mat3 = [
     [-0.018151, -0.100579, 1.118730],
 ];
 
+/// CIE XYZ D50 → linear ProPhoto RGB, the space raw editors apply profile curves in.
+pub const XYZ_D50_TO_PROPHOTO: Mat3 = [
+    [1.3459433, -0.2556075, -0.0511118],
+    [-0.5445989, 1.5081673, 0.0205351],
+    [0.0, 0.0, 1.2118128],
+];
+
+/// CIE XYZ D50 → linear sRGB, with Bradford adaptation to D65.
+pub const XYZ_D50_TO_SRGB: Mat3 = [
+    [3.1338561, -1.6168667, -0.4906146],
+    [-0.9787684, 1.9161415, 0.033454],
+    [0.0719453, -0.2289914, 1.4052427],
+];
+
 /// EXIF LightSource code for D65, used as the DNG calibration illuminant.
 pub const ILLUMINANT_D65: u16 = 21;
 
@@ -58,6 +72,16 @@ pub fn apply(m: &Mat3, p: [f32; 3]) -> [f32; 3] {
         .map(|i| (m[i][0] * p[0] as f64 + m[i][1] * p[1] as f64 + m[i][2] * p[2] as f64) as f32)
 }
 
+/// Linear Rec.2020 → linear ProPhoto, through the DNG's own forward matrix.
+pub fn rec2020_to_prophoto() -> Mat3 {
+    mul(&XYZ_D50_TO_PROPHOTO, &dng_matrices().1)
+}
+
+/// Linear ProPhoto → linear sRGB; out-of-gamut values may be negative.
+pub fn prophoto_to_srgb() -> Mat3 {
+    mul(&XYZ_D50_TO_SRGB, &invert(&XYZ_D50_TO_PROPHOTO))
+}
+
 /// DNG ColorMatrix1 (XYZ → "camera" = our Rec.2020 data) and ForwardMatrix1
 /// (white-balanced camera → XYZ D50), row-major.
 pub fn dng_matrices() -> (Mat3, Mat3) {
@@ -90,6 +114,18 @@ mod tests {
                 && (xyz[1] - 1.0).abs() < 2e-3
                 && (xyz[2] - 0.8249).abs() < 2e-3
         );
+    }
+
+    #[test]
+    fn prophoto_round_trip_keeps_white_and_matches_the_direct_matrix() {
+        let m = mul(&prophoto_to_srgb(), &rec2020_to_prophoto());
+        let w = apply(&m, [1.0, 1.0, 1.0]);
+        assert!(w.iter().all(|v| (v - 1.0).abs() < 2e-3));
+        let (via, direct) = (
+            apply(&m, [0.6, 0.3, 0.1]),
+            apply(&REC2020_TO_SRGB, [0.6, 0.3, 0.1]),
+        );
+        assert!(via.iter().zip(direct).all(|(a, b)| (a - b).abs() < 3e-3));
     }
 
     #[test]
