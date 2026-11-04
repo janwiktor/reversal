@@ -1,13 +1,12 @@
-//! Display rendering: tone curve + Rec.2020 → sRGB. Used for UI previews and the
-//! previews embedded in the DNG. Raw editors render the DNG themselves; this only
-//! approximates them with the same tone curve the DNG's main profile carries.
+//! Display rendering: linear Rec.2020 → profile look and tone in ProPhoto → sRGB. Used
+//! for UI previews and the previews embedded in the DNG. Raw editors render the DNG
+//! themselves; this follows them with the curve and look table of the DNG's main profile.
 
 use serde::{Deserialize, Serialize};
 
 use crate::color;
 use crate::dng;
 use crate::image::Rgb32;
-use crate::invert;
 
 /// Sample count of the tone curves written to the DNG and used for previews.
 const CURVE_POINTS: usize = 129;
@@ -19,6 +18,9 @@ const BLACKS_RANGE: f32 = 0.12;
 const BUMP_RANGE: f32 = 0.9;
 /// Saturation the Vivid profile adds, in its look table.
 const VIVID_SATURATION: f32 = 1.15;
+/// Display-linear value where a raw editor's highlight roll-off starts. Fitted to an
+/// editor's rendering of a Neutral frame.
+const ROLLOFF_KNEE: f32 = 0.2;
 
 /// Rendering styles carried as DNG profiles; a raw editor can switch between them.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,24 +170,64 @@ fn srgb_encode(v: f32) -> f32 {
     }
 }
 
+/// Highlight roll-off a raw editor applies when the data holds range above white: linear
+/// up to the knee, then an exponential that meets it with equal slope and approaches 1.
+fn highlight_rolloff(l: f32) -> f32 {
+    if l <= ROLLOFF_KNEE {
+        l
+    } else {
+        let range = 1.0 - ROLLOFF_KNEE;
+        ROLLOFF_KNEE + range * (1.0 - (-(l - ROLLOFF_KNEE) / range).exp())
+    }
+}
+
+/// Look-table saturation: scales HSV saturation, keeping the largest channel.
+fn hsv_saturate(p: [f32; 3], gain: f32) -> [f32; 3] {
+    let top = p[0].max(p[1]).max(p[2]);
+    p.map(|v| (top - gain * (top - v)).max(0.0))
+}
+
+/// Hue-stable tone mapping of a DNG renderer: the curve sets the largest and smallest
+/// channels, and the middle one keeps its proportion between them.
+fn hue_stable_tone(p: [f32; 3], tone: impl Fn(f32) -> f32) -> [f32; 3] {
+    let top = p[0].max(p[1]).max(p[2]);
+    let bottom = p[0].min(p[1]).min(p[2]);
+    let (top_out, bottom_out) = (tone(top), tone(bottom));
+    let span = top - bottom;
+    p.map(|v| {
+        if span > 0.0 {
+            bottom_out + (top_out - bottom_out) * (v - bottom) / span
+        } else {
+            top_out
+        }
+    })
+}
+
 /// Render a positive (frame white = 1) to 8-bit sRGB as a raw editor would open it under
 /// `profile`, interleaved.
 pub fn to_srgb8(img: &Rgb32, profile: &dng::Profile) -> Vec<u8> {
-    let m = color::REC2020_TO_SRGB;
+    let to_prophoto = color::rec2020_to_prophoto();
+    let to_srgb = color::prophoto_to_srgb();
     let lift = dng::DISPLAY_LIFT * 2f32.powf(profile.exposure_offset);
-    // Lookup for curve + transfer function, fine enough for curves steep near black.
+    // Lookup for roll-off + curve over the stored range, spaced by square root so it is
+    // fine enough for curves steep near black.
     const N: usize = 16384;
-    let lut: Vec<u8> = (0..N)
+    let lut: Vec<f32> = (0..N)
         .map(|i| {
-            let y = interp(&profile.tone_curve, i as f32 / (N - 1) as f32);
-            (srgb_encode(y) * 255.0 + 0.5) as u8
+            let t = i as f32 / (N - 1) as f32;
+            interp(&profile.tone_curve, highlight_rolloff(t * t * STORED_REACH))
         })
         .collect();
+    let tone = |v: f32| {
+        let t = (v / STORED_REACH).clamp(0.0, 1.0).sqrt();
+        lut[(t * (N - 1) as f32 + 0.5) as usize]
+    };
     img.pixels()
         .flat_map(|p| {
-            let p = invert::saturate(p.map(|v| v * lift), profile.saturation);
-            let s = color::apply(&m, p);
-            s.map(|v| lut[((v.clamp(0.0, 1.0)) * (N - 1) as f32) as usize])
+            let p = color::apply(&to_prophoto, p.map(|v| v * lift)).map(|v| v.max(0.0));
+            let p = hsv_saturate(p, profile.saturation);
+            let s = color::apply(&to_srgb, hue_stable_tone(p, tone));
+            s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8)
         })
         .collect()
 }
@@ -338,6 +380,56 @@ mod tests {
         // Vivid separates the channels further than Flat.
         let spread = |p: Vec<u8>| p[0] as i32 - p[2] as i32;
         assert!(spread(px(Look::Vivid)) > spread(px(Look::Flat)));
+    }
+
+    #[test]
+    fn rolloff_is_linear_to_the_knee_then_keeps_the_stored_range_below_white() {
+        assert_eq!(highlight_rolloff(ROLLOFF_KNEE / 2.0), ROLLOFF_KNEE / 2.0);
+        let e = 1e-3;
+        let slope = (highlight_rolloff(ROLLOFF_KNEE + e) - ROLLOFF_KNEE) / e;
+        assert!((slope - 1.0).abs() < 2e-2);
+        let top = highlight_rolloff(STORED_REACH);
+        assert!(top > 0.98 && top < 1.0);
+        assert!(highlight_rolloff(1.5) > highlight_rolloff(1.0));
+    }
+
+    #[test]
+    fn hue_stable_tone_keeps_the_middle_channels_proportion() {
+        let out = hue_stable_tone([0.8, 0.5, 0.2], |v| v * v);
+        assert!((out[0] - 0.64).abs() < 1e-6 && (out[2] - 0.04).abs() < 1e-6);
+        assert!((out[1] - 0.34).abs() < 1e-6);
+        let grey = hue_stable_tone([0.3, 0.3, 0.3], |v| v * v);
+        assert!(grey.iter().all(|v| (v - 0.09).abs() < 1e-6));
+    }
+
+    #[test]
+    fn previews_keep_neutrals_and_detail_above_white() {
+        let grey = |v: f32| Rgb32 {
+            width: 1,
+            height: 1,
+            data: vec![v; 3],
+        };
+        let p = profile(Look::Neutral, Tone::default());
+        let px = |v| to_srgb8(&grey(v), &p);
+        for v in [0.05, 0.3, 1.0, 2.0] {
+            let out = px(v);
+            assert!(
+                out[0].abs_diff(out[1]) <= 1 && out[1].abs_diff(out[2]) <= 1,
+                "{v}"
+            );
+        }
+        // Frame white and brighter values stay apart instead of clipping together.
+        assert!(px(2.0)[1] > px(1.0)[1] + 5);
+        assert!(px(2.0)[1] < 255);
+    }
+
+    #[test]
+    fn vivid_saturates_in_the_preview_like_its_look_table() {
+        let same = hsv_saturate([0.8, 0.4, 0.2], 1.0);
+        assert!((same[1] - 0.4).abs() < 1e-6 && (same[2] - 0.2).abs() < 1e-6);
+        let out = hsv_saturate([0.8, 0.4, 0.2], 1.25);
+        assert_eq!(out[0], 0.8);
+        assert!((out[1] - 0.3).abs() < 1e-6 && (out[2] - 0.05).abs() < 1e-6);
     }
 
     #[test]
