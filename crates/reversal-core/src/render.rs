@@ -18,7 +18,7 @@ const BLACKS_RANGE: f32 = 0.12;
 /// Strength of the shadows and highlights bumps; below 1 the curve can't fold over.
 const BUMP_RANGE: f32 = 0.9;
 /// Saturation the Vivid profile adds, in its look table.
-const VIVID_SATURATION: f32 = 1.25;
+const VIVID_SATURATION: f32 = 1.15;
 
 /// Rendering styles carried as DNG profiles; a raw editor can switch between them.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
