@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/reversal-core", "crates/reversal-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+
+[profile.release]
+debug = false
+opt-level = 3
+
+[profile.dev]
+opt-level = 2

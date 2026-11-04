@@ -1,0 +1,50 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Build output
+build/
+dist/
+out/
+target/
+*.o
+*.dylib
+*.so
+*.dll
+
+# Dependencies / environments
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Local config & secrets
+.env
+.env.*
+!.env.example
+
+# Agent config and memory stay local
+.claude/
+
+# Large image test material — keep sample scans out of git (use Git LFS if needed)
+samples/raw/
+*.dng
+*.cr2
+*.cr3
+*.nef
+*.arw
+*.raf
+*.tif
+*.tiff
+!tests/fixtures/**
+
+# Experiments stay local
+spike/
+
+# Local sample scans and Rust build output
+Samples/
+target/

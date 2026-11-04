@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reversal</title>
+<style>
+  :root {
+    /* Neutral grey surround (no tint) so colour can be judged, as on a viewing booth. */
+    --surround: #3d3d3d;
+    --panel: #2e2e2e;
+    --panel-edge: #4a4a4a;
+    --control: #383838;
+    --ink: #e8e8e8;
+    --ink-quiet: #a3a3a3;
+    --focus: #f2f2f2;
+    --warn: #ffb547;
+    /* Region overlays */
+    --crop: #ffffff;
+    --area: #5ec8ff;
+    --base: #ffb547;
+    --font: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--surround); color: var(--ink); font: 400 15px/1.4 var(--font);
+    display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; grid-template-rows: 100%;
+    font-variant-numeric: tabular-nums;
+  }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* Frames */
+  #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); overflow-y: auto; padding: 14px 0; }
+  #roll h1 { font-size: 20px; font-weight: 600; margin: 0 16px 2px; }
+  #folder { color: var(--ink-quiet); font-size: 13px; margin: 0 16px 14px; overflow-wrap: anywhere; }
+  #files { list-style: none; margin: 0; padding: 0; }
+  #files button { width: 100%; text-align: left; background: none; border: 0; padding: 7px 16px; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+  #files button:hover { background: #383838; }
+  #files button[aria-current="true"] { background: #4a4a4a; font-weight: 600; }
+  #files .done { color: var(--ink-quiet); font-size: 13px; }
+
+  /* Image: JS sizes #view to fit, so rotation always stays centred. */
+  #stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
+  #view { position: relative; flex: none; }
+  #photo { display: block; width: 100%; height: 100%; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  #overlay rect { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  #overlay .crop { stroke: var(--crop); }
+  #overlay .area { stroke: var(--area); stroke-dasharray: 6 4; }
+  #overlay .base { stroke: var(--base); }
+  #overlay .drag { stroke: var(--crop); stroke-dasharray: 3 3; }
+  #message { position: absolute; color: var(--ink-quiet); font-size: 17px; text-align: center; max-width: 40ch; margin: 0; }
+  #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 6px 12px; display: flex; gap: 12px; align-items: center; font-size: 14px; }
+  #toolbar button { background: none; border: 0; color: var(--ink-quiet); cursor: pointer; padding: 0; }
+  #toolbar button:hover { color: var(--ink); }
+
+  /* Controls */
+  #head { background: var(--panel); border-left: 1px solid var(--panel-edge); overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+  section h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
+  .hint { color: var(--ink-quiet); font-size: 13px; margin: 0; }
+
+  #histogram { width: 100%; height: 96px; display: block; background: #262626; border-radius: 4px; }
+  .clip { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-quiet); margin-top: 4px; }
+  .clip .over { color: var(--warn); }
+  #stored { font-size: 13px; color: var(--warn); margin: 2px 0 0; }
+
+  .slider { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 0 10px; margin-bottom: 6px; }
+  .slider label { cursor: default; }
+  .slider output { color: var(--ink-quiet); min-width: 4ch; text-align: right; }
+  .slider input { grid-column: 1 / -1; width: 100%; margin: 2px 0 0; accent-color: #cfcfcf; }
+  #temperature { accent-color: #e0b04a; }
+  #tint { accent-color: #c25ea6; }
+
+  .buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+  .buttons button, .actions button {
+    flex: 1 1 auto; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--panel-edge); background: var(--control); cursor: pointer; white-space: nowrap;
+  }
+  .buttons button:hover { background: #454545; }
+  .buttons button[aria-pressed="true"] { background: #5a5a5a; border-color: #8a8a8a; }
+  .group-label { font-size: 14px; color: var(--ink-quiet); margin: 10px 0 4px; display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
+  .actions { display: flex; gap: 8px; margin-top: auto; }
+  .actions .primary { background: var(--ink); color: #1f1f1f; border-color: var(--ink); font-weight: 600; }
+  .actions button:disabled { opacity: .45; cursor: default; }
+  #status { color: var(--ink-quiet); font-size: 13px; min-height: 2.8em; margin: 0; overflow-wrap: anywhere; }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; }
+    #roll { border-right: 0; border-bottom: 1px solid var(--panel-edge); max-height: 30vh; }
+    #head { border-left: 0; }
+  }
+</style>
+</head>
+<body>
+<nav id="roll" aria-label="Frames">
+  <h1>Reversal</h1>
+  <p id="folder"></p>
+  <ul id="files"></ul>
+</nav>
+
+<main id="stage">
+  <div id="view" hidden>
+    <img id="photo" alt="Positive preview">
+    <svg id="overlay" hidden viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+  </div>
+  <div id="toolbar" hidden><span id="tool-text"></span><button type="button" id="tool-done">Done</button></div>
+  <p id="message">Choose a frame on the left to convert it.</p>
+</main>
+
+<aside id="head" aria-label="Conversion controls">
+  <section aria-labelledby="h-hist">
+    <h2 id="h-hist">Histogram</h2>
+    <canvas id="histogram" width="528" height="192" aria-label="RGB histogram of the preview"></canvas>
+    <div class="clip"><span id="clip-low">Shadows clipped 0%</span><span id="clip-high">Highlights clipped 0%</span></div>
+    <p id="stored" hidden></p>
+  </section>
+
+  <section aria-labelledby="h-tone">
+    <h2 id="h-tone">Tone</h2>
+    <div class="slider"><label for="exposure">Exposure</label><output for="exposure">0</output><input id="exposure" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="contrast">Contrast</label><output for="contrast">0</output><input id="contrast" type="range" min="-100" max="100" step="1" value="0"></div>
+  </section>
+
+  <section aria-labelledby="h-color">
+    <h2 id="h-color">Color</h2>
+    <div class="slider"><label for="temperature">Temperature</label><output for="temperature">0</output><input id="temperature" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="tint">Tint</label><output for="tint">0</output><input id="tint" type="range" min="-100" max="100" step="1" value="0"></div>
+    <div class="slider"><label for="saturation">Saturation</label><output for="saturation">0</output><input id="saturation" type="range" min="-100" max="100" step="1" value="0"></div>
+    <p class="hint">Double-click a slider to reset it.</p>
+  </section>
+
+  <section aria-labelledby="h-frame">
+    <h2 id="h-frame">Frame</h2>
+    <div class="buttons">
+      <button type="button" id="flip" aria-pressed="false">Mirror</button>
+      <button type="button" id="rotate">Rotate 90°</button>
+    </div>
+    <div class="slider" style="margin-top:10px"><label for="straighten">Straighten</label><output for="straighten">0.0°</output><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"></div>
+    <div class="group-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</div>
+    <div class="buttons">
+      <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
+      <button type="button" id="crop-frame" aria-pressed="false">Image frame</button>
+      <button type="button" id="crop-draw" aria-pressed="false">Draw</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-analysis">
+    <h2 id="h-analysis">Analysis</h2>
+    <p class="hint">Where the conversion measures the image and the film base. Change these if colours look off.</p>
+    <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Image area</div>
+    <div class="buttons">
+      <button type="button" id="area-auto" aria-pressed="true">Detect</button>
+      <button type="button" id="area-draw" aria-pressed="false">Draw</button>
+    </div>
+    <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
+    <div class="buttons">
+      <button type="button" id="base-auto" aria-pressed="true">Detect</button>
+      <button type="button" id="base-draw" aria-pressed="false">Pick</button>
+      <button type="button" id="show-areas" aria-pressed="false">Show areas</button>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button type="button" id="reset" disabled>Reset sliders</button>
+    <button type="button" id="export" class="primary" disabled>Save DNG</button>
+  </div>
+  <p id="status" role="status"></p>
+</aside>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SLIDERS = ["exposure", "contrast", "temperature", "tint", "saturation"];
+const TOOL_TEXT = {
+  crop: "Drag over the image to set the crop.",
+  area: "Drag over the part of the scan that is picture (no rebate, no holder).",
+  base: "Drag over clear, unexposed film between or beside the frames.",
+};
+
+let current = null;   // { file, auto, settings }
+let tool = null;      // null | "crop" | "area" | "base" | "show"
+let seq = 0;
+let timer = null;
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  if (!res.ok) {
+    let msg = `${res.status}`;
+    try { msg = (await res.json()).error; } catch {}
+    throw new Error(msg);
+  }
+  return res;
+}
+
+const adj = () => current.settings.adjust;
+const hints = () => current.settings.hints;
+const status = (t) => { $("status").textContent = t; };
+
+// ---------- Files ----------
+async function loadFiles(selectName) {
+  const data = await (await api("/api/files")).json();
+  $("folder").textContent = data.folder;
+  const list = $("files");
+  list.replaceChildren();
+  for (const f of data.files) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.name = f.name;
+    const name = document.createElement("span"); name.textContent = f.name;
+    const done = document.createElement("span"); done.className = "done"; done.textContent = f.exported ? "saved" : "";
+    b.append(name, done);
+    b.addEventListener("click", () => open(f.name));
+    li.append(b);
+    list.append(li);
+  }
+  if (!data.files.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
+  markCurrent(selectName);
+}
+
+function markCurrent(name) {
+  for (const b of document.querySelectorAll("#files button")) b.setAttribute("aria-current", String(b.dataset.name === name));
+}
+
+async function open(name) {
+  markCurrent(name);
+  setTool(null);
+  $("message").textContent = "Decoding the raw file…";
+  $("message").hidden = false;
+  $("view").hidden = true;
+  setBusy(true);
+  try {
+    const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
+    current = { file: name, auto: data.auto, settings: data.settings };
+    current.settings.hints ??= {};
+    syncControls();
+    await refresh();
+    status(data.warning ?? "");
+  } catch (e) {
+    current = null;
+    $("message").textContent = `Could not open ${name}: ${e.message}`;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function setBusy(busy) {
+  $("export").disabled = busy || !current;
+  $("reset").disabled = busy || !current;
+}
+
+// ---------- Controls ----------
+function fmt(id, v) {
+  if (id === "straighten") return `${v > 0 ? "+" : ""}${v.toFixed(1)}°`;
+  return `${v > 0 ? "+" : ""}${Math.round(v)}`;
+}
+
+function syncControls() {
+  const a = adj();
+  for (const id of [...SLIDERS, "straighten"]) {
+    $(id).value = a[id];
+    document.querySelector(`output[for=${id}]`).textContent = fmt(id, a[id]);
+  }
+  $("flip").setAttribute("aria-pressed", String(a.flip_h));
+  const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.frame) ? "frame" : "draw";
+  for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
+  $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
+  $("area-draw").setAttribute("aria-pressed", String(!!hints().analysis || tool === "area"));
+  $("base-auto").setAttribute("aria-pressed", String(!hints().base));
+  $("base-draw").setAttribute("aria-pressed", String(!!hints().base || tool === "base"));
+  $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
+}
+
+const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a[k] - b[k]) < 1e-4);
+
+function changed(delay = 90) {
+  if (!current) return;
+  syncControls();
+  clearTimeout(timer);
+  timer = setTimeout(refresh, delay);
+}
+
+for (const id of [...SLIDERS, "straighten"]) {
+  $(id).addEventListener("input", (e) => { adj()[id] = Number(e.target.value); changed(); });
+  $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
+}
+
+// Mirror the image as it is shown now: with an odd quarter turn the stored
+// "mirror, then rotate" order needs the opposite rotation.
+$("flip").addEventListener("click", () => {
+  if (!current) return;
+  const a = adj();
+  a.flip_h = !a.flip_h;
+  a.rotate = (4 - a.rotate) % 4;
+  changed(0);
+});
+$("rotate").addEventListener("click", () => { if (current) { adj().rotate = (adj().rotate + 1) % 4; changed(0); } });
+
+$("crop-full").addEventListener("click", () => { if (current) { adj().crop = null; setTool(null); changed(0); } });
+$("crop-frame").addEventListener("click", () => { if (current) { adj().crop = { ...current.settings.estimate.frame }; setTool(null); changed(0); } });
+$("crop-draw").addEventListener("click", () => setTool(tool === "crop" ? null : "crop"));
+$("area-draw").addEventListener("click", () => setTool(tool === "area" ? null : "area"));
+$("base-draw").addEventListener("click", () => setTool(tool === "base" ? null : "base"));
+$("show-areas").addEventListener("click", () => setTool(tool === "show" ? null : "show"));
+$("area-auto").addEventListener("click", () => setHint("analysis", null));
+$("base-auto").addEventListener("click", () => setHint("base", null));
+$("tool-done").addEventListener("click", () => setTool(null));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tool) setTool(null); });
+
+$("reset").addEventListener("click", () => {
+  if (!current) return;
+  for (const id of SLIDERS) adj()[id] = 0;
+  changed(0);
+  status("Tone and colour are back to the automatic conversion.");
+});
+
+$("export").addEventListener("click", async () => {
+  if (!current) return;
+  setBusy(true);
+  status("Saving DNG…");
+  try {
+    const r = await (await api("/api/export", { file: current.file, settings: current.settings })).json();
+    status(`Saved ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB)`);
+    await loadFiles(current.file);
+  } catch (e) {
+    status(`Could not save: ${e.message}`);
+  } finally {
+    setBusy(false);
+  }
+});
+
+async function setHint(key, rect) {
+  if (!current) return;
+  const wasFrameCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.frame);
+  hints()[key] = rect;
+  status("Measuring…");
+  try {
+    current.settings.estimate = await (await api("/api/estimate", { file: current.file, hints: hints() })).json();
+    if (wasFrameCrop) adj().crop = { ...current.settings.estimate.frame };
+    status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
+                          : (rect ? "Image area set from your selection." : "Image area detected automatically."));
+  } catch (e) {
+    status(`Could not measure: ${e.message}`);
+  }
+  changed(0);
+}
+
+// ---------- Tools and overlay ----------
+// Region tools show the whole scan (straightened, mirrored, rotated) with the areas drawn on it.
+function setTool(t) {
+  tool = t;
+  $("overlay").toggleAttribute("hidden", !t); // SVG elements don't reflect .hidden
+  $("toolbar").hidden = !t;
+  $("tool-text").textContent = t === "show" ? "Showing the crop, image area and film base." : TOOL_TEXT[t] ?? "";
+  if (current) changed(0);
+}
+
+// Scan (normalised, straightened) <-> displayed full view: mirror first, then quarter turns.
+function scanToView([x, y], a) {
+  if (a.flip_h) x = 1 - x;
+  switch (a.rotate % 4) {
+    case 1: return [1 - y, x];
+    case 2: return [1 - x, 1 - y];
+    case 3: return [y, 1 - x];
+    default: return [x, y];
+  }
+}
+function viewToScan([u, v], a) {
+  let x, y;
+  switch (a.rotate % 4) {
+    case 1: [x, y] = [v, 1 - u]; break;
+    case 2: [x, y] = [1 - u, 1 - v]; break;
+    case 3: [x, y] = [1 - v, u]; break;
+    default: [x, y] = [u, v];
+  }
+  return [a.flip_h ? 1 - x : x, y];
+}
+function rectFromPoints(p, q) {
+  return { x0: Math.min(p[0], q[0]), y0: Math.min(p[1], q[1]), x1: Math.max(p[0], q[0]), y1: Math.max(p[1], q[1]) };
+}
+function svgRect(r, cls) {
+  const a = adj();
+  const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
+  return `<rect class="${cls}" x="${v.x0}" y="${v.y0}" width="${v.x1 - v.x0}" height="${v.y1 - v.y0}"/>`;
+}
+function drawOverlay(drag) {
+  if (!current || !tool) return;
+  const e = current.settings.estimate;
+  let s = svgRect(e.area, "area") + svgRect(e.base_area, "base");
+  if (adj().crop) s += svgRect(adj().crop, "crop");
+  if (drag) s += `<rect class="drag" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
+  $("overlay").innerHTML = s;
+}
+
+let dragStart = null;
+const eventPoint = (ev) => {
+  const b = $("overlay").getBoundingClientRect();
+  return [Math.min(1, Math.max(0, (ev.clientX - b.left) / b.width)), Math.min(1, Math.max(0, (ev.clientY - b.top) / b.height))];
+};
+$("overlay").addEventListener("pointerdown", (ev) => {
+  if (!["crop", "area", "base"].includes(tool)) return;
+  dragStart = eventPoint(ev);
+  $("overlay").setPointerCapture(ev.pointerId);
+});
+$("overlay").addEventListener("pointermove", (ev) => {
+  if (dragStart) drawOverlay(rectFromPoints(dragStart, eventPoint(ev)));
+});
+$("overlay").addEventListener("pointerup", (ev) => {
+  if (!dragStart) return;
+  const view = rectFromPoints(dragStart, eventPoint(ev));
+  dragStart = null;
+  if (view.x1 - view.x0 < 0.005 || view.y1 - view.y0 < 0.005) { drawOverlay(); return; }
+  const a = adj();
+  const scan = rectFromPoints(viewToScan([view.x0, view.y0], a), viewToScan([view.x1, view.y1], a));
+  const t = tool;
+  if (t === "crop") { a.crop = scan; setTool(null); }
+  else { setTool(null); setHint(t === "area" ? "analysis" : "base", scan); }
+});
+
+// ---------- Preview, fit and histogram ----------
+async function refresh() {
+  if (!current) return;
+  const id = ++seq;
+  try {
+    const res = await api("/api/preview", { file: current.file, settings: current.settings, full: !!tool });
+    const clipped = Number(res.headers.get("X-Clipped") || 0);
+    const blob = await res.blob();
+    if (id !== seq) return;
+    const img = $("photo");
+    const old = img.src;
+    img.src = URL.createObjectURL(blob);
+    await img.decode();
+    if (id !== seq) return;
+    if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+    $("view").hidden = false;
+    $("message").hidden = true;
+    fit();
+    drawOverlay();
+    histogram(img, clipped);
+  } catch (e) {
+    if (id === seq) status(`Preview failed: ${e.message}`);
+  }
+}
+
+function fit() {
+  const img = $("photo");
+  if (!img.naturalWidth) return;
+  const stage = $("stage");
+  const pad = 56;
+  const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - pad) / img.naturalHeight);
+  $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
+  $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
+}
+new ResizeObserver(fit).observe($("stage"));
+
+const histCanvas = document.createElement("canvas");
+function histogram(img, storedClipped) {
+  const w = Math.min(400, img.naturalWidth), h = Math.round(img.naturalHeight * w / img.naturalWidth);
+  histCanvas.width = w; histCanvas.height = h;
+  const ctx = histCanvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const bins = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  let low = 0, high = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2];
+    bins[0][r]++; bins[1][g]++; bins[2][b]++;
+    if (r <= 1 && g <= 1 && b <= 1) low++;
+    if (r >= 254 || g >= 254 || b >= 254) high++;
+  }
+  const n = px.length / 4;
+  const c = $("histogram"), g = c.getContext("2d");
+  g.clearRect(0, 0, c.width, c.height);
+  // Scale to the 99.5th percentile bin so a spike at 0 or 255 doesn't flatten the rest.
+  const all = bins.flatMap((b) => Array.from(b.slice(1, 255))).sort((a, b) => a - b);
+  const peak = Math.max(1, all[Math.floor(all.length * 0.995)]);
+  g.globalCompositeOperation = "lighter";
+  const colors = ["rgba(230,70,70,.85)", "rgba(70,200,90,.85)", "rgba(80,130,240,.85)"];
+  bins.forEach((bin, k) => {
+    g.fillStyle = colors[k];
+    g.beginPath();
+    g.moveTo(0, c.height);
+    for (let x = 0; x < 256; x++) g.lineTo(x * c.width / 255, c.height - Math.min(1, bin[x] / peak) * c.height);
+    g.lineTo(c.width, c.height);
+    g.fill();
+  });
+  g.globalCompositeOperation = "source-over";
+  const pct = (v) => `${(100 * v / n).toFixed(v / n < 0.01 ? 2 : 1)}%`;
+  $("clip-low").textContent = `Shadows clipped ${pct(low)}`;
+  $("clip-high").textContent = `Highlights clipped ${pct(high)}`;
+  $("clip-low").classList.toggle("over", low / n > 0.005);
+  $("clip-high").classList.toggle("over", high / n > 0.005);
+  $("stored").hidden = storedClipped < 0.0005;
+  $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
+}
+
+loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
+</script>
+</body>
+</html>

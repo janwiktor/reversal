@@ -1,0 +1,17 @@
+[package]
+name = "reversal-cli"
+description = "Reversal command line and local web UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "reversal"
+path = "src/main.rs"
+
+[dependencies]
+reversal-core = { path = "../reversal-core" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny_http = "0.12"
