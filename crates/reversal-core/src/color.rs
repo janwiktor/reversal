@@ -134,12 +134,11 @@ mod tests {
         assert!(w.iter().all(|v| (v - 1.0).abs() < 1e-3));
     }
 }
-pub fn  badly_formatted( ) {}
 
 #[cfg(test)]
 mod ci_failure_probe {
     #[test]
     fn fails_on_purpose() {
-        assert_eq!(1 + 1, 3);
+        assert!(std::env::var_os("CI_PROBE_NEVER_SET").is_some());
     }
 }
