@@ -163,6 +163,10 @@ impl Batch {
         progress.queue.clear();
     }
 
+    pub fn is_running(&self) -> bool {
+        self.0.lock().expect("no panics while locked").running
+    }
+
     pub fn status(&self) -> serde_json::Value {
         let progress = self.0.lock().expect("no panics while locked");
         serde_json::to_value(&*progress).expect("progress serializes")

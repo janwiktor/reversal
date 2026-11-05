@@ -60,6 +60,10 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered, defer: false)
         window.title = "Reversal"
+        // The title bar carries on from the page's top bar, in any system appearance.
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = NSColor(calibratedWhite: 0.15, alpha: 1)
         window.delegate = self
         window.contentMinSize = NSSize(width: 960, height: 600)
         window.contentView = web
@@ -253,7 +257,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             item("Close Window", #selector(NSWindow.performClose(_:)), "w"),
         ])
         _ = add("Edit", [
+            item("Cut", #selector(NSText.cut(_:)), "x"),
             item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
             item("Select All", #selector(NSText.selectAll(_:)), "a"),
         ])
         NSApp.windowsMenu = add("Window", [

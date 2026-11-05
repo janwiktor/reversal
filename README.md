@@ -42,7 +42,7 @@ In the app, choose a folder of scans. From the command line, open the web UI on 
 
 Each frame remembers its settings as you change them. Tick several frames to save them together, each with its own settings; frames you haven't touched get the automatic conversion.
 
-Frames of one roll can share a film base: choose Roll under Setup, or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Color curves and exposure stay each frame's own.
+Frames of one roll can share a film base: choose Match film base under Setup, review what each frame reads, and decide which frames count; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Color curves and exposure stay each frame's own.
 
 Or convert from the command line:
 

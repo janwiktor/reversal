@@ -64,6 +64,22 @@ const GRAY_BIN_WEIGHT: f32 = 0.25;
 /// Neutrals have zero differences, so they pass unchanged.
 const CROSSTALK: [[f32; 2]; 3] = [[1.1532, 0.3195], [0.0973, 1.3271], [-0.0460, -0.1033]];
 
+/// Film base search: cells along the scan's long side, and how much a cell may vary (10th to
+/// 90th percentile, as a share of its median) and still count as even.
+const BASE_CELLS_LONG_SIDE: usize = 150;
+const BASE_CELL_SPREAD: f32 = 0.05;
+/// Clear film lies within this share of a high percentile of the even cells' levels.
+const BASE_LEVEL_PERCENTILE: f32 = 98.0;
+const BASE_LEVEL_RANGE: f32 = 0.93;
+/// Share of each side counted as the film's edge, and how much of a side a patch must span
+/// there, or inside the scan, to be taken for clear film.
+const BASE_EDGE_BAND: f32 = 0.15;
+const BASE_MIN_EDGE_SHARE: f32 = 0.08;
+const BASE_MIN_GAP_SHARE: f32 = 0.5;
+/// A frame's base this far from its roll's, as a share in any channel, deserves a look: frames
+/// of a roll scanned alike stayed within 2%, unless something was misread.
+const ROLL_BASE_TOLERANCE: f32 = 0.06;
+
 /// Exposure anchor = mean of the 99th percentile and the average of E_g, plus this.
 const ANCHOR_OFFSET: f32 = 0.1027;
 /// Shared film toe, expanded near the base: E' = E - amount · exp(-max(E, floor) / scale).
@@ -300,82 +316,143 @@ fn near_clipped(small: &Rgb32) -> Vec<bool> {
     out
 }
 
-/// Film base: the brightest pixels away from clipped light are the rebate.
-fn detect_base(small: &Rgb32) -> ([f32; 3], NRect) {
-    let lum: Vec<f32> = small.pixels().map(|p| (p[0] + p[1] + p[2]) / 3.0).collect();
-    let mut unclipped: Vec<bool> = near_clipped(small).iter().map(|&n| !n).collect();
-    if unclipped.iter().filter(|&&u| u).count() < 1000 {
-        unclipped = small
-            .pixels()
-            .map(|p| p[0].max(p[1]).max(p[2]) < 0.98)
-            .collect();
+/// A film base read from one scan.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BaseReading {
+    /// Linear camera RGB of the film base.
+    pub rgb: [f32; 3],
+    /// Where it was read: one even patch, free of holes, markings and picture.
+    pub area: NRect,
+    /// False when no patch looked like clear film, so the value is only a best guess.
+    pub found: bool,
+}
+
+/// Largest rectangle of set cells in a grid, as (left, top, right, bottom) with exclusive
+/// ends: for each row, the tallest bars ending there, walked with a stack of rising bars.
+fn largest_rect(cells: &[bool], cols: usize, rows: usize) -> Option<(usize, usize, usize, usize)> {
+    let mut heights = vec![0usize; cols + 1];
+    let mut best = None;
+    let mut best_area = 0;
+    let mut stack: Vec<usize> = Vec::with_capacity(cols + 1);
+    for row in 0..rows {
+        for col in 0..cols {
+            heights[col] = if cells[row * cols + col] {
+                heights[col] + 1
+            } else {
+                0
+            };
+        }
+        stack.clear();
+        for col in 0..=cols {
+            while let Some(&top) = stack.last() {
+                if heights[top] <= heights[col] {
+                    break;
+                }
+                stack.pop();
+                let left = stack.last().map_or(0, |&l| l + 1);
+                let area = heights[top] * (col - left);
+                if area > best_area {
+                    best_area = area;
+                    best = Some((left, row + 1 - heights[top], col, row + 1));
+                }
+            }
+            stack.push(col);
+        }
     }
-    let mut lum_ok: Vec<f32> = lum
-        .iter()
-        .zip(&unclipped)
-        .filter(|(_, &u)| u)
-        .map(|(&l, _)| l)
-        .collect();
-    let thr = percentile(&mut lum_ok, 97.0);
-    let picked = |i: usize| unclipped[i] && lum[i] >= thr;
-    let mut base = [0.0f32; 3];
-    for (c, b) in base.iter_mut().enumerate() {
-        let mut vals: Vec<f32> = small
-            .pixels()
-            .enumerate()
-            .filter(|(i, _)| picked(*i))
-            .map(|(_, p)| p[c])
-            .collect();
-        *b = median(&mut vals).max(1e-4);
-    }
-    // For display: the strip (rows or columns) holding most picked pixels, i.e. one rebate.
+    best
+}
+
+/// Film base: clear film is the brightest thing on a negative, and it is even. So split the
+/// scan into small cells, keep the even ones near the brightest level, and read the largest
+/// rectangle of them. Holes, film markings and picture detail break a cell's evenness, and
+/// the holder and exposed film are darker. Film edges come first, since an even bright patch
+/// inside the picture may be a deep shadow; a strip across the scan can be the gap between
+/// two frames.
+pub fn detect_base(small: &Rgb32) -> BaseReading {
     let (w, h) = (small.width, small.height);
-    let mut rows = vec![0usize; h];
-    let mut cols = vec![0usize; w];
-    for i in (0..w * h).filter(|&i| picked(i)) {
-        rows[i / w] += 1;
-        cols[i % w] += 1;
+    let side = (w.max(h) / BASE_CELLS_LONG_SIDE).max(2);
+    let (cols, rows) = (w / side, h / side);
+    let near = near_clipped(small);
+    let mut even = vec![false; cols * rows];
+    let mut level = vec![0.0f32; cols * rows];
+    let mut values: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::with_capacity(side * side));
+    for row in 0..rows {
+        for col in 0..cols {
+            let cell = row * cols + col;
+            for v in &mut values {
+                v.clear();
+            }
+            let mut touches_clipped = false;
+            for y in row * side..(row + 1) * side {
+                for x in col * side..(col + 1) * side {
+                    let at = y * w + x;
+                    touches_clipped |= near[at];
+                    for (c, v) in values.iter_mut().enumerate() {
+                        v.push(small.data[at * 3 + c]);
+                    }
+                }
+            }
+            if touches_clipped {
+                continue;
+            }
+            let (mut sum, mut flat) = (0.0, true);
+            for v in &mut values {
+                let mid = median(v).max(1e-4);
+                flat &= percentile(v, 90.0) - percentile(v, 10.0) < BASE_CELL_SPREAD * mid;
+                sum += mid;
+            }
+            even[cell] = flat;
+            level[cell] = sum / 3.0;
+        }
     }
-    // Contiguous run around the peak where counts stay above half of it.
-    let band = |v: &[usize]| {
-        let (peak, &max) = v
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, &c)| c)
-            .unwrap_or((0, &0));
-        let (mut a, mut b) = (peak, peak + 1);
-        while a > 0 && v[a - 1] * 2 > max {
-            a -= 1;
-        }
-        while b < v.len() && v[b] * 2 > max {
-            b += 1;
-        }
-        (a, b, max)
+    let mut levels: Vec<f32> = (0..cols * rows)
+        .filter(|&i| even[i])
+        .map(|i| level[i])
+        .collect();
+    if levels.is_empty() {
+        return BaseReading {
+            rgb: channel_medians(small),
+            area: NRect::FULL,
+            found: false,
+        };
+    }
+    let bright = percentile(&mut levels, BASE_LEVEL_PERCENTILE) * BASE_LEVEL_RANGE;
+    let clear: Vec<bool> = (0..cols * rows)
+        .map(|i| even[i] && level[i] >= bright)
+        .collect();
+    let band_cols = (cols as f32 * BASE_EDGE_BAND).ceil() as usize;
+    let band_rows = (rows as f32 * BASE_EDGE_BAND).ceil() as usize;
+    let at_edge: Vec<bool> = (0..cols * rows)
+        .map(|i| {
+            let (row, col) = (i / cols, i % cols);
+            clear[i]
+                && (row < band_rows
+                    || row + band_rows >= rows
+                    || col < band_cols
+                    || col + band_cols >= cols)
+        })
+        .collect();
+    let long_enough = |(l, t, r, b): (usize, usize, usize, usize), share: f32| {
+        (r - l) as f32 >= share * cols as f32 || (b - t) as f32 >= share * rows as f32
     };
-    let (r0, r1, rmax) = band(&rows);
-    let (c0, c1, cmax) = band(&cols);
-    // A horizontal rebate strip fills its rows more fully than a vertical one fills columns.
-    let rect = if rmax as f32 / w as f32 >= cmax as f32 / h as f32 {
-        crate::image::Rect {
-            top: r0,
-            bottom: r1,
-            left: 0,
-            right: w,
-        }
-    } else {
-        crate::image::Rect {
-            top: 0,
-            bottom: h,
-            left: c0,
-            right: c1,
-        }
+    let edge = largest_rect(&at_edge, cols, rows).filter(|&r| long_enough(r, BASE_MIN_EDGE_SHARE));
+    let across = largest_rect(&clear, cols, rows);
+    let (rect, found) = match (edge, across) {
+        (Some(rect), _) => (rect, true),
+        (None, Some(rect)) => (rect, long_enough(rect, BASE_MIN_GAP_SHARE)),
+        (None, None) => unreachable!("the brightest even cell is always clear"),
     };
-    let area = if rmax.max(cmax) > 0 {
-        NRect::from_pixels(rect, w, h)
-    } else {
-        NRect::FULL
+    let pixels = crate::image::Rect {
+        left: rect.0 * side,
+        top: rect.1 * side,
+        right: rect.2 * side,
+        bottom: rect.3 * side,
     };
-    (base, area)
+    BaseReading {
+        rgb: channel_medians(&small.crop(pixels)),
+        area: NRect::from_pixels(pixels, w, h),
+        found,
+    }
 }
 
 /// Estimate film base, image area, density points and balance from a full-res scan.
@@ -504,8 +581,8 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
     let (base_rgb, base_area) = match hints.base {
         Some(area) => (channel_medians(&small.crop(area.to_pixels(w, h))), area),
         None => {
-            let (detected, base_area) = detect_base(small);
-            (hints.base_rgb.unwrap_or(detected), base_area)
+            let detected = detect_base(small);
+            (hints.base_rgb.unwrap_or(detected.rgb), detected.area)
         }
     };
     let area = hints.analysis.unwrap_or_else(|| {
@@ -533,6 +610,11 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
 /// per frame, which matched finished scans better than curves pooled over a roll.
 pub fn roll_base(frame_bases: &[[f32; 3]]) -> [f32; 3] {
     [0, 1, 2].map(|c| median(&mut frame_bases.iter().map(|b| b[c]).collect::<Vec<_>>()))
+}
+
+/// Whether a frame's own base is further from its roll's than one roll's frames should be.
+pub fn differs_from_roll(frame_base: [f32; 3], roll: [f32; 3]) -> bool {
+    (0..3).any(|c| (frame_base[c] / roll[c].max(1e-6) - 1.0).abs() > ROLL_BASE_TOLERANCE)
 }
 
 /// Scene-linear positive for one pixel of linear camera RGB, before saturation.
@@ -858,6 +940,101 @@ mod tests {
         let e = estimate(&held, &Hints::default());
         let want = estimate(&clean, &Hints::default()).anchor;
         assert!((e.anchor - want).abs() < 0.05, "{} {want}", e.anchor);
+    }
+
+    #[test]
+    fn largest_rect_finds_the_biggest_block() {
+        #[rustfmt::skip]
+        let cells = [
+            true,  false, false, false,
+            false, true,  true,  true,
+            false, true,  true,  true,
+            false, false, true,  false,
+        ];
+        assert_eq!(largest_rect(&cells, 4, 4), Some((1, 1, 4, 3)));
+        assert_eq!(largest_rect(&[false; 4], 2, 2), None);
+    }
+
+    /// A strip of film: clear edges with holes and markings, picture between them.
+    fn film_strip() -> (Rgb32, Vec<NRect>) {
+        let (w, h) = (600, 400);
+        let mut scan = Rgb32::new(w, h);
+        let mut flaws = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                // Detail everywhere in the picture, which is denser than clear film.
+                let detail = ((x / 3 + y / 3) % 2) as f32 * 0.5;
+                let d = if (60..340).contains(&y) {
+                    [0.4 + detail; 3]
+                } else {
+                    [0.0; 3]
+                };
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel(d));
+            }
+        }
+        let mut paint = |x0: usize, y0: usize, x1: usize, y1: usize, v: [f32; 3]| {
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let i = (y * w + x) * 3;
+                    scan.data[i..i + 3].copy_from_slice(&v);
+                }
+            }
+            flaws.push(NRect::from_pixels(
+                crate::image::Rect {
+                    left: x0,
+                    top: y0,
+                    right: x1,
+                    bottom: y1,
+                },
+                w,
+                h,
+            ));
+        };
+        // Sprocket holes along the top, and film markings printed along the bottom edge.
+        for x in (20..600).step_by(60) {
+            paint(x, 15, x + 24, 40, [1.0; 3]);
+        }
+        for x in (40..560).step_by(120) {
+            paint(x, 350, x + 60, 375, pixel([0.7, 0.9, 1.0]));
+        }
+        (scan, flaws)
+    }
+
+    #[test]
+    fn the_base_comes_from_even_film_clear_of_holes_and_markings() {
+        let (scan, flaws) = film_strip();
+        let read = detect_base(&scan);
+        assert!(read.found);
+        for (got, want) in read.rgb.iter().zip(BASE) {
+            assert!((got - want).abs() < 0.005, "{:?}", read.rgb);
+        }
+        let a = read.area;
+        for f in flaws {
+            let apart = a.x1 <= f.x0 || f.x1 <= a.x0 || a.y1 <= f.y0 || f.y1 <= a.y0;
+            assert!(apart, "{a:?} overlaps {f:?}");
+        }
+    }
+
+    #[test]
+    fn a_scan_without_clear_film_says_so() {
+        let (w, h) = (400, 300);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let d = 0.2 + ((x * 7 + y * 13) % 11) as f32 * 0.08;
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel([d; 3]));
+            }
+        }
+        assert!(!detect_base(&scan).found);
+    }
+
+    #[test]
+    fn a_frame_far_from_its_roll_is_noticed() {
+        let roll = [0.3, 0.4, 0.25];
+        assert!(!differs_from_roll([0.306, 0.396, 0.252], roll));
+        assert!(differs_from_roll([0.3, 0.45, 0.25], roll));
     }
 
     #[test]
