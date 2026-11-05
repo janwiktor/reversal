@@ -25,6 +25,8 @@ pub struct Progress {
     pub task: &'static str,
     pub total: usize,
     pub done: usize,
+    /// Frames that failed. A frame with only a warning counts as done.
+    pub failed: usize,
     pub active: Vec<String>,
     pub issues: Vec<Issue>,
     pub canceled: bool,
@@ -147,7 +149,10 @@ impl Batch {
                 progress.done += 1;
                 progress.last_path = Some(done.path);
             }
-            Err(message) => report(message),
+            Err(message) => {
+                report(message);
+                progress.failed += 1;
+            }
         }
     }
 
@@ -183,6 +188,28 @@ mod tests {
             std::thread::sleep(Duration::from_millis(2));
         }
         panic!("batch didn't finish");
+    }
+
+    #[test]
+    fn a_warning_counts_as_done_and_only_a_failure_as_failed() {
+        let batch = Batch::default();
+        batch
+            .start(names(3), 1, |file| match file {
+                "f0" => Err("no good".to_string()),
+                "f1" => Ok(Done {
+                    path: file.to_string(),
+                    warning: Some("look again".to_string()),
+                }),
+                _ => Ok(Done {
+                    path: file.to_string(),
+                    warning: None,
+                }),
+            })
+            .unwrap();
+        let status = wait(&batch);
+        assert_eq!(status["done"], 2);
+        assert_eq!(status["failed"], 1);
+        assert_eq!(status["issues"].as_array().unwrap().len(), 2);
     }
 
     #[test]

@@ -552,7 +552,7 @@ async function followBatch() {
   }
   if (batch.running) {
     const verb = batch.task === "roll" ? "Measuring" : "Saving";
-    status(`${verb} ${Math.min(batch.done + batch.issues.length + 1, batch.total)} of ${batch.total}…`);
+    status(`${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`);
     showFrameStates();
     setTimeout(followBatch, 150);
     return;
