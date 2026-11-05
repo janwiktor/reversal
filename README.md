@@ -40,6 +40,8 @@ In the app, choose a folder of scans. From the command line, open the web UI on 
 ./target/release/reversal ui path/to/scans
 ```
 
+Each frame remembers its settings as you change them. Tick several frames to save them together, each with its own settings; frames you haven't touched get the automatic conversion.
+
 Or convert from the command line:
 
 ```bash

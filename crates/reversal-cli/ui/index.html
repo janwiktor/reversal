@@ -39,10 +39,17 @@
   #choose-folder { align-self: flex-start; background: none; border: 0; padding: 0; margin: -10px 16px 10px; color: var(--ink-quiet); font-size: 13px; cursor: pointer; }
   #choose-folder:hover { color: var(--ink); }
   #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
-  #files button { width: 100%; text-align: left; background: none; border: 0; padding: 7px 16px; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
-  #files button:hover { background: #383838; }
-  #files button[aria-current="true"] { background: #4a4a4a; font-weight: 600; }
-  #files .done { color: var(--ink-quiet); font-size: 13px; }
+  #files li { display: flex; align-items: center; padding-left: 16px; }
+  #files li:hover { background: #383838; }
+  #files li:has(button[aria-current="true"]) { background: #4a4a4a; }
+  #files input, #select-all input { margin: 0 8px 0 0; accent-color: #cfcfcf; flex: none; }
+  #files button { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 7px 16px 7px 0; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+  #files button[aria-current="true"] { font-weight: 600; }
+  #files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #files .state { color: var(--ink-quiet); font-size: 13px; font-weight: 400; white-space: nowrap; }
+  #files .state.edited { color: var(--ink); }
+  #files .state.manual::before { content: "●"; color: var(--base); font-size: 9px; margin-right: 5px; vertical-align: 1px; }
+  #select-all { display: flex; align-items: center; color: var(--ink-quiet); font-size: 13px; padding: 0 16px 6px; cursor: pointer; }
 
   /* Image: JS sizes #view to fit, so rotation always stays centred. */
   #stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
@@ -79,6 +86,9 @@
   #save { padding: 0 16px 12px; }
   #save button { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: #1f1f1f; font-weight: 600; cursor: pointer; }
   #save button:disabled { opacity: .45; cursor: default; }
+  #save button.cancel { background: var(--control); border-color: var(--panel-edge); color: var(--ink); font-weight: 400; }
+  #reveal { display: block; width: auto !important; background: none !important; border: 0 !important; color: var(--ink-quiet) !important; padding: 2px 0 0 !important; font-size: 13px; font-weight: 400 !important; }
+  #reveal:hover { color: var(--ink) !important; }
   section h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
   .hint { color: var(--ink-quiet); font-size: 13px; margin: 0; }
 
@@ -104,7 +114,7 @@
   .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
   .actions { display: flex; gap: 8px; }
   .actions button:disabled { opacity: .45; cursor: default; }
-  #status { color: var(--ink-quiet); font-size: 13px; margin: 6px 0 0; overflow-wrap: anywhere; }
+  #status { color: var(--ink-quiet); font-size: 13px; margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 7.5em; overflow-y: auto; }
 
   @media (max-width: 900px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; }
@@ -120,6 +130,7 @@
   <h1>Reversal</h1>
   <p id="folder"></p>
   <button type="button" id="choose-folder" hidden>Open another folder…</button>
+  <label id="select-all"><input type="checkbox" id="select-all-box">Select all</label>
   <ul id="files"></ul>
   <section id="setup" aria-labelledby="h-setup">
     <h2><span id="h-setup">Setup</span><button type="button" id="show-areas" aria-pressed="false">Show areas</button></h2>
@@ -147,6 +158,7 @@
   <div id="save">
     <button type="button" id="export" disabled>Save DNG</button>
     <p id="status" role="status"></p>
+    <button type="button" id="reveal" hidden>Show in Finder</button>
   </div>
 </nav>
 
@@ -224,16 +236,19 @@ const TOOL_TEXT = {
 let current = null;   // { file, auto, settings }
 let tool = null;      // null | "crop" | "area" | "base" | "show"
 let timer = null;
+let saveTimer = null;
+let frames = [];          // what the frame list shows
+const selected = new Set();
+let lastChecked = null;   // for shift-click
+let batch = null;         // the running export's progress
+let lastPath = null;
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
 
-const store = {
-  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
-};
-
+// In the Mac app the shell does what a page can't.
+const shell = window.webkit?.messageHandlers?.reversal;
 async function api(path, body) {
-  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const res = await fetch(path, body ? { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!res.ok) {
     let msg = `${res.status}`;
     try { msg = (await res.json()).error; } catch {}
@@ -247,25 +262,86 @@ const hints = () => current.settings.hints;
 const status = (t) => { $("status").textContent = t; };
 
 // ---------- Files ----------
-async function loadFiles(selectName) {
+async function loadFiles() {
   const data = await (await api("/api/files")).json();
   $("folder").textContent = data.folder;
+  frames = data.files;
+  const names = new Set(frames.map((f) => f.name));
+  for (const name of selected) if (!names.has(name)) selected.delete(name);
   const list = $("files");
-  list.replaceChildren();
-  for (const f of data.files) {
-    const li = document.createElement("li");
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.name = f.name;
-    const name = document.createElement("span"); name.textContent = f.name;
-    const done = document.createElement("span"); done.className = "done"; done.textContent = f.exported ? "saved" : "";
-    b.append(name, done);
-    b.addEventListener("click", () => open(f.name));
-    li.append(b);
-    list.append(li);
+  const scroll = list.scrollTop;
+  list.replaceChildren(...frames.map(frameRow));
+  list.scrollTop = scroll;
+  if (!frames.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
+  markCurrent(current?.file);
+  updateSaveButton();
+}
+
+function frameRow(f) {
+  const li = document.createElement("li");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = selected.has(f.name);
+  box.dataset.name = f.name;
+  box.setAttribute("aria-label", `Select ${f.name}`);
+  box.addEventListener("click", (e) => checkFrame(f.name, box.checked, e.shiftKey));
+  const b = document.createElement("button");
+  b.type = "button";
+  b.dataset.name = f.name;
+  const name = document.createElement("span"); name.className = "name"; name.textContent = f.name; name.title = f.name;
+  const state = document.createElement("span");
+  b.append(name, state);
+  b.addEventListener("click", () => open(f.name));
+  li.append(box, b);
+  showFrameState(f, state);
+  return li;
+}
+
+function showFrameState(f, state) {
+  const saving = batch?.active.includes(f.name);
+  state.textContent = saving ? "saving" : f.edited ? "edited" : f.saved ? "saved" : "";
+  state.className = `state${f.edited && !saving ? " edited" : ""}${f.manualSetup ? " manual" : ""}`;
+  state.title = f.manualSetup ? "Film base or measured area set by hand" : f.edited ? "Changes not saved to a DNG yet" : "";
+}
+
+function showFrameStates() {
+  for (const b of document.querySelectorAll("#files button")) {
+    const f = frames.find((x) => x.name === b.dataset.name);
+    if (f) showFrameState(f, b.querySelector(".state"));
   }
-  if (!data.files.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
-  markCurrent(selectName);
+}
+
+function checkFrame(name, on, range) {
+  const names = frames.map((f) => f.name);
+  const from = range && lastChecked ? names.indexOf(lastChecked) : -1;
+  const at = names.indexOf(name);
+  const span = from < 0 ? [name] : names.slice(Math.min(from, at), Math.max(from, at) + 1);
+  for (const n of span) on ? selected.add(n) : selected.delete(n);
+  lastChecked = name;
+  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
+  updateSaveButton();
+}
+
+$("select-all-box").addEventListener("change", (e) => {
+  selected.clear();
+  if (e.target.checked) for (const f of frames) selected.add(f.name);
+  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
+  updateSaveButton();
+});
+
+function updateSaveButton() {
+  const button = $("export");
+  button.classList.toggle("cancel", !!batch);
+  if (batch) {
+    button.textContent = "Stop after these frames";
+    button.disabled = false;
+    return;
+  }
+  button.textContent = selected.size ? `Save ${selected.size} DNG${selected.size > 1 ? "s" : ""}` : "Save DNG";
+  button.disabled = !selected.size && !current;
+  const box = $("select-all-box");
+  box.checked = frames.length > 0 && selected.size === frames.length;
+  box.indeterminate = selected.size > 0 && selected.size < frames.length;
 }
 
 function markCurrent(name) {
@@ -275,7 +351,27 @@ function markCurrent(name) {
   }
 }
 
+// ---------- Remembering settings ----------
+// Each frame keeps its settings on disk from the first change, so frames can be saved together.
+async function rememberSettings() {
+  clearTimeout(saveTimer);
+  if (!current) return;
+  const { file, settings } = current;
+  const json = JSON.stringify(settings);
+  if (json === current.remembered) return;
+  current.remembered = json;
+  const state = await (await api("/api/settings", { file, settings })).json();
+  const f = frames.find((x) => x.name === file);
+  if (f) { Object.assign(f, state); showFrameStates(); }
+}
+
+function rememberSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not keep your settings: ${e.message}`)), 300);
+}
+
 async function open(name) {
+  try { await rememberSettings(); } catch (e) { status(`Could not keep your settings: ${e.message}`); }
   markCurrent(name);
   setTool(null);
   $("message").textContent = "Decoding the raw file…";
@@ -286,6 +382,7 @@ async function open(name) {
     const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
     current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent };
     current.settings.hints ??= {};
+    current.remembered = JSON.stringify(current.settings);
     syncControls();
     await refresh();
     status("");
@@ -300,8 +397,9 @@ async function open(name) {
 }
 
 function setBusy(busy) {
-  $("export").disabled = busy || !current;
   $("reset").disabled = busy || !current;
+  updateSaveButton();
+  if (busy && !batch) $("export").disabled = true;
 }
 
 // ---------- Controls ----------
@@ -337,6 +435,7 @@ const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a
 function changed(delay = 0) {
   if (!current) return;
   syncControls();
+  rememberSoon();
   clearTimeout(timer);
   timer = setTimeout(refresh, delay);
 }
@@ -393,19 +492,54 @@ $("reset").addEventListener("click", () => {
 });
 
 $("export").addEventListener("click", async () => {
-  if (!current) return;
-  setBusy(true);
-  status("Saving DNG…");
+  if (batch) {
+    api("/api/export/cancel", {}).catch(() => {});
+    return;
+  }
+  const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
+  if (!files.length) return;
+  $("reveal").hidden = true;
   try {
-    const r = await (await api("/api/export", { file: current.file, settings: current.settings })).json();
-    status(`Saved ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB)`);
-    await loadFiles(current.file);
+    await rememberSettings();
+    batch = await (await api("/api/export", { files })).json();
+    updateSaveButton();
+    followBatch();
   } catch (e) {
     status(`Could not save: ${e.message}`);
-  } finally {
-    setBusy(false);
   }
 });
+
+async function followBatch() {
+  try {
+    batch = await (await api("/api/export/status")).json();
+  } catch (e) {
+    batch = null;
+    updateSaveButton();
+    status(`Lost track of saving: ${e.message}`);
+    return;
+  }
+  if (batch.running) {
+    status(`Saving ${Math.min(batch.done + batch.issues.length + 1, batch.total)} of ${batch.total}…`);
+    showFrameStates();
+    setTimeout(followBatch, 150);
+    return;
+  }
+  const finished = batch;
+  batch = null;
+  if (finished.done === finished.total) selected.clear();
+  status(batchSummary(finished));
+  lastPath = finished.last_path;
+  $("reveal").hidden = !(shell && lastPath);
+  await loadFiles();
+}
+
+function batchSummary({ done, total, issues, cancelled, last_path }) {
+  const where = last_path ? ` to ${last_path.slice(0, last_path.lastIndexOf("/"))}` : "";
+  const head = total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${cancelled ? ", then stopped" : ""}.`;
+  return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
+}
+
+$("reveal").addEventListener("click", () => { if (shell && lastPath) shell.postMessage({ action: "reveal", path: lastPath }); });
 
 async function setHint(key, rect) {
   if (!current) return;
@@ -579,12 +713,13 @@ function histogram(img, storedClipped) {
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
 }
 
-// In the Mac app the shell does what a page can't.
-const shell = window.webkit?.messageHandlers?.reversal;
 $("choose-folder").hidden = !shell;
 $("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
 loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
+// Reloaded while saving: pick the progress back up.
+api("/api/export/status").then((r) => r.json()).then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
+addEventListener("pagehide", () => { rememberSettings().catch(() => {}); });
 </script>
 </body>
 </html>

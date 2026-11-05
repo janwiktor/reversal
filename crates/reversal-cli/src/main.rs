@@ -1,5 +1,7 @@
 //! `reversal` — convert film negative scans to positive LinearRaw DNGs.
 
+mod batch;
+mod folder;
 mod pipeline;
 mod ui;
 

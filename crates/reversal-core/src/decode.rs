@@ -5,6 +5,7 @@
 
 use std::ffi::{c_char, c_float, c_int, c_uint, c_ushort, c_void, CStr, CString};
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::image::Rgb32;
 
@@ -77,8 +78,13 @@ fn path_bytes(path: &Path) -> Vec<u8> {
     path.to_string_lossy().into_owned().into_bytes()
 }
 
+/// One decode at a time. We link plain `libraw`, not its thread-safe `libraw_r`, and a build
+/// with OpenMP slows to a crawl when several decodes each start a thread for every core.
+static DECODING: Mutex<()> = Mutex::new(());
+
 /// Decode a camera raw or DNG to linear camera RGB in [0, 1].
 pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
+    let _one_at_a_time = DECODING.lock().unwrap_or_else(|e| e.into_inner());
     let c_path = CString::new(path_bytes(path))
         .map_err(|_| DecodeError("path contains a NUL byte".into()))?;
     unsafe {
