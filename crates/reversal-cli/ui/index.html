@@ -25,7 +25,7 @@
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--surround); color: var(--ink); font: 400 15px/1.4 var(--font);
-    display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; grid-template-rows: 100%;
+    display: grid; grid-template-columns: 260px minmax(0, 1fr) 280px; grid-template-rows: 100%;
     font-variant-numeric: tabular-nums;
   }
   button, input { font: inherit; color: inherit; }
@@ -79,7 +79,8 @@
   #setup h2 button:hover, #setup h2 button[aria-pressed="true"] { color: var(--ink); }
   .setup-row { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px; }
   .setup-row > .group-label { margin: 0; white-space: nowrap; }
-  .setup-row .buttons button { padding: 3px 6px; }
+  .setup-row .buttons { flex-wrap: nowrap; }
+  .setup-row .buttons button { padding: 3px 4px; min-width: 0; flex: 1 1 0; }
   .setup-row .slider { grid-column: 2; margin: 0; }
   .setup-row .slider label { font-size: 13px; color: var(--ink-quiet); }
   #setup-note { color: var(--warn); font-size: 13px; margin: 0; }
@@ -139,6 +140,7 @@
       <div class="buttons">
         <button type="button" id="base-auto" aria-pressed="true">Detect</button>
         <button type="button" id="base-draw" aria-pressed="false">Pick</button>
+        <button type="button" id="base-roll" aria-pressed="false" title="Measure one film base across the ticked frames, or all frames if none are ticked, and use it on each">Roll</button>
       </div>
     </div>
     <div class="setup-row">
@@ -423,7 +425,8 @@ function syncControls() {
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
   $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
   $("area-draw").setAttribute("aria-pressed", String(!!hints().analysis || tool === "area"));
-  $("base-auto").setAttribute("aria-pressed", String(!hints().base));
+  $("base-auto").setAttribute("aria-pressed", String(!hints().base && !hints().base_rgb));
+  $("base-roll").setAttribute("aria-pressed", String(!hints().base && !!hints().base_rgb));
   $("base-draw").setAttribute("aria-pressed", String(!!hints().base || tool === "base"));
   $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
   $("h-setup").textContent = `Setup: ${current.file}`;
@@ -480,6 +483,7 @@ $("base-draw").addEventListener("click", () => setTool(tool === "base" ? null : 
 $("show-areas").addEventListener("click", () => setTool(tool === "show" ? null : "show"));
 $("area-auto").addEventListener("click", () => setHint("analysis", null));
 $("base-auto").addEventListener("click", () => setHint("base", null));
+$("base-roll").addEventListener("click", measureRoll);
 $("tool-done").addEventListener("click", () => setTool(null));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tool) setTool(null); });
 
@@ -509,6 +513,21 @@ $("export").addEventListener("click", async () => {
   }
 });
 
+async function measureRoll() {
+  if (batch) return;
+  const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : frames.map((f) => f.name);
+  if (files.length < 2) { status("Tick at least two frames of the roll."); return; }
+  $("reveal").hidden = true;
+  try {
+    await rememberSettings();
+    batch = await (await api("/api/roll", { files })).json();
+    updateSaveButton();
+    followBatch();
+  } catch (e) {
+    status(`Could not measure the roll: ${e.message}`);
+  }
+}
+
 async function followBatch() {
   try {
     batch = await (await api("/api/export/status")).json();
@@ -519,18 +538,38 @@ async function followBatch() {
     return;
   }
   if (batch.running) {
-    status(`Saving ${Math.min(batch.done + batch.issues.length + 1, batch.total)} of ${batch.total}…`);
+    const verb = batch.task === "roll" ? "Measuring" : "Saving";
+    status(`${verb} ${Math.min(batch.done + batch.issues.length + 1, batch.total)} of ${batch.total}…`);
     showFrameStates();
     setTimeout(followBatch, 150);
     return;
   }
   const finished = batch;
   batch = null;
+  await loadFiles();
+  if (finished.task === "roll") {
+    if (current) {
+      // Its base and measurements changed on disk: read them back, don't write these over them.
+      await rememberSettings().catch(() => {});
+      current.remembered = JSON.stringify(current.settings);
+      await open(current.file);
+    }
+    status(rollSummary(finished));
+    return;
+  }
   if (finished.done === finished.total) selected.clear();
+  updateSaveButton();
+  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
   status(batchSummary(finished));
   lastPath = finished.last_path;
   $("reveal").hidden = !(shell && lastPath);
-  await loadFiles();
+}
+
+function rollSummary({ done, total, issues, cancelled }) {
+  const head = cancelled ? "Stopped; no frame changed."
+    : issues.length ? "The roll's film base wasn't applied."
+    : `${total} frames now share one film base. Detect on a frame goes back to its own.`;
+  return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
 
 function batchSummary({ done, total, issues, cancelled, last_path }) {
@@ -545,6 +584,7 @@ async function setHint(key, rect) {
   if (!current) return;
   const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
   hints()[key] = rect;
+  if (key === "base") hints().base_rgb = null;
   status("Measuring…");
   try {
     current.settings.estimate = await (await api("/api/estimate", { file: current.file, hints: hints() })).json();

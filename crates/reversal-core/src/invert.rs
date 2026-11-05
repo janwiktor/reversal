@@ -81,6 +81,8 @@ pub struct Hints {
     pub area_percent: Option<f32>,
     /// Unexposed film (rebate) to read the film base from.
     pub base: Option<NRect>,
+    /// A film base measured elsewhere, as for a whole roll. `base` wins over this.
+    pub base_rgb: Option<[f32; 3]>,
 }
 
 /// Red or blue density as a function of green density for a neutral:
@@ -500,7 +502,10 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
 
     let (base_rgb, base_area) = match hints.base {
         Some(area) => (channel_medians(&small.crop(area.to_pixels(w, h))), area),
-        None => detect_base(small),
+        None => {
+            let (detected, base_area) = detect_base(small);
+            (hints.base_rgb.unwrap_or(detected), base_area)
+        }
     };
     let area = hints.analysis.unwrap_or_else(|| {
         NRect::centred(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
@@ -520,6 +525,13 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         grey,
         anchor: fit_anchor(&density, &grey),
     }
+}
+
+/// One film base for a roll from its frames' bases: stock and processing don't change from
+/// frame to frame, and the median outvotes a frame whose base was misread. Grey curves stay
+/// per frame, which matched finished scans better than curves pooled over a roll.
+pub fn roll_base(frame_bases: &[[f32; 3]]) -> [f32; 3] {
+    [0, 1, 2].map(|c| median(&mut frame_bases.iter().map(|b| b[c]).collect::<Vec<_>>()))
 }
 
 /// Scene-linear positive for one pixel of linear camera RGB, before saturation.
@@ -590,6 +602,25 @@ mod tests {
             grey: CURVES,
             anchor: 0.7,
         }
+    }
+
+    #[test]
+    fn roll_base_outvotes_a_misread_frame_and_a_picked_base_still_wins() {
+        let base = [0.3, 0.4, 0.25];
+        let misread = [0.9, 0.9, 0.9];
+        assert_eq!(roll_base(&[base, misread, base]), base);
+
+        let mut scan = Rgb32::new(64, 48);
+        for (i, v) in scan.data.iter_mut().enumerate() {
+            *v = 0.05 + (i % 89) as f32 / 100.0;
+        }
+        let mut hints = Hints {
+            base_rgb: Some(base),
+            ..Hints::default()
+        };
+        assert_eq!(estimate_on(&scan, &hints).base_rgb, base);
+        hints.base = Some(NRect::FULL);
+        assert_ne!(estimate_on(&scan, &hints).base_rgb, base);
     }
 
     fn pixel(d: [f32; 3]) -> [f32; 3] {

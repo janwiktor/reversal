@@ -21,6 +21,12 @@ pub struct Folder {
 }
 
 /// Where a frame stands, as the frame list shows it.
+pub struct RollFrame {
+    file: String,
+    small: Rgb32,
+    base_rgb: [f32; 3],
+}
+
 pub struct FrameState {
     /// A DNG of this frame exists.
     pub saved: bool,
@@ -68,6 +74,18 @@ pub fn saved_settings(
     let warning = "These settings came from an older version. Colours were measured again, \
                    and your adjustments may need another look.";
     (settings, Some(warning.to_string()))
+}
+
+/// A frame's settings: from its sidecar, or the automatic ones if it has none.
+fn settings_from(sidecar: Option<&[u8]>, small: &Rgb32) -> (Settings, Option<String>) {
+    let auto = Settings::new(
+        invert::estimate_on(small, &Hints::default()),
+        Adjust::default(),
+    );
+    match sidecar {
+        Some(bytes) => saved_settings(bytes, &auto, small),
+        None => (auto, None),
+    }
 }
 
 impl Folder {
@@ -161,22 +179,55 @@ impl Folder {
         reversal_core::write_atomic(&self.sidecar(file), &bytes)
     }
 
+    /// What a frame adds to a roll measurement: its analysis image and the film base its own
+    /// hints give, leaving out any earlier roll base.
+    pub fn measure_for_roll(&self, file: &str) -> Result<RollFrame, String> {
+        let input = self.resolve(file).map_err(|(_, message)| message)?;
+        let scan = reversal_core::decode::decode(&input).map_err(|e| e.to_string())?;
+        let small = invert::analysis_image(&scan);
+        let sidecar = std::fs::read(self.sidecar(file)).ok();
+        let (settings, _) = settings_from(sidecar.as_deref(), &small);
+        let hints = Hints {
+            base_rgb: None,
+            ..settings.hints
+        };
+        let base_rgb = invert::estimate_on(&small, &hints).base_rgb;
+        Ok(RollFrame {
+            file: file.to_string(),
+            small,
+            base_rgb,
+        })
+    }
+
+    /// Give frames the median of their bases, keeping everything else the user chose, also
+    /// what changed while measuring. A base picked by hand on a frame stays.
+    pub fn apply_roll_base(&self, frames: &[RollFrame]) -> Result<(), String> {
+        let bases: Vec<[f32; 3]> = frames.iter().map(|f| f.base_rgb).collect();
+        let base_rgb = invert::roll_base(&bases);
+        for frame in frames {
+            let sidecar = std::fs::read(self.sidecar(&frame.file)).ok();
+            let (mut settings, _) = settings_from(sidecar.as_deref(), &frame.small);
+            let followed_area = settings.adjust.crop == Some(settings.estimate.area);
+            settings.hints.base_rgb = Some(base_rgb);
+            settings.estimate = invert::estimate_on(&frame.small, &settings.hints);
+            if followed_area {
+                settings.adjust.crop = Some(settings.estimate.area);
+            }
+            self.save_settings(&frame.file, &settings)
+                .map_err(|e| format!("{}: {e}", frame.file))?;
+        }
+        Ok(())
+    }
+
     /// Write a frame's DNG with its remembered settings, or the automatic ones if it has none.
     /// Returns the path, the size in bytes, and anything the user should know.
     pub fn export_frame(&self, file: &str) -> Result<(PathBuf, u64, Option<String>), String> {
         let input = self.resolve(file).map_err(|(_, message)| message)?;
         let scan = reversal_core::decode::decode(&input).map_err(|e| e.to_string())?;
         let small = invert::analysis_image(&scan);
-        let auto = Settings::new(
-            invert::estimate_on(&small, &Hints::default()),
-            Adjust::default(),
-        );
         let sidecar_path = self.sidecar(file);
         let used = std::fs::read(&sidecar_path).ok();
-        let (settings, warning) = match &used {
-            Some(bytes) => saved_settings(bytes, &auto, &small),
-            None => (auto, None),
-        };
+        let (settings, warning) = settings_from(used.as_deref(), &small);
         std::fs::create_dir_all(&self.out_dir).map_err(|e| e.to_string())?;
         let out = self.output_path(file);
         let bytes = pipeline::export(&input, &scan, &settings, Compression::LosslessJpeg, &out)

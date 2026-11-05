@@ -21,6 +21,8 @@ pub struct Done {
 
 #[derive(Default, Serialize)]
 pub struct Progress {
+    /// What's being done, for the page: "save" or "roll".
+    pub task: &'static str,
     pub total: usize,
     pub done: usize,
     pub active: Vec<String>,
@@ -42,12 +44,30 @@ impl Batch {
     where
         F: Fn(&str) -> Result<Done, String> + Send + Sync + 'static,
     {
+        self.start_then("save", files, workers, work, || None)
+    }
+
+    /// Like [`Batch::start`], with a last step once all frames are through: unless cancelled,
+    /// `then` runs on the last worker, and an error it returns is reported as an issue.
+    pub fn start_then<F, T>(
+        &self,
+        task: &'static str,
+        files: Vec<String>,
+        workers: usize,
+        work: F,
+        then: T,
+    ) -> Result<(), String>
+    where
+        F: Fn(&str) -> Result<Done, String> + Send + Sync + 'static,
+        T: FnOnce() -> Option<String> + Send + 'static,
+    {
         {
             let mut progress = self.0.lock().expect("no panics while locked");
             if progress.running {
                 return Err("still saving the previous DNGs".to_string());
             }
             *progress = Progress {
+                task,
                 total: files.len(),
                 running: !files.is_empty(),
                 queue: files.into(),
@@ -55,9 +75,13 @@ impl Batch {
             };
         }
         let work = Arc::new(work);
+        let then = Arc::new(Mutex::new(Some(then)));
         for _ in 0..workers {
-            let (batch, work) = (self.clone(), work.clone());
-            std::thread::spawn(move || batch.work_through(work.as_ref()));
+            let (batch, work, then) = (self.clone(), work.clone(), then.clone());
+            std::thread::spawn(move || {
+                batch.work_through(work.as_ref());
+                batch.finish_last(&then);
+            });
         }
         Ok(())
     }
@@ -71,6 +95,34 @@ impl Batch {
         }
     }
 
+    /// Every worker ends here; the one that sees nothing left runs the last step, and only
+    /// then does the batch count as finished.
+    fn finish_last<T: FnOnce() -> Option<String>>(&self, then: &Mutex<Option<T>>) {
+        let progress = self.0.lock().expect("no panics while locked");
+        if !progress.active.is_empty() || !progress.queue.is_empty() {
+            return;
+        }
+        let Some(then) = then.lock().expect("no panics while locked").take() else {
+            return;
+        };
+        let cancelled = progress.cancelled;
+        drop(progress);
+        let issue = if cancelled {
+            None
+        } else {
+            catch_unwind(AssertUnwindSafe(then))
+                .unwrap_or_else(|_| Some("the last step failed unexpectedly".to_string()))
+        };
+        let mut progress = self.0.lock().expect("no panics while locked");
+        if let Some(message) = issue {
+            progress.issues.push(Issue {
+                file: String::new(),
+                message,
+            });
+        }
+        progress.running = false;
+    }
+
     fn next_file(&self) -> Option<String> {
         let mut progress = self.0.lock().expect("no panics while locked");
         let file = progress.queue.pop_front()?;
@@ -81,7 +133,6 @@ impl Batch {
     fn finish(&self, file: &str, result: Result<Done, String>) {
         let mut progress = self.0.lock().expect("no panics while locked");
         progress.active.retain(|f| f != file);
-        progress.running = !progress.active.is_empty() || !progress.queue.is_empty();
         let mut report = |message| {
             progress.issues.push(Issue {
                 file: file.to_string(),
@@ -105,7 +156,6 @@ impl Batch {
         let mut progress = self.0.lock().expect("no panics while locked");
         progress.cancelled = !progress.queue.is_empty();
         progress.queue.clear();
-        progress.running = !progress.active.is_empty();
     }
 
     pub fn status(&self) -> serde_json::Value {
@@ -153,6 +203,37 @@ mod tests {
         assert_eq!(status["done"], 4);
         assert_eq!(status["issues"].as_array().unwrap().len(), 3);
         assert_eq!(status["active"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn the_last_step_runs_once_after_all_frames_and_reports_its_error() {
+        let batch = Batch::default();
+        let done = Arc::new(Mutex::new(0));
+        let seen = done.clone();
+        let count = Arc::new(Mutex::new(0));
+        let runs = count.clone();
+        batch
+            .start_then(
+                "test",
+                names(8),
+                3,
+                move |file| {
+                    *seen.lock().unwrap() += 1;
+                    Ok(Done {
+                        path: file.to_string(),
+                        warning: None,
+                    })
+                },
+                move || {
+                    *runs.lock().unwrap() += 1;
+                    Some("couldn't finish".to_string())
+                },
+            )
+            .unwrap();
+        let status = wait(&batch);
+        assert_eq!(*done.lock().unwrap(), 8);
+        assert_eq!(*count.lock().unwrap(), 1);
+        assert_eq!(status["issues"][0]["message"], "couldn't finish");
     }
 
     #[test]

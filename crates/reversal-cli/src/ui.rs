@@ -10,11 +10,13 @@
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
 //! POST /api/export/cancel                  frames not started yet don't start
+//! POST /api/roll     {files}               measure one film base across frames and use it on
+//!                                          each; runs like an export, with the same progress
 
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use reversal_core::dng;
@@ -226,6 +228,10 @@ impl State {
                 let job: ExportJob = read_body(req)?;
                 self.export(job.files)
             }
+            (Method::Post, "/api/roll") => {
+                let job: ExportJob = read_body(req)?;
+                self.measure_roll(job.files)
+            }
             (Method::Get, "/api/export/status") => Ok(json_resp(200, &self.batch.status())),
             (Method::Post, "/api/export/cancel") => {
                 self.batch.cancel();
@@ -345,6 +351,50 @@ impl State {
                 let path = out.display().to_string();
                 Ok(Done { path, warning })
             })
+            .map_err(|e| (409, e))?;
+        Ok(json_resp(200, &self.batch.status()))
+    }
+}
+
+impl State {
+    fn measure_roll(&self, files: Vec<String>) -> Handled {
+        if files.len() < 2 {
+            return Err((400, "a roll needs at least two frames".to_string()));
+        }
+        for file in &files {
+            self.folder.resolve(file)?;
+        }
+        let measured = Arc::new(Mutex::new(Vec::with_capacity(files.len())));
+        let total = files.len();
+        let (folder, collected) = (self.folder.clone(), measured.clone());
+        let apply_folder = self.folder.clone();
+        self.batch
+            .start_then(
+                "roll",
+                files,
+                1,
+                move |file| {
+                    let frame = folder.measure_for_roll(file)?;
+                    collected
+                        .lock()
+                        .expect("no panics while locked")
+                        .push(frame);
+                    Ok(Done {
+                        path: String::new(),
+                        warning: None,
+                    })
+                },
+                move || {
+                    let frames =
+                        std::mem::take(&mut *measured.lock().expect("no panics while locked"));
+                    if frames.len() < total {
+                        return Some(
+                            "Not every frame could be read, so nothing changed.".to_string(),
+                        );
+                    }
+                    apply_folder.apply_roll_base(&frames).err()
+                },
+            )
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
     }
