@@ -134,8 +134,4 @@ mod tests {
         assert!(w.iter().all(|v| (v - 1.0).abs() < 1e-3));
     }
 }
-
-pub fn lint_violation() -> i32 {
-    let value = 1;
-    return value;
-}
+pub fn  badly_formatted( ) {}
