@@ -25,7 +25,7 @@
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--surround); color: var(--ink); font: 400 15px/1.4 var(--font);
-    display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; grid-template-rows: 100%;
+    display: grid; grid-template-columns: 240px minmax(0, 1fr) 280px; grid-template-rows: 100%;
     font-variant-numeric: tabular-nums;
   }
   button, input { font: inherit; color: inherit; }
@@ -33,10 +33,10 @@
   [hidden] { display: none !important; }
 
   /* Frames */
-  #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); overflow-y: auto; padding: 14px 0; }
+  #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); padding-top: 14px; display: flex; flex-direction: column; min-height: 0; }
   #roll h1 { font-size: 20px; font-weight: 600; margin: 0 16px 2px; }
   #folder { color: var(--ink-quiet); font-size: 13px; margin: 0 16px 14px; overflow-wrap: anywhere; }
-  #files { list-style: none; margin: 0; padding: 0; }
+  #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
   #files button { width: 100%; text-align: left; background: none; border: 0; padding: 7px 16px; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
   #files button:hover { background: #383838; }
   #files button[aria-current="true"] { background: #4a4a4a; font-weight: 600; }
@@ -58,7 +58,25 @@
   #toolbar button:hover { color: var(--ink); }
 
   /* Controls */
-  #head { background: var(--panel); border-left: 1px solid var(--panel-edge); overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+  #head { background: var(--panel); border-left: 1px solid var(--panel-edge); display: flex; flex-direction: column; min-height: 0; }
+  #controls { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+  #head .actions { padding: 10px 18px; border-top: 1px solid var(--panel-edge); }
+
+  /* Setup: how the scan is read. Pinned under the frames, away from the development controls. */
+  #setup { border-top: 1px solid var(--panel-edge); padding: 10px 16px 12px; display: grid; gap: 8px; }
+  #setup h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0; }
+  #setup h2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #setup h2 button { background: none; border: 0; padding: 0; color: var(--ink-quiet); font-size: 13px; font-weight: 400; cursor: pointer; white-space: nowrap; }
+  #setup h2 button:hover, #setup h2 button[aria-pressed="true"] { color: var(--ink); }
+  .setup-row { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px; }
+  .setup-row > .group-label { margin: 0; white-space: nowrap; }
+  .setup-row .buttons button { padding: 3px 6px; }
+  .setup-row .slider { grid-column: 2; margin: 0; }
+  .setup-row .slider label { font-size: 13px; color: var(--ink-quiet); }
+  #setup-note { color: var(--warn); font-size: 13px; margin: 0; }
+  #save { padding: 0 16px 12px; }
+  #save button { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: #1f1f1f; font-weight: 600; cursor: pointer; }
+  #save button:disabled { opacity: .45; cursor: default; }
   section h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
   .hint { color: var(--ink-quiet); font-size: 13px; margin: 0; }
 
@@ -82,15 +100,16 @@
   .buttons button[aria-pressed="true"] { background: #5a5a5a; border-color: #8a8a8a; }
   .group-label { font-size: 14px; color: var(--ink-quiet); margin: 10px 0 4px; display: flex; align-items: center; gap: 6px; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
-  .actions { display: flex; gap: 8px; margin-top: auto; }
-  .actions .primary { background: var(--ink); color: #1f1f1f; border-color: var(--ink); font-weight: 600; }
+  .actions { display: flex; gap: 8px; }
   .actions button:disabled { opacity: .45; cursor: default; }
-  #status { color: var(--ink-quiet); font-size: 13px; min-height: 2.8em; margin: 0; overflow-wrap: anywhere; }
+  #status { color: var(--ink-quiet); font-size: 13px; margin: 6px 0 0; overflow-wrap: anywhere; }
 
   @media (max-width: 900px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; }
-    #roll { border-right: 0; border-bottom: 1px solid var(--panel-edge); max-height: 30vh; }
+    #roll { border-right: 0; border-bottom: 1px solid var(--panel-edge); }
+    #files { flex: none; max-height: 30vh; }
     #head { border-left: 0; }
+    #controls { overflow: visible; }
   }
 </style>
 </head>
@@ -99,6 +118,33 @@
   <h1>Reversal</h1>
   <p id="folder"></p>
   <ul id="files"></ul>
+  <section id="setup" aria-labelledby="h-setup">
+    <h2><span id="h-setup">Setup</span><button type="button" id="show-areas" aria-pressed="false">Show areas</button></h2>
+    <div class="setup-row">
+      <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
+      <div class="buttons">
+        <button type="button" id="base-auto" aria-pressed="true">Detect</button>
+        <button type="button" id="base-draw" aria-pressed="false">Pick</button>
+      </div>
+    </div>
+    <div class="setup-row">
+      <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Measured</div>
+      <div class="buttons">
+        <button type="button" id="area-auto" aria-pressed="true">Centre</button>
+        <button type="button" id="area-draw" aria-pressed="false">Draw</button>
+      </div>
+      <div class="slider"><label for="area-percent">Centre size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
+    </div>
+    <div class="setup-row">
+      <div class="group-label">Scan</div>
+      <div class="buttons"><button type="button" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up">Mirror</button></div>
+    </div>
+    <p id="setup-note" hidden></p>
+  </section>
+  <div id="save">
+    <button type="button" id="export" disabled>Save DNG</button>
+    <p id="status" role="status"></p>
+  </div>
 </nav>
 
 <main id="stage">
@@ -110,7 +156,8 @@
   <p id="message">Choose a frame on the left to convert it.</p>
 </main>
 
-<aside id="head" aria-label="Conversion controls">
+<aside id="head" aria-label="Development controls">
+  <div id="controls">
   <section aria-labelledby="h-hist">
     <h2 id="h-hist">Histogram</h2>
     <canvas id="histogram" width="528" height="192" aria-label="RGB histogram of the preview"></canvas>
@@ -139,46 +186,26 @@
     <div class="slider"><label for="temperature">Temperature</label><output for="temperature">0</output><input id="temperature" type="range" min="-100" max="100" step="1" value="0"></div>
     <div class="slider"><label for="tint">Tint</label><output for="tint">0</output><input id="tint" type="range" min="-100" max="100" step="1" value="0"></div>
     <div class="slider"><label for="saturation">Saturation</label><output for="saturation">0</output><input id="saturation" type="range" min="-100" max="100" step="1" value="0"></div>
-    <p class="hint">Double-click a slider to reset it.</p>
   </section>
 
   <section aria-labelledby="h-frame">
     <h2 id="h-frame">Frame</h2>
     <div class="buttons">
-      <button type="button" id="flip" aria-pressed="false">Mirror</button>
       <button type="button" id="rotate">Rotate 90°</button>
     </div>
     <div class="slider" style="margin-top:10px"><label for="straighten">Straighten</label><output for="straighten">0.0°</output><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"></div>
     <div class="group-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</div>
     <div class="buttons">
       <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
-      <button type="button" id="crop-frame" aria-pressed="false">Image area</button>
+      <button type="button" id="crop-frame" aria-pressed="false" title="Crop to the area measured in Setup">Measured area</button>
       <button type="button" id="crop-draw" aria-pressed="false">Draw</button>
     </div>
   </section>
 
-  <section aria-labelledby="h-analysis">
-    <h2 id="h-analysis">Analysis</h2>
-    <p class="hint">Where the conversion measures the image and the film base. Change these if colours look off.</p>
-    <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Image area</div>
-    <div class="buttons">
-      <button type="button" id="area-auto" aria-pressed="true">Centre</button>
-      <button type="button" id="area-draw" aria-pressed="false">Draw</button>
-    </div>
-    <div class="slider" style="margin-top:10px"><label for="area-percent">Centre size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
-    <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
-    <div class="buttons">
-      <button type="button" id="base-auto" aria-pressed="true">Detect</button>
-      <button type="button" id="base-draw" aria-pressed="false">Pick</button>
-      <button type="button" id="show-areas" aria-pressed="false">Show areas</button>
-    </div>
-  </section>
-
-  <div class="actions">
-    <button type="button" id="reset" disabled>Reset sliders</button>
-    <button type="button" id="export" class="primary" disabled>Save DNG</button>
   </div>
-  <p id="status" role="status"></p>
+  <div class="actions">
+    <button type="button" id="reset" disabled>Reset tone &amp; colour</button>
+  </div>
 </aside>
 
 <script>
@@ -187,14 +214,15 @@ const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "bla
 const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
   crop: "Drag over the image to set the crop.",
-  area: "Drag over the part of the scan that is picture (no rebate, no holder).",
+  area: "Drag over the part of the scan that is picture (no rebate, no holder). Colour and exposure are measured here.",
   base: "Drag over clear, unexposed film between or beside the frames.",
 };
 
 let current = null;   // { file, auto, settings }
 let tool = null;      // null | "crop" | "area" | "base" | "show"
-let seq = 0;
 let timer = null;
+let rendering = false;  // one preview at a time; changes meanwhile ask for one more
+let renderAgain = false;
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -238,7 +266,10 @@ async function loadFiles(selectName) {
 }
 
 function markCurrent(name) {
-  for (const b of document.querySelectorAll("#files button")) b.setAttribute("aria-current", String(b.dataset.name === name));
+  for (const b of document.querySelectorAll("#files button")) {
+    b.setAttribute("aria-current", String(b.dataset.name === name));
+    if (b.dataset.name === name) b.scrollIntoView({ block: "nearest" });
+  }
 }
 
 async function open(name) {
@@ -254,7 +285,9 @@ async function open(name) {
     current.settings.hints ??= {};
     syncControls();
     await refresh();
-    status(data.warning ?? "");
+    status("");
+    $("setup-note").textContent = data.warning ?? "";
+    $("setup-note").hidden = !data.warning;
   } catch (e) {
     current = null;
     $("message").textContent = `Could not open ${name}: ${e.message}`;
@@ -292,11 +325,13 @@ function syncControls() {
   $("base-auto").setAttribute("aria-pressed", String(!hints().base));
   $("base-draw").setAttribute("aria-pressed", String(!!hints().base || tool === "base"));
   $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
+  $("h-setup").textContent = `Setup: ${current.file}`;
+  $("h-setup").title = current.file;
 }
 
 const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a[k] - b[k]) < 1e-4);
 
-function changed(delay = 90) {
+function changed(delay = 0) {
   if (!current) return;
   syncControls();
   clearTimeout(timer);
@@ -304,6 +339,7 @@ function changed(delay = 90) {
 }
 
 for (const id of [...SLIDERS, "straighten"]) {
+  $(id).title = "Double-click to reset";
   $(id).addEventListener("input", (e) => { adj()[id] = Number(e.target.value); changed(); });
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
 }
@@ -375,6 +411,7 @@ async function setHint(key, rect) {
   status("Measuring…");
   try {
     current.settings.estimate = await (await api("/api/estimate", { file: current.file, hints: hints() })).json();
+    $("setup-note").hidden = true;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
     status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
                           : (rect ? "Image area set from your selection." : "Measuring the centre of the scan."));
@@ -390,7 +427,7 @@ function setTool(t) {
   tool = t;
   $("overlay").toggleAttribute("hidden", !t); // SVG elements don't reflect .hidden
   $("toolbar").hidden = !t;
-  $("tool-text").textContent = t === "show" ? "Showing the crop, image area and film base." : TOOL_TEXT[t] ?? "";
+  $("tool-text").textContent = t === "show" ? "Showing the crop, measured area and film base." : TOOL_TEXT[t] ?? "";
   if (current) changed(0);
 }
 
@@ -459,25 +496,30 @@ $("overlay").addEventListener("pointerup", (ev) => {
 // ---------- Preview, fit and histogram ----------
 async function refresh() {
   if (!current) return;
-  const id = ++seq;
+  if (rendering) { renderAgain = true; return; }
+  rendering = true;
+  const file = current.file;
   try {
-    const res = await api("/api/preview", { file: current.file, settings: current.settings, full: !!tool });
+    const res = await api("/api/preview", { file, settings: current.settings, full: !!tool });
     const clipped = Number(res.headers.get("X-Clipped") || 0);
     const blob = await res.blob();
-    if (id !== seq) return;
+    if (file !== current?.file) return;
     const img = $("photo");
     const old = img.src;
-    img.src = URL.createObjectURL(blob);
-    await img.decode();
-    if (id !== seq) return;
+    // Not img.decode(): it can stay pending for as long as the page is hidden.
+    await new Promise((done) => { img.onload = img.onerror = done; img.src = URL.createObjectURL(blob); });
     if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+    if (file !== current?.file) return;
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
     drawOverlay();
     histogram(img, clipped);
   } catch (e) {
-    if (id === seq) status(`Preview failed: ${e.message}`);
+    if (file === current?.file) status(`Preview failed: ${e.message}`);
+  } finally {
+    rendering = false;
+    if (renderAgain) { renderAgain = false; refresh(); }
   }
 }
 
