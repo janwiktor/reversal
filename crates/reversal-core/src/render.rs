@@ -95,12 +95,15 @@ fn white_amount(look: Look, tone: Tone) -> f32 {
 }
 
 /// Display value of linear `l` before the S-curve. At −1 an extended Reinhard shoulder takes
-/// `STORED_REACH` to white; at 0 nothing happens; at +1 the top is pushed into clipping.
+/// `STORED_REACH` to white; at +1 the top is pushed into clipping. Below 0 the curve sees the
+/// stored range, so it does the raw editor's roll-off itself: that's what 0 looks like, and
+/// the image stays continuous as the slider passes it.
 fn shoulder(l: f32, amount: f32) -> f32 {
     if amount < 0.0 {
         let reach2 = STORED_REACH * STORED_REACH;
         let rolled = l * (1.0 + l / reach2) / (1.0 + l);
-        l + -amount * (rolled - l)
+        let start = highlight_rolloff(l);
+        start + -amount * (rolled - start)
     } else {
         l * (1.0 + amount * l)
     }
@@ -323,6 +326,27 @@ mod tests {
             display(Look::Neutral, lower, 0.18),
         );
         assert!((before - after).abs() < 0.04, "{before} {after}");
+    }
+
+    #[test]
+    fn whites_pass_through_zero_without_a_jump() {
+        let shown = |look, whites, v| {
+            let tone = Tone {
+                whites,
+                ..Tone::default()
+            };
+            to_srgb8(&gray(v), &profile(look, tone))[1] as i32
+        };
+        for look in [Look::Neutral, Look::Vivid] {
+            for i in 0..=100 {
+                let v = i as f32 / 100.0;
+                let at_zero = shown(look, 0.0, v);
+                for whites in [-1.0, 1.0] {
+                    let step = (shown(look, whites, v) - at_zero).abs();
+                    assert!(step <= 3, "{look:?} at {v}, whites {whites}: moved {step}");
+                }
+            }
+        }
     }
 
     #[test]
