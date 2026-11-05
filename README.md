@@ -15,15 +15,14 @@ Reversal takes a RAW scan of a negative and writes a positive, losslessly compre
 Reversal is pre-alpha, so expect rough edges and changes.
 
 - **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI.
-- **Film:** color negative only. Black and white and slide film aren't handled yet.
-- **Cameras:** limited testing, on files from a single DSLR (Nikon D5100, NEF and DNG) and one light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
+- **Film:** color negative only. Black and white not handled yet.
+- **Cameras:** limited testing, on files from a single DSLR (Nikon D5100 NEF) and one light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
 - **Editors:** DNG rendering is benchmarked against Adobe Camera Raw only. Other tools may show the same file differently.
 
 ### What's next
 
-- Testing on files from more cameras and light sources, and on pixel shift files
+- Testing on more files from more cameras and light sources, and on pixel shift files
 - [Black and white negative conversion](https://github.com/janwiktor/reversal/issues/14)
-- Support for scanner files
 - [Rendering correctness in other tools](https://github.com/janwiktor/reversal/issues/13)
 
 More in [GitHub issues](https://github.com/janwiktor/reversal/issues).
