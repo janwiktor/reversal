@@ -1,6 +1,7 @@
 //! A folder of scans: which frames it holds, where their results and settings go.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use reversal_core::dng::Compression;
@@ -18,6 +19,8 @@ const RAW_EXTENSIONS: &[&str] = &[
 pub struct Folder {
     pub dir: PathBuf,
     out_dir: PathBuf,
+    /// Held while changing a sidecar: the page and background work both do.
+    sidecars: Mutex<()>,
 }
 
 /// Where a frame stands, as the frame list shows it.
@@ -93,6 +96,7 @@ impl Folder {
         Folder {
             out_dir: dir.join("positives"),
             dir,
+            sidecars: Mutex::new(()),
         }
     }
 
@@ -174,6 +178,11 @@ impl Folder {
     }
 
     pub fn save_settings(&self, file: &str, settings: &Settings) -> std::io::Result<()> {
+        let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_settings(file, settings)
+    }
+
+    fn write_settings(&self, file: &str, settings: &Settings) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.out_dir)?;
         let bytes = serde_json::to_vec_pretty(settings).expect("settings serialise");
         reversal_core::write_atomic(&self.sidecar(file), &bytes)
@@ -205,6 +214,7 @@ impl Folder {
         let bases: Vec<[f32; 3]> = frames.iter().map(|f| f.base_rgb).collect();
         let base_rgb = invert::roll_base(&bases);
         for frame in frames {
+            let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
             let sidecar = std::fs::read(self.sidecar(&frame.file)).ok();
             let (mut settings, _) = settings_from(sidecar.as_deref(), &frame.small);
             let followed_area = settings.adjust.crop == Some(settings.estimate.area);
@@ -213,7 +223,7 @@ impl Folder {
             if followed_area {
                 settings.adjust.crop = Some(settings.estimate.area);
             }
-            self.save_settings(&frame.file, &settings)
+            self.write_settings(&frame.file, &settings)
                 .map_err(|e| format!("{}: {e}", frame.file))?;
         }
         Ok(())
@@ -233,9 +243,14 @@ impl Folder {
         let bytes = pipeline::export(&input, &scan, &settings, Compression::LosslessJpeg, &out)
             .map_err(|e| e.to_string())?;
         // Edited while this ran? Then those settings aren't in the DNG: keep them newer than it.
+        let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
         if let Ok(now) = std::fs::read(&sidecar_path) {
             if used.as_ref() != Some(&now) {
-                reversal_core::write_atomic(&sidecar_path, &now).map_err(|e| e.to_string())?;
+                std::fs::File::options()
+                    .write(true)
+                    .open(&sidecar_path)
+                    .and_then(|f| f.set_modified(SystemTime::now()))
+                    .map_err(|e| e.to_string())?;
             }
         }
         Ok((out, bytes, warning))

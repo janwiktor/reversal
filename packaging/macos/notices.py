@@ -19,6 +19,8 @@ for package in sorted(metadata["packages"], key=lambda p: p["name"]):
     if (package["name"], package["version"]) not in wanted or package["source"] is None:
         continue
     print(f"{'=' * 72}\n{package['name']} {package['version']}: {package['license']}\n")
+    if "IJG" in package["license"]:
+        print("This software is based in part on the work of the Independent JPEG Group.\n")
     folder = os.path.dirname(package["manifest_path"])
     for path in sorted(glob.glob(folder + "/LICEN[CS]E*") + glob.glob(folder + "/COPYING*")):
         if os.path.isfile(path):

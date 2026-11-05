@@ -32,11 +32,13 @@ final class DropWebView: WKWebView {
     }
 }
 
-final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
+final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler {
     private static let lastFolderKey = "folder"
     private var window: NSWindow!
     private var web: DropWebView!
     private var engine: Process?
+    /// The page says when it has work running in the engine.
+    private var busy = false
     /// A folder the app was opened with, in the Dock or Finder, before it finished launching.
     private var launchFolder: URL?
 
@@ -48,7 +50,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "reversal")
         web = DropWebView(frame: .zero, configuration: config)
-        web.onFolder = { [weak self] in self?.show(folder: $0) }
+        web.onFolder = { [weak self] folder in self?.leaveFolder(then: { self?.show(folder: folder) }) }
         web.unregisterDraggedTypes()
         web.registerForDraggedTypes([.fileURL])
 
@@ -58,6 +60,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered, defer: false)
         window.title = "Reversal"
+        window.delegate = self
         window.contentMinSize = NSSize(width: 960, height: 600)
         window.contentView = web
         window.center()
@@ -79,14 +82,55 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         guard let url = urls.first else { return }
         let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
         let folder = isFolder ? url : url.deletingLastPathComponent()
-        if web == nil { launchFolder = folder } else { show(folder: folder) }
+        if web == nil {
+            launchFolder = folder
+        } else {
+            leaveFolder(then: { [weak self] in self?.show(folder: folder) })
+        }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool { true }
+    /// Closing the window goes through the same checks as quitting.
+    func windowShouldClose(_: NSWindow) -> Bool {
+        NSApp.terminate(nil)
+        return false
+    }
+
+    func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+        leaveFolder(
+            then: { NSApp.reply(toApplicationShouldTerminate: true) },
+            otherwise: { NSApp.reply(toApplicationShouldTerminate: false) })
+        return .terminateLater
+    }
 
     func applicationWillTerminate(_: Notification) { stopEngine() }
 
+    /// Before the engine stops: ask if it has work running, then let the page store its
+    /// latest edits.
+    private func leaveFolder(then proceed: @escaping () -> Void, otherwise stay: @escaping () -> Void = {}) {
+        guard engine != nil else { return proceed() }
+        if busy {
+            let alert = NSAlert()
+            alert.messageText = "Reversal is still working"
+            alert.informativeText = "Stopping now leaves the frames in progress unfinished."
+            alert.addButton(withTitle: "Keep Working")
+            alert.addButton(withTitle: "Stop")
+            guard alert.runModal() == .alertSecondButtonReturn else { return stay() }
+        }
+        var finished = false
+        let finish = {
+            guard !finished else { return }
+            finished = true
+            proceed()
+        }
+        web.callAsyncJavaScript(
+            "await rememberSettings()", arguments: [:], in: nil, in: .page,
+            completionHandler: { _ in finish() })
+        // A page that doesn't answer mustn't stop the app from closing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: finish)
+    }
+
     @objc func chooseFolder() {
+        guard window.attachedSheet == nil else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -95,7 +139,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             if response == .OK, let url = panel.url {
-                self.show(folder: url)
+                self.leaveFolder(then: { self.show(folder: url) })
             } else if self.engine == nil {
                 NSApp.terminate(nil)
             }
@@ -105,6 +149,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
     /// The engine serves one folder, so a new folder gets a new engine.
     private func show(folder: URL) {
         stopEngine()
+        busy = false
         UserDefaults.standard.set(folder.path, forKey: Self.lastFolderKey)
         window.title = "Reversal: \(folder.lastPathComponent)"
 
@@ -120,15 +165,22 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
         var pending = ""
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             // Always read, or the engine would block once the pipe fills up.
-            let text = String(decoding: handle.availableData, as: UTF8.self)
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil  // it ended
+                return
+            }
+            let text = String(decoding: data, as: UTF8.self)
             guard !pending.isEmpty || text.contains("http") else { return }
             pending += text
             guard let range = pending.range(of: #"http://127\.0\.0\.1:\d+"#, options: .regularExpression),
                 let url = URL(string: String(pending[range]))
             else { return }
             pending = ""
-            handle.readabilityHandler = { _ = $0.availableData }
-            DispatchQueue.main.async { self?.web.load(URLRequest(url: url)) }
+            DispatchQueue.main.async {
+                guard let self, self.engine === process else { return }
+                self.web.load(URLRequest(url: url))
+            }
         }
         process.terminationHandler = { [weak self] ended in
             DispatchQueue.main.async {
@@ -161,12 +213,14 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler {
 
     /// Requests from the page. It is served by our own engine, on this machine.
     func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: String] else { return }
-        switch body["action"] {
+        guard let body = message.body as? [String: Any] else { return }
+        switch body["action"] as? String {
         case "chooseFolder":
             chooseFolder()
+        case "busy":
+            busy = body["busy"] as? Bool ?? false
         case "reveal":
-            if let path = body["path"] {
+            if let path = body["path"] as? String {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
         default:

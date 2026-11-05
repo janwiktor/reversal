@@ -239,6 +239,7 @@ let current = null;   // { file, auto, settings }
 let tool = null;      // null | "crop" | "area" | "base" | "show"
 let timer = null;
 let saveTimer = null;
+let opening = null;       // the frame being loaded
 let frames = [];          // what the frame list shows
 const selected = new Set();
 let lastChecked = null;   // for shift-click
@@ -275,7 +276,7 @@ async function loadFiles() {
   list.replaceChildren(...frames.map(frameRow));
   list.scrollTop = scroll;
   if (!frames.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
-  markCurrent(current?.file);
+  markCurrent(opening ?? current?.file);
   updateSaveButton();
 }
 
@@ -333,6 +334,7 @@ $("select-all-box").addEventListener("change", (e) => {
 
 function updateSaveButton() {
   const button = $("export");
+  shell?.postMessage({ action: "busy", busy: !!batch });
   button.classList.toggle("cancel", !!batch);
   if (batch) {
     button.textContent = "Stop after these frames";
@@ -357,12 +359,14 @@ function markCurrent(name) {
 // Each frame keeps its settings on disk from the first change, so frames can be saved together.
 async function rememberSettings() {
   clearTimeout(saveTimer);
-  if (!current) return;
-  const { file, settings } = current;
+  // A roll measurement is rewriting the sidecars; what changes meanwhile follows when it ends.
+  if (!current || batch?.task === "roll") return;
+  const frame = current;
+  const { file, settings } = frame;
   const json = JSON.stringify(settings);
-  if (json === current.remembered) return;
-  current.remembered = json;
+  if (json === frame.remembered) return;
   const state = await (await api("/api/settings", { file, settings })).json();
+  frame.remembered = json;
   const f = frames.find((x) => x.name === file);
   if (f) { Object.assign(f, state); showFrameStates(); }
 }
@@ -373,7 +377,16 @@ function rememberSoon() {
 }
 
 async function open(name) {
-  try { await rememberSettings(); } catch (e) { status(`Could not keep your settings: ${e.message}`); }
+  try {
+    await rememberSettings();
+  } catch (e) {
+    status(`Could not keep your settings, so this frame stays open: ${e.message}`);
+    return;
+  }
+  clearTimeout(timer);
+  clearTimeout(areaTimer);
+  opening = name;
+  current = null;  // no edits while nothing is open
   markCurrent(name);
   setTool(null);
   $("message").textContent = "Decoding the raw file…";
@@ -382,6 +395,7 @@ async function open(name) {
   setBusy(true);
   try {
     const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
+    if (opening !== name) return;  // another frame was chosen meanwhile
     current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent };
     current.settings.hints ??= {};
     current.remembered = JSON.stringify(current.settings);
@@ -391,10 +405,12 @@ async function open(name) {
     $("setup-note").textContent = data.warning ?? "";
     $("setup-note").hidden = !data.warning;
   } catch (e) {
-    current = null;
-    $("message").textContent = `Could not open ${name}: ${e.message}`;
+    if (opening === name) $("message").textContent = `Could not open ${name}: ${e.message}`;
   } finally {
-    setBusy(false);
+    if (opening === name) {
+      opening = null;
+      setBusy(false);
+    }
   }
 }
 
@@ -445,7 +461,7 @@ function changed(delay = 0) {
 
 for (const id of [...SLIDERS, "straighten"]) {
   $(id).title = "Double-click to reset";
-  $(id).addEventListener("input", (e) => { adj()[id] = Number(e.target.value); changed(); });
+  $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); changed(); } });
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
 }
 
@@ -548,12 +564,7 @@ async function followBatch() {
   batch = null;
   await loadFiles();
   if (finished.task === "roll") {
-    if (current) {
-      // Its base and measurements changed on disk: read them back, don't write these over them.
-      await rememberSettings().catch(() => {});
-      current.remembered = JSON.stringify(current.settings);
-      await open(current.file);
-    }
+    await reopenAfterRoll();
     status(rollSummary(finished));
     return;
   }
@@ -565,9 +576,22 @@ async function followBatch() {
   $("reveal").hidden = !(shell && lastPath);
 }
 
+// The open frame's base and measurements changed on disk: read them back, and keep the slider
+// moves made while measuring. A frame being opened already reads them.
+async function reopenAfterRoll() {
+  if (!current) return;
+  const { file, settings: { adjust } } = current;
+  current.remembered = JSON.stringify(current.settings);
+  await open(file);
+  if (current?.file === file) {
+    current.settings.adjust = adjust;
+    changed(0);
+  }
+}
+
 function rollSummary({ done, total, issues, cancelled }) {
   const head = cancelled ? "Stopped; no frame changed."
-    : issues.length ? "The roll's film base wasn't applied."
+    : issues.length ? "The roll's film base didn't reach every frame."
     : `${total} frames now share one film base. Detect on a frame goes back to its own.`;
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
@@ -582,20 +606,24 @@ $("reveal").addEventListener("click", () => { if (shell && lastPath) shell.postM
 
 async function setHint(key, rect) {
   if (!current) return;
+  if (batch?.task === "roll") { status("Measuring the roll; try again when it's done."); return; }
+  const file = current.file;
   const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
   status("Measuring…");
   try {
-    current.settings.estimate = await (await api("/api/estimate", { file: current.file, hints: hints() })).json();
+    const estimate = await (await api("/api/estimate", { file, hints: hints() })).json();
+    if (current?.file !== file) return;
+    current.settings.estimate = estimate;
     $("setup-note").hidden = true;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
     status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
                           : (rect ? "Image area set from your selection." : "Measuring the centre of the scan."));
   } catch (e) {
-    status(`Could not measure: ${e.message}`);
+    if (current?.file === file) status(`Could not measure: ${e.message}`);
   }
-  changed(0);
+  if (current?.file === file) changed(0);
 }
 
 // ---------- Tools and overlay ----------

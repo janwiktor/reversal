@@ -154,7 +154,7 @@ impl Batch {
     /// Frames being worked on finish; the rest don't start.
     pub fn cancel(&self) {
         let mut progress = self.0.lock().expect("no panics while locked");
-        progress.cancelled = !progress.queue.is_empty();
+        progress.cancelled |= !progress.queue.is_empty();
         progress.queue.clear();
     }
 

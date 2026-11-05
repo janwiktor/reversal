@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds dist/Reversal-<version>-arm64.dmg: an ad hoc signed app with LibRaw built in.
-# Needs Rust and the Xcode command line tools; no Homebrew libraries end up in the app.
+# Needs Rust, pkgconf and the Xcode command line tools; no Homebrew libraries end up in the app.
 set -euo pipefail
 
 LIBRAW_VERSION=0.22.3
@@ -16,13 +16,13 @@ mkdir -p "$build"
 
 # LibRaw, static and with only what the conversion uses: the Homebrew library only runs on
 # the macOS it was built for. Colour management is ours and OpenMP isn't needed.
-prefix="$build/libraw-$LIBRAW_VERSION"
+prefix="$build/libraw-install-$LIBRAW_VERSION"
 source_dir="$build/LibRaw-$LIBRAW_VERSION"
-if [ ! -f "$prefix/lib/libraw.a" ]; then
+if [ ! -f "$prefix/lib/pkgconfig/libraw.pc" ]; then
   tarball="$build/LibRaw-$LIBRAW_VERSION.tar.gz"
   [ -f "$tarball" ] || curl -fsSL -o "$tarball" "https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
   echo "$LIBRAW_SHA256  $tarball" | shasum -a 256 -c -
-  rm -rf "$source_dir"
+  rm -rf "$source_dir" "$prefix"
   tar -xzf "$tarball" -C "$build"
   (cd "$source_dir" &&
     ./configure --prefix="$prefix" --disable-shared --enable-static --disable-openmp \
@@ -34,6 +34,11 @@ fi
 PKG_CONFIG_PATH="$prefix/lib/pkgconfig" CARGO_TARGET_DIR="$build/target" \
   CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_STRIP=true \
   cargo build --release --locked --manifest-path "$root/Cargo.toml"
+
+if otool -L "$build/target/release/reversal" | grep -q raw; then
+  echo "The engine links a shared LibRaw, so it wouldn't run on other Macs." >&2
+  exit 1
+fi
 
 # App bundle.
 app="$build/Reversal.app"
