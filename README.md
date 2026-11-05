@@ -120,4 +120,3 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 This product includes DNG technology under license by Adobe.
 
 RAW decoding uses [LibRaw](https://www.libraw.org/), linked as a system library.
-

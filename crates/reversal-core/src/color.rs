@@ -134,3 +134,4 @@ mod tests {
         assert!(w.iter().all(|v| (v - 1.0).abs() < 1e-3));
     }
 }
+pub fn  badly_formatted( ) {}
