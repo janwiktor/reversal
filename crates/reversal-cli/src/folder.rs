@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::SystemTime;
 
 use reversal_core::dng::Compression;
 use reversal_core::image::Rgb32;
@@ -33,14 +32,14 @@ pub struct RollFrame {
 pub struct FrameState {
     /// A DNG of this frame exists.
     pub saved: bool,
-    /// The settings changed since that DNG, or it was never saved.
+    /// The settings differ from that DNG's, or from the automatic ones if there is none.
     pub edited: bool,
     /// The film base or measured area were set by hand.
     pub manual_setup: bool,
 }
 
 /// The parts of a sidecar that are the user's, readable from any model version.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct SavedChoices {
     #[serde(default)]
     model: u32,
@@ -89,6 +88,10 @@ fn settings_from(sidecar: Option<&[u8]>, small: &Rgb32) -> (Settings, Option<Str
         Some(bytes) => saved_settings(bytes, &auto, small),
         None => (auto, None),
     }
+}
+
+fn settings_json(settings: &Settings) -> Vec<u8> {
+    serde_json::to_vec_pretty(settings).expect("settings serialize")
 }
 
 impl Folder {
@@ -157,23 +160,31 @@ impl Folder {
         })
     }
 
+    /// The settings a frame's DNG was written with.
+    fn in_dng(&self, file: &str) -> PathBuf {
+        self.sidecar(file).with_extension("in-dng.json")
+    }
+
     pub fn frame_state(&self, file: &str) -> FrameState {
-        let modified =
-            |path: &Path| -> Option<SystemTime> { path.metadata().ok()?.modified().ok() };
-        let sidecar_path = self.sidecar(file);
-        let settings_at = modified(&sidecar_path);
-        let dng_at = modified(&self.output_path(file));
-        let hints = settings_at
-            .and_then(|_| std::fs::read(&sidecar_path).ok())
-            .and_then(|bytes| serde_json::from_slice::<SavedChoices>(&bytes).ok())
-            .map(|choices| choices.hints)
-            .unwrap_or_default();
+        let choices = |path: &Path| -> SavedChoices {
+            std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default()
+        };
+        let saved = self.output_path(file).is_file();
+        let now = choices(&self.sidecar(file));
+        let before = if saved {
+            choices(&self.in_dng(file))
+        } else {
+            SavedChoices::default()
+        };
         FrameState {
-            saved: dng_at.is_some(),
-            edited: settings_at.is_some_and(|s| dng_at.is_none_or(|d| s > d)),
-            manual_setup: hints.base.is_some()
-                || hints.analysis.is_some()
-                || hints.area_percent.is_some(),
+            saved,
+            edited: now.hints != before.hints || now.adjust != before.adjust,
+            manual_setup: now.hints.base.is_some()
+                || now.hints.analysis.is_some()
+                || now.hints.area_percent.is_some(),
         }
     }
 
@@ -184,8 +195,7 @@ impl Folder {
 
     fn write_settings(&self, file: &str, settings: &Settings) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.out_dir)?;
-        let bytes = serde_json::to_vec_pretty(settings).expect("settings serialize");
-        reversal_core::write_atomic(&self.sidecar(file), &bytes)
+        reversal_core::write_atomic(&self.sidecar(file), &settings_json(settings))
     }
 
     /// What a frame adds to a roll measurement: its analysis image and the film base its own
@@ -242,17 +252,9 @@ impl Folder {
         let out = self.output_path(file);
         let bytes = pipeline::export(&input, &scan, &settings, Compression::LosslessJpeg, &out)
             .map_err(|e| e.to_string())?;
-        // Edited while this ran? Then those settings aren't in the DNG: keep them newer than it.
-        let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
-        if let Ok(now) = std::fs::read(&sidecar_path) {
-            if used.as_ref() != Some(&now) {
-                std::fs::File::options()
-                    .write(true)
-                    .open(&sidecar_path)
-                    .and_then(|f| f.set_modified(SystemTime::now()))
-                    .map_err(|e| e.to_string())?;
-            }
-        }
+        // What's in the DNG, not what's in the sidecar: that may have changed while this ran.
+        reversal_core::write_atomic(&self.in_dng(file), &settings_json(&settings))
+            .map_err(|e| e.to_string())?;
         Ok((out, bytes, warning))
     }
 }
@@ -289,20 +291,44 @@ mod tests {
         assert!(!state.saved && !state.edited && !state.manual_setup);
 
         let mut settings = self::settings();
+        settings.adjust.exposure = 20.0;
         folder.save_settings("a.NEF", &settings).unwrap();
         let state = folder.frame_state("a.NEF");
         assert!(!state.saved && state.edited && !state.manual_setup);
 
-        std::thread::sleep(std::time::Duration::from_millis(5));
         std::fs::write(folder.output_path("a.NEF"), b"dng").unwrap();
+        std::fs::write(folder.in_dng("a.NEF"), settings_json(&settings)).unwrap();
         let state = folder.frame_state("a.NEF");
         assert!(state.saved && !state.edited);
 
-        std::thread::sleep(std::time::Duration::from_millis(5));
         settings.hints.base = Some(settings.estimate.base_area);
         folder.save_settings("a.NEF", &settings).unwrap();
         let state = folder.frame_state("a.NEF");
         assert!(state.saved && state.edited && state.manual_setup);
+    }
+
+    #[test]
+    fn going_back_to_where_a_frame_was_clears_edited() {
+        let temp = TempFolder::new("back");
+        let folder = &temp.0;
+        let auto = self::settings();
+        let mut changed = auto.clone();
+        changed.adjust.whites = -30.0;
+
+        // Never saved: the automatic settings are where it started.
+        folder.save_settings("a.NEF", &changed).unwrap();
+        assert!(folder.frame_state("a.NEF").edited);
+        folder.save_settings("a.NEF", &auto).unwrap();
+        assert!(!folder.frame_state("a.NEF").edited);
+
+        // Saved: the DNG's settings are, even when they aren't the automatic ones.
+        folder.save_settings("a.NEF", &changed).unwrap();
+        std::fs::write(folder.output_path("a.NEF"), b"dng").unwrap();
+        std::fs::write(folder.in_dng("a.NEF"), settings_json(&changed)).unwrap();
+        folder.save_settings("a.NEF", &auto).unwrap();
+        assert!(folder.frame_state("a.NEF").edited);
+        folder.save_settings("a.NEF", &changed).unwrap();
+        assert!(!folder.frame_state("a.NEF").edited);
     }
 
     fn small_scan() -> Rgb32 {
