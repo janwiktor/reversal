@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore: &docs
+      - "**/*.md"
+      - "docs/**"
+  push:
+    branches: [main]
+    paths-ignore: *docs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # The fast gate: format, lint and tests. Everything else waits for it.
+  linux:
+    name: Linux (format, lint, test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install LibRaw
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libraw-dev pkg-config
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace
+      # The core has to stay usable without LibRaw or any other host library.
+      - name: Lint the core without LibRaw
+        run: cargo clippy --locked -p reversal-core --no-default-features --all-targets -- -D warnings
+      - name: Test the core without LibRaw
+        run: cargo test --locked -p reversal-core --no-default-features
+
+  # The platform the app ships on. Skips when the Linux job fails, since macOS runners are
+  # billed at ten times the Linux rate while the repository is private.
+  macos:
+    name: macOS (test)
+    needs: linux
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install LibRaw
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install libraw pkgconf
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Test
+        run: cargo test --locked --workspace
+      - name: Check that the binary starts
+        run: cargo run --locked -- --version

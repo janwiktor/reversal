@@ -1,0 +1,10 @@
+# The workflows pin actions to commit hashes, so updates have to come from here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
