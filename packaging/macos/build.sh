@@ -49,7 +49,13 @@ cp "$build/target/release/reversal" "$app/Contents/MacOS/reversal-engine"
 sed "s/@VERSION@/$version/" "$here/Info.plist" >"$app/Contents/Info.plist"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" xcrun actool "$here/Reversal.icon" \
   --compile "$app/Contents/Resources" --app-icon Reversal --platform macosx \
-  --minimum-deployment-target "$MACOS_TARGET" --output-partial-info-plist "$build/icon.plist" >/dev/null
+  --minimum-deployment-target "$MACOS_TARGET" --output-partial-info-plist "$build/icon.plist" >"$build/icon.log"
+# It can fail and still exit 0.
+if [ ! -f "$app/Contents/Resources/Assets.car" ] || [ ! -f "$app/Contents/Resources/Reversal.icns" ]; then
+  cat "$build/icon.log" >&2
+  echo "The icon didn't compile." >&2
+  exit 1
+fi
 
 # Licenses of what's inside.
 licenses="$app/Contents/Resources/Licenses"
