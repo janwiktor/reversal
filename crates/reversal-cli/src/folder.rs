@@ -227,12 +227,8 @@ impl Folder {
             let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
             let sidecar = std::fs::read(self.sidecar(&frame.file)).ok();
             let (mut settings, _) = settings_from(sidecar.as_deref(), &frame.small);
-            let followed_area = settings.adjust.crop == Some(settings.estimate.area);
             settings.hints.base_rgb = Some(base_rgb);
             settings.estimate = invert::estimate_on(&frame.small, &settings.hints);
-            if followed_area {
-                settings.adjust.crop = Some(settings.estimate.area);
-            }
             self.write_settings(&frame.file, &settings)
                 .map_err(|e| format!("{}: {e}", frame.file))?;
         }
