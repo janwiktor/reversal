@@ -6,230 +6,387 @@
 <title>Reversal</title>
 <style>
   :root {
+    color-scheme: dark;
     /* Neutral gray surround (no tint) so color can be judged, as on a viewing booth. */
     --surround: #3d3d3d;
-    --panel: #2e2e2e;
-    --panel-edge: #4a4a4a;
-    --control: #383838;
-    --ink: #e8e8e8;
-    --ink-quiet: #a3a3a3;
-    --focus: #f2f2f2;
+    --panel: #2b2b2b;
+    --bar: #262626;
+    --strip: #222;
+    --seam: #161616;       /* between panels */
+    --line: #3e3e3e;       /* inside a panel */
+    --field: #1e1e1e;
+    --control: #3a3a3a;
+    --control-hover: #454545;
+    --control-on: #565656;
+    --row-hover: #343434;
+    --row-on: #484848;
+    --track: #555;
+    --tick: #6e6e6e;
+    --ink: #e2e2e2;
+    --ink-quiet: #a6a6a6;
+    --accent: #1f6fd1;     /* ticks and the Save button; white on it holds 4.5:1 */
+    --focus: #4a94f0;
     --warn: #ffb547;
     /* Region overlays */
     --crop: #ffffff;
     --area: #5ec8ff;
     --base: #ffb547;
-    --font: "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --left: 220px;
+    --right: 272px;
+    --label: 74px;
+    --value: 40px;
   }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
+  * { box-sizing: border-box; cursor: default; }
+  html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
   body {
-    background: var(--surround); color: var(--ink); font: 400 15px/1.4 var(--font);
-    display: grid; grid-template-columns: 260px minmax(0, 1fr) 280px; grid-template-rows: 100%;
+    background: var(--surround); color: var(--ink); font: 400 12px/16px var(--font);
+    display: grid; grid-template: "bar bar bar" 40px "roll stage dock" minmax(0, 1fr) "foot foot foot" 24px / var(--left) minmax(0, 1fr) var(--right);
     font-variant-numeric: tabular-nums;
+    -webkit-user-select: none; user-select: none;
+    -webkit-font-smoothing: antialiased;
   }
-  button, input { font: inherit; color: inherit; }
-  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button, input { font: inherit; color: inherit; margin: 0; }
+  p, h2 { margin: 0; }
   [hidden] { display: none !important; }
+  :focus { outline: none; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  [inert] { opacity: .45; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: #555; background-clip: padding-box; border: 3px solid transparent; border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background-color: #6a6a6a; }
+  @supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: #555 transparent; } }
+
+  /* Buttons */
+  .btn, .icon, .seg button, .link {
+    height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: none; white-space: nowrap;
+  }
+  .btn { background: var(--control); box-shadow: inset 0 0 0 1px #4a4a4a; }
+  .btn:hover { background: var(--control-hover); }
+  .btn:active { background: var(--control-on); }
+  .btn[aria-pressed="true"] { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; }
+  .icon { width: 28px; padding: 0; display: inline-grid; place-items: center; color: #cfcfcf; }
+  .icon:hover { background: var(--control); color: #fff; }
+  .icon:active, .icon[aria-pressed="true"] { background: var(--control-on); color: #fff; }
+  .icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+  button:disabled { opacity: .45; background: none; }
+  .link { height: 18px; padding: 0 6px; color: var(--ink); text-decoration: underline; text-decoration-color: #777; text-underline-offset: 2px; }
+  .link:hover { text-decoration-color: currentColor; }
+
+  /* One control with a few choices. */
+  .seg { display: flex; padding: 1px; background: var(--field); border-radius: 5px; box-shadow: inset 0 0 0 1px #3a3a3a; }
+  .seg button { flex: 1 1 auto; min-width: 0; height: 22px; padding: 0 8px; color: var(--ink-quiet); }
+  .seg button:hover { color: #fff; }
+  .seg button[aria-pressed="true"] { background: var(--control-on); color: #fff; box-shadow: 0 1px 0 rgb(0 0 0 / .4); }
+  .seg button:focus-visible { outline-offset: -1px; }
+
+  /* Checkboxes */
+  input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none; flex: none; width: 14px; height: 14px; border-radius: 3px;
+    background: var(--field) center / 10px 10px no-repeat; box-shadow: inset 0 0 0 1px #5e5e5e;
+  }
+  input[type="checkbox"]:hover { box-shadow: inset 0 0 0 1px #8c8c8c; }
+  input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  input[type="checkbox"]:checked { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.2 4 7.4l4.2-4.8' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+  input[type="checkbox"]:indeterminate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5h6' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); }
+
+  /* Sliders. The track is painted on the input so every browser draws the same thing;
+     --from and --to mark the filled part, measured to the thumb's center. */
+  input[type="range"] {
+    --x0: calc(6px + (100% - 12px) * var(--from, .5));
+    --x1: calc(6px + (100% - 12px) * var(--to, .5));
+    appearance: none; -webkit-appearance: none; display: block; width: 100%; min-width: 0; height: 20px; background:
+      linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat,
+      linear-gradient(to right, var(--track) var(--x0), #cfcfcf var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat;
+  }
+  input[type="range"].from-min { background: linear-gradient(to right, var(--track) var(--x0), #cfcfcf var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat; }
+  #temperature { background: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat, linear-gradient(to right, #4f86cc, #6f6f6f 50%, #dcae4a) center / 100% 3px no-repeat; }
+  #tint { background: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat, linear-gradient(to right, #57a862, #6f6f6f 50%, #c063ae) center / 100% 3px no-repeat; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #d6d6d6; box-shadow: 0 0 0 1px #141414; }
+  input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #d6d6d6; box-shadow: 0 0 0 1px #141414; }
+  input[type="range"]:hover::-webkit-slider-thumb { background: #fff; }
+  input[type="range"]:hover::-moz-range-thumb { background: #fff; }
+  input[type="range"]:focus-visible { outline: none; }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--focus); }
+  input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--focus); }
+
+  /* Label, track and a value you can type into, on one line. */
+  .slider { display: grid; grid-template-columns: var(--label) minmax(0, 1fr) var(--value); align-items: center; gap: 0 6px; height: 24px; }
+  .slider label { color: var(--ink-quiet); white-space: nowrap; }
+  .val {
+    width: 100%; height: 20px; padding: 0 4px; text-align: right; border: 0; border-radius: 3px; background: none; color: var(--ink-quiet);
+    -webkit-user-select: text; user-select: text; cursor: text;
+  }
+  .val:hover { box-shadow: inset 0 0 0 1px #4e4e4e; color: var(--ink); }
+  .val:focus { outline: none; background: var(--field); color: #fff; box-shadow: inset 0 0 0 1px var(--focus); }
+
+  /* Top bar, lined up with the columns below it. */
+  #bar { grid-area: bar; display: grid; grid-template-columns: var(--left) minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
+  #choose-folder { display: flex; align-items: center; gap: 6px; width: calc(100% - 12px); margin: 0 6px; padding: 0 4px; height: 26px; background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
+  #choose-folder:not(:disabled):hover { background: var(--control); }
+  #choose-folder svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--ink-quiet); stroke-width: 1.25; stroke-linejoin: round; }
+  #folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  #frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px; min-width: 0; }
+  #frame-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
+  #crop-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); margin-right: 4px; }
+  #frame-tools .slider { flex: 0 1 230px; grid-template-columns: auto minmax(60px, 1fr) var(--value); min-width: 110px; }
+  #save { display: flex; justify-content: flex-end; padding: 0 10px; }
+  .primary { padding: 0 14px; border: 0; border-radius: 4px; height: 24px; background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
+  .primary:not(:disabled):hover { background: #2a7ae0; }
+  .primary:not(:disabled):active { background: #1a61b8; }
+  .primary:disabled { background: var(--control); opacity: .55; }
+  #export.cancel { background: var(--control); box-shadow: inset 0 0 0 1px #4a4a4a; font-weight: 400; }
+  #export.cancel:hover { background: var(--control-hover); }
 
   /* Frames */
-  #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); padding-top: 14px; display: flex; flex-direction: column; min-height: 0; }
-  #roll h1 { font-size: 20px; font-weight: 600; margin: 0 16px 2px; }
-  #folder { color: var(--ink-quiet); font-size: 13px; margin: 0 16px 14px; overflow-wrap: anywhere; }
-  #choose-folder { align-self: flex-start; background: none; border: 0; padding: 0; margin: -10px 16px 10px; color: var(--ink-quiet); font-size: 13px; cursor: pointer; }
-  #choose-folder:hover { color: var(--ink); }
+  #roll { grid-area: roll; background: var(--panel); border-right: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
+  #roll-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 28px; padding: 0 10px; background: var(--strip); border-bottom: 1px solid var(--seam); color: var(--ink-quiet); }
+  #select-all { display: flex; align-items: center; gap: 8px; }
   #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
-  #files li { display: flex; align-items: center; padding-left: 16px; }
-  #files li:hover { background: #383838; }
-  #files li:has(button[aria-current="true"]) { background: #4a4a4a; }
-  #files input, #select-all input { margin: 0 8px 0 0; accent-color: #cfcfcf; flex: none; }
-  #files button { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 7px 16px 7px 0; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
-  #files button[aria-current="true"] { font-weight: 600; }
+  #files li { display: flex; align-items: center; gap: 8px; height: 24px; padding-left: 10px; }
+  #files li:hover { background: var(--row-hover); }
+  #files li:has(button[aria-current="true"]) { background: var(--row-on); }
+  #files button { flex: 1; min-width: 0; height: 100%; text-align: left; background: none; border: 0; padding: 0 10px 0 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #files button:focus-visible { outline-offset: -2px; }
   #files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #files .state { color: var(--ink-quiet); font-size: 13px; font-weight: 400; white-space: nowrap; }
+  #files .state { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
   #files .state.edited { color: var(--ink); }
-  #files .state.manual::before { content: "●"; color: var(--base); font-size: 9px; margin-right: 5px; vertical-align: 1px; }
-  #select-all { display: flex; align-items: center; color: var(--ink-quiet); font-size: 13px; padding: 0 16px 6px; cursor: pointer; }
+  #files .state.manual::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--base); margin-right: 5px; vertical-align: 2px; }
 
   /* Image: JS sizes #view to fit, so rotation always stays centered. */
-  #stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
+  #stage { grid-area: stage; position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
   #view { position: relative; flex: none; }
-  #photo { display: block; width: 100%; height: 100%; }
+  #photo { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  #overlay * { cursor: crosshair; }
   #overlay rect { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   #overlay .crop { stroke: var(--crop); }
   #overlay .area { stroke: var(--area); stroke-dasharray: 6 4; }
   #overlay .base { stroke: var(--base); }
   #overlay .drag { stroke: var(--crop); stroke-dasharray: 3 3; }
-  #message { position: absolute; color: var(--ink-quiet); font-size: 17px; text-align: center; max-width: 40ch; margin: 0; }
-  #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 6px 12px; display: flex; gap: 12px; align-items: center; font-size: 14px; }
-  #toolbar button { background: none; border: 0; color: var(--ink-quiet); cursor: pointer; padding: 0; }
-  #toolbar button:hover { color: var(--ink); }
+  #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
+  #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); padding: 6px 6px 6px 12px; display: flex; gap: 12px; align-items: center; }
 
-  /* Controls */
-  #head { background: var(--panel); border-left: 1px solid var(--panel-edge); display: flex; flex-direction: column; min-height: 0; }
-  #controls { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
-  #head .actions { padding: 10px 18px; border-top: 1px solid var(--panel-edge); }
-
-  /* Setup: how the scan is read. Pinned under the frames, away from the development controls. */
-  #setup { border-top: 1px solid var(--panel-edge); padding: 10px 16px 12px; display: grid; gap: 8px; }
-  #setup h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0; }
-  #setup h2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #setup h2 button { background: none; border: 0; padding: 0; color: var(--ink-quiet); font-size: 13px; font-weight: 400; cursor: pointer; white-space: nowrap; }
-  #setup h2 button:hover, #setup h2 button[aria-pressed="true"] { color: var(--ink); }
-  .setup-row { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px; }
-  .setup-row > .group-label { margin: 0; white-space: nowrap; }
-  .setup-row .buttons { flex-wrap: nowrap; }
-  .setup-row .buttons button { padding: 3px 4px; min-width: 0; flex: 1 1 0; }
-  .setup-row .slider { grid-column: 2; margin: 0; }
-  .setup-row .slider label { font-size: 13px; color: var(--ink-quiet); }
-  #setup-note { color: var(--warn); font-size: 13px; margin: 0; }
-  #save { padding: 0 16px 12px; }
-  #save button { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: #1f1f1f; font-weight: 600; cursor: pointer; }
-  #save button:disabled { opacity: .45; cursor: default; }
-  #save button.cancel { background: var(--control); border-color: var(--panel-edge); color: var(--ink); font-weight: 400; }
-  #reveal { display: block; width: auto !important; background: none !important; border: 0 !important; color: var(--ink-quiet) !important; padding: 2px 0 0 !important; font-size: 13px; font-weight: 400 !important; }
-  #reveal:hover { color: var(--ink) !important; }
-  section h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
-  .hint { color: var(--ink-quiet); font-size: 13px; margin: 0; }
-
-  #histogram { width: 100%; height: 96px; display: block; background: #262626; border-radius: 4px; }
-  .clip { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-quiet); margin-top: 4px; }
+  /* Dock */
+  #dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
+  #hist { flex: none; padding: 10px; }
+  #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
+  .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
   .clip .over { color: var(--warn); }
-  #stored { font-size: 13px; color: var(--warn); margin: 2px 0 0; }
 
-  .slider { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 0 10px; margin-bottom: 6px; }
-  .slider label { cursor: default; }
-  .slider output { color: var(--ink-quiet); min-width: 4ch; text-align: right; }
-  .slider input { grid-column: 1 / -1; width: 100%; margin: 2px 0 0; accent-color: #cfcfcf; }
-  #temperature { accent-color: #e0b04a; }
-  #tint { accent-color: #c25ea6; }
+  .panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 28px; padding: 0 4px 0 10px; background: var(--strip); border-block: 1px solid var(--seam); font-weight: 600; }
+  .head-btn { height: 20px; padding: 0 8px; background: none; border: 0; border-radius: 3px; color: var(--ink-quiet); font-weight: 400; }
+  .head-btn:not(:disabled):hover { background: var(--control); color: var(--ink); }
+  .head-btn[aria-pressed="true"] { background: var(--control-on); color: #fff; }
 
-  .buttons { display: flex; gap: 6px; flex-wrap: wrap; }
-  .buttons button, .actions button {
-    flex: 1 1 auto; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--panel-edge); background: var(--control); cursor: pointer; white-space: nowrap;
+  #setup { flex: none; padding: 6px 10px 8px; }
+  #develop { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+  #develop section { padding: 8px 10px; }
+  #develop section + section { border-top: 1px solid var(--line); }
+  section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height: 20px; }
+  .row { display: grid; grid-template-columns: var(--label) minmax(0, 1fr); align-items: center; gap: 0 6px; min-height: 24px; margin-top: 4px; }
+  .row-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); white-space: nowrap; }
+  .swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
+  #setup .slider { margin-top: 4px; }
+  #setup .row .btn { width: 100%; padding: 0 6px; }
+  #roll-state { color: var(--ink-quiet); margin-top: 6px; }
+  #setup-note { color: var(--warn); margin-top: 6px; }
+
+  /* The roll flow */
+  #roll-flow { width: min(480px, calc(100vw - 32px)); padding: 16px; border: 0; border-radius: 8px; background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--seam), 0 12px 40px rgb(0 0 0 / .5); }
+  #roll-flow::backdrop { background: rgb(0 0 0 / .35); }
+  #roll-flow h2 { font-size: 13px; margin: 0 0 8px; }
+  #roll-flow p { line-height: 17px; margin: 0 0 8px; color: var(--ink-quiet); }
+  #roll-flow p.warn { color: var(--warn); }
+  .progress { height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; margin-bottom: 8px; }
+  .progress div { height: 100%; width: 0; background: #cfcfcf; }
+  #roll-table { max-height: 42vh; overflow-y: auto; margin-bottom: 10px; background: var(--field); border-radius: 4px; }
+  .roll-row { display: grid; grid-template-columns: 14px 14px minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 26px; padding: 0 10px; }
+  .roll-row + .roll-row { border-top: 1px solid #2a2a2a; }
+  .roll-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roll-row .note { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
+  .roll-row .note.warn { color: var(--warn); }
+  .base-chip { width: 14px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .15); }
+  #roll-result { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--ink-quiet); }
+  #roll-result span:last-child { min-width: 0; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* Status bar */
+  #foot { grid-area: foot; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--bar); border-top: 1px solid var(--seam); color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
+  #status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; -webkit-user-select: text; user-select: text; }
+  #progress { flex: none; width: 120px; height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  #progress div { height: 100%; width: 0; background: #cfcfcf; }
+  /* Lives here so that it appears without moving the slider being dragged. */
+  #stored { flex: 0 100 auto; min-width: 0; margin-left: auto; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; color: var(--warn); }
+  #position { flex: none; margin-left: auto; padding-left: 12px; display: flex; gap: 12px; }
+  #stored:not([hidden]) + #position { margin-left: 0; }
+  #status-more {
+    position: absolute; left: 6px; bottom: 28px; z-index: 2; width: min(640px, calc(100vw - 12px)); max-height: 40vh; overflow-y: auto; padding: 8px 10px;
+    background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; color: var(--ink);
+    -webkit-user-select: text; user-select: text;
   }
-  .buttons button:hover { background: #454545; }
-  .buttons button[aria-pressed="true"] { background: #5a5a5a; border-color: #8a8a8a; }
-  .group-label { font-size: 14px; color: var(--ink-quiet); margin: 10px 0 4px; display: flex; align-items: center; gap: 6px; }
-  .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
-  .actions { display: flex; gap: 8px; }
-  .actions button:disabled { opacity: .45; cursor: default; }
-  #status { color: var(--ink-quiet); font-size: 13px; margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 7.5em; overflow-y: auto; }
 
+  /* A narrow window: drop what names itself, then stack. */
+  @media (max-width: 1180px) {
+    #crop-label, #frame-tools .slider label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #frame-tools .slider { grid-template-columns: minmax(60px, 1fr) var(--value); }
+    #frame-tools .sep { margin: 0 4px; }
+  }
   @media (max-width: 900px) {
-    body { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; }
-    #roll { border-right: 0; border-bottom: 1px solid var(--panel-edge); }
+    html, body { height: auto; overflow: auto; }
+    body { grid-template: "bar" auto "roll" auto "stage" 55vh "dock" auto "foot" auto / minmax(0, 1fr); }
+    #bar { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 0; padding: 6px 0; }
+    #frame-tools { grid-row: 2; grid-column: 1 / -1; flex-wrap: wrap; }
+    #roll { border-right: 0; border-bottom: 1px solid var(--seam); }
     #files { flex: none; max-height: 30vh; }
-    #head { border-left: 0; }
-    #controls { overflow: visible; }
+    #dock { border-left: 0; }
+    #develop { overflow: visible; }
+    #foot { position: sticky; bottom: 0; height: 24px; }
   }
 </style>
 </head>
 <body>
-<nav id="roll" aria-label="Frames">
-  <h1>Reversal</h1>
-  <p id="folder"></p>
-  <button type="button" id="choose-folder" hidden>Open another folder…</button>
-  <label id="select-all"><input type="checkbox" id="select-all-box">Select all</label>
-  <ul id="files"></ul>
-  <section id="setup" aria-labelledby="h-setup">
-    <h2><span id="h-setup">Setup</span><button type="button" id="show-areas" aria-pressed="false">Show areas</button></h2>
-    <div class="setup-row">
-      <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
-      <div class="buttons">
-        <button type="button" id="base-auto" aria-pressed="true">Detect</button>
-        <button type="button" id="base-draw" aria-pressed="false">Pick</button>
-        <button type="button" id="base-roll" aria-pressed="false" title="Measure one film base across the ticked frames, or all frames if none are ticked, and use it on each">Roll</button>
-      </div>
-    </div>
-    <div class="setup-row">
-      <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Measured</div>
-      <div class="buttons">
-        <button type="button" id="area-auto" aria-pressed="true">Center</button>
-        <button type="button" id="area-draw" aria-pressed="false">Draw</button>
-      </div>
-      <div class="slider"><label for="area-percent">Center size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
-    </div>
-    <p id="setup-note" hidden></p>
-  </section>
-  <div id="save">
-    <button type="button" id="export" disabled>Save DNG</button>
-    <p id="status" role="status"></p>
-    <button type="button" id="reveal" hidden>Show in Finder</button>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 12.5v-9c0-.4.3-.7.7-.7h3.4l1.5 1.7h6.1c.4 0 .7.3.7.7v7.3c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7Z"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7L13 5.8M13 2.6v3.2H9.8"/></symbol>
+  <symbol id="i-mirror" viewBox="0 0 16 16"><path d="M8 1.8v12.4M5.8 4.2v7.6L1.8 11.8ZM10.2 4.2v7.6h4Z"/></symbol>
+</svg>
+
+<header id="bar">
+  <div>
+    <button type="button" id="choose-folder"><svg aria-hidden="true"><use href="#i-folder"/></svg><span id="folder"></span></button>
   </div>
+  <div id="frame-tools" role="toolbar" aria-label="Frame">
+    <button type="button" class="icon" id="rotate" title="Rotate 90°" aria-label="Rotate 90°"><svg aria-hidden="true"><use href="#i-rotate"/></svg></button>
+    <button type="button" class="icon" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up" aria-label="Mirror"><svg aria-hidden="true"><use href="#i-mirror"/></svg></button>
+    <span class="sep"></span>
+    <span id="crop-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</span>
+    <div class="seg" role="group" aria-labelledby="crop-label" title="What the saved DNG keeps. This doesn't change the colors.">
+      <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
+      <button type="button" id="crop-frame" aria-pressed="false" title="Keep the area measured in Setup">Measured area</button>
+      <button type="button" id="crop-draw" aria-pressed="false" title="Draw what the saved DNG keeps. This doesn't change the colors.">Draw crop</button>
+    </div>
+    <span class="sep"></span>
+    <div class="slider"><label for="straighten">Straighten</label><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"><input class="val" id="straighten-val" type="text" inputmode="decimal" aria-label="Straighten value" value="0.0°"></div>
+  </div>
+  <div id="save">
+    <button type="button" class="primary" id="export" disabled>Save DNG</button>
+  </div>
+</header>
+
+<nav id="roll" aria-label="Frames">
+  <div id="roll-head">
+    <label id="select-all"><input type="checkbox" id="select-all-box">Select all</label>
+    <span id="frame-count"></span>
+  </div>
+  <ul id="files"></ul>
 </nav>
 
 <main id="stage">
   <div id="view" hidden>
-    <img id="photo" alt="Positive preview">
+    <img id="photo" alt="Positive preview" draggable="false">
     <svg id="overlay" hidden viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
   </div>
-  <div id="toolbar" hidden><span id="tool-text"></span><button type="button" id="tool-done">Done</button></div>
+  <div id="toolbar" hidden><span id="tool-text"></span><button type="button" class="btn" id="tool-done">Done</button></div>
   <p id="message">Choose a frame on the left to convert it.</p>
 </main>
 
-<aside id="head" aria-label="Development controls">
-  <div id="controls">
-  <section aria-labelledby="h-hist">
-    <h2 id="h-hist">Histogram</h2>
-    <canvas id="histogram" width="528" height="192" aria-label="RGB histogram of the preview"></canvas>
-    <div class="clip"><span id="clip-low">Shadows clipped 0%</span><span id="clip-high">Highlights clipped 0%</span></div>
-    <p id="stored" hidden></p>
-  </section>
-
-  <section aria-labelledby="h-tone">
-    <h2 id="h-tone">Tone</h2>
-    <div class="slider"><label for="exposure">Exposure</label><output for="exposure">0</output><input id="exposure" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="contrast">Contrast</label><output for="contrast">0</output><input id="contrast" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="highlights">Highlights</label><output for="highlights">0</output><input id="highlights" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="shadows">Shadows</label><output for="shadows">0</output><input id="shadows" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="whites">Whites</label><output for="whites">0</output><input id="whites" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="blacks">Blacks</label><output for="blacks">0</output><input id="blacks" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="group-label">Profile</div>
-    <div class="buttons">
-      <button type="button" id="look-neutral" aria-pressed="true">Neutral</button>
-      <button type="button" id="look-flat" aria-pressed="false">Flat</button>
-      <button type="button" id="look-vivid" aria-pressed="false">Vivid</button>
-    </div>
-  </section>
-
-  <section aria-labelledby="h-color">
-    <h2 id="h-color">Color</h2>
-    <div class="slider"><label for="temperature">Temperature</label><output for="temperature">0</output><input id="temperature" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="tint">Tint</label><output for="tint">0</output><input id="tint" type="range" min="-100" max="100" step="1" value="0"></div>
-    <div class="slider"><label for="saturation">Saturation</label><output for="saturation">0</output><input id="saturation" type="range" min="-100" max="100" step="1" value="0"></div>
-  </section>
-
-  <section aria-labelledby="h-frame">
-    <h2 id="h-frame">Frame</h2>
-    <div class="buttons">
-      <button type="button" id="rotate">Rotate 90°</button>
-      <button type="button" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up">Mirror</button>
-    </div>
-    <div class="slider" style="margin-top:10px"><label for="straighten">Straighten</label><output for="straighten">0.0°</output><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"></div>
-    <div class="group-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</div>
-    <div class="buttons">
-      <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
-      <button type="button" id="crop-frame" aria-pressed="false" title="Crop to the area measured in Setup">Measured area</button>
-      <button type="button" id="crop-draw" aria-pressed="false">Draw</button>
-    </div>
-  </section>
-
+<aside id="dock" aria-label="Development controls">
+  <div id="hist">
+    <canvas id="histogram" width="504" height="176" aria-label="RGB histogram of the preview"></canvas>
+    <div class="clip"><span>Clipped</span><span id="clip-low">Shadows 0%</span><span id="clip-high">Highlights 0%</span></div>
   </div>
-  <div class="actions">
-    <button type="button" id="reset" disabled>Reset tone &amp; color</button>
+
+  <!-- How the scan is read. These can break the conversion, so they always stay in view. -->
+  <div class="panel-head">
+    <span id="h-setup">Setup</span>
+    <button type="button" class="head-btn" id="show-areas" aria-pressed="false" title="Show the crop, measured area and film base on the whole scan">Show areas</button>
+  </div>
+  <section id="setup" aria-labelledby="h-setup">
+    <div class="row" style="margin-top:0">
+      <div class="row-label" id="l-base"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
+      <div class="seg" role="group" aria-labelledby="l-base" title="Clear, unexposed film, which sets the color conversion for this frame">
+        <button type="button" id="base-auto" aria-pressed="true">Detect</button>
+        <button type="button" id="base-draw" aria-pressed="false">Pick</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-label" id="l-area"><span class="swatch" style="border-color:var(--area)"></span>Measured</div>
+      <div class="seg" role="group" aria-labelledby="l-area" title="Where this frame's color and exposure are measured. This doesn't change the crop.">
+        <button type="button" id="area-auto" aria-pressed="true">Center</button>
+        <button type="button" id="area-draw" aria-pressed="false">Draw area</button>
+      </div>
+    </div>
+    <div class="slider"><label for="area-percent">Center size</label><input id="area-percent" class="from-min" type="range" min="50" max="100" step="1" value="85"><input class="val" id="area-percent-val" type="text" inputmode="numeric" aria-label="Center size value" value="85%"></div>
+    <div class="row">
+      <div class="row-label">Roll</div>
+      <button type="button" class="btn" id="base-roll">Match film base…</button>
+    </div>
+    <p id="roll-state" hidden>This frame uses its roll's film base.</p>
+    <p id="setup-note" hidden></p>
+  </section>
+
+  <div class="panel-head">
+    <span>Develop</span>
+    <button type="button" class="head-btn" id="reset" title="Reset tone and color" disabled>Reset</button>
+  </div>
+  <div id="develop">
+    <section aria-labelledby="h-tone">
+      <h2 id="h-tone">Tone</h2>
+      <div class="slider"><label for="exposure">Exposure</label><input id="exposure" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="exposure-val" type="text" inputmode="numeric" aria-label="Exposure value" value="0"></div>
+      <div class="slider"><label for="contrast">Contrast</label><input id="contrast" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="contrast-val" type="text" inputmode="numeric" aria-label="Contrast value" value="0"></div>
+      <div class="slider"><label for="highlights">Highlights</label><input id="highlights" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="highlights-val" type="text" inputmode="numeric" aria-label="Highlights value" value="0"></div>
+      <div class="slider"><label for="shadows">Shadows</label><input id="shadows" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="shadows-val" type="text" inputmode="numeric" aria-label="Shadows value" value="0"></div>
+      <div class="slider"><label for="whites">Whites</label><input id="whites" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="whites-val" type="text" inputmode="numeric" aria-label="Whites value" value="0"></div>
+      <div class="slider"><label for="blacks">Blacks</label><input id="blacks" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="blacks-val" type="text" inputmode="numeric" aria-label="Blacks value" value="0"></div>
+      <div class="row">
+        <div class="row-label" id="l-profile">Profile</div>
+        <div class="seg" role="group" aria-labelledby="l-profile">
+          <button type="button" id="look-neutral" aria-pressed="true">Neutral</button>
+          <button type="button" id="look-flat" aria-pressed="false">Flat</button>
+          <button type="button" id="look-vivid" aria-pressed="false">Vivid</button>
+        </div>
+      </div>
+    </section>
+    <section aria-labelledby="h-color">
+      <h2 id="h-color">Color</h2>
+      <div class="slider"><label for="temperature">Temperature</label><input id="temperature" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="temperature-val" type="text" inputmode="numeric" aria-label="Temperature value" value="0"></div>
+      <div class="slider"><label for="tint">Tint</label><input id="tint" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="tint-val" type="text" inputmode="numeric" aria-label="Tint value" value="0"></div>
+      <div class="slider"><label for="saturation">Saturation</label><input id="saturation" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="saturation-val" type="text" inputmode="numeric" aria-label="Saturation value" value="0"></div>
+    </section>
   </div>
 </aside>
+
+<footer id="foot">
+  <p id="status" role="status"></p>
+  <button type="button" class="link" id="status-details" aria-expanded="false" aria-controls="status-more" hidden>Details</button>
+  <button type="button" class="link" id="reveal" hidden>Show in Finder</button>
+  <div id="progress" hidden><div></div></div>
+  <p id="stored" hidden></p>
+  <div id="position"><span id="position-name"></span><span id="position-index"></span></div>
+  <div id="status-more" hidden></div>
+</footer>
+
+<dialog id="roll-flow" aria-labelledby="roll-title">
+  <h2 id="roll-title">Match film base across a roll</h2>
+  <div id="roll-body"></div>
+  <div class="dialog-actions">
+    <button type="button" class="btn" id="roll-cancel">Cancel</button>
+    <button type="button" class="primary" id="roll-go"></button>
+  </div>
+</dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "saturation"];
+const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
-  crop: "Drag over the image to set the crop.",
-  area: "Drag over the part of the scan that is picture (no rebate, no holder). Color and exposure are measured here.",
-  base: "Drag over clear, unexposed film between or beside the frames.",
+  crop: "Drag over what the saved DNG should keep. This doesn't change the colors.",
+  area: "Drag over the part of the scan that is picture (no rebate, no holder). Color and exposure are measured here. This doesn't change the crop.",
+  base: "Drag over clear, unexposed film between or beside the frames, away from holes and markings.",
 };
 
 let current = null;   // { file, auto, settings }
@@ -259,12 +416,27 @@ async function api(path, body) {
 
 const adj = () => current.settings.adjust;
 const hints = () => current.settings.hints;
-const status = (t) => { $("status").textContent = t; };
+// The status bar holds one line; anything longer opens from Details.
+function status(text) {
+  const [head, ...rest] = text.split("\n");
+  $("status").textContent = head;
+  $("status").title = head;
+  $("status-more").textContent = text;
+  $("status-details").hidden = !rest.length;
+  showDetails(false);
+}
+function showDetails(on) {
+  $("status-more").hidden = !on;
+  $("status-details").setAttribute("aria-expanded", String(on));
+}
+$("status-details").addEventListener("click", () => showDetails($("status-more").hidden));
+
 
 // ---------- Files ----------
 async function loadFiles() {
   const data = await (await api("/api/files")).json();
-  $("folder").textContent = data.folder;
+  $("folder").textContent = data.folder.split("/").filter(Boolean).pop() ?? data.folder;
+  $("choose-folder").title = shell ? `${data.folder}\nOpen another folder…` : data.folder;
   frames = data.files;
   const names = new Set(frames.map((f) => f.name));
   for (const name of selected) if (!names.has(name)) selected.delete(name);
@@ -298,7 +470,7 @@ function frameRow(f) {
 }
 
 function showFrameState(f, state) {
-  const saving = batch?.active.includes(f.name);
+  const saving = batch?.task === "save" && batch.active.includes(f.name);
   state.textContent = saving ? "saving" : f.edited ? "edited" : f.saved ? "saved" : "";
   state.className = `state${f.edited && !saving ? " edited" : ""}${f.manualSetup ? " manual" : ""}`;
   state.title = f.manualSetup ? "Film base or measured area set by hand" : f.edited ? "Changes not saved to a DNG yet" : "";
@@ -332,14 +504,18 @@ $("select-all-box").addEventListener("change", (e) => {
 function updateSaveButton() {
   const button = $("export");
   shell?.postMessage({ action: "busy", busy: !!batch });
-  button.classList.toggle("cancel", !!batch);
-  if (batch) {
-    button.textContent = "Stop after these frames";
+  $("frame-count").textContent = !frames.length ? "" : selected.size ? `${selected.size} of ${frames.length}` : `${frames.length} frame${frames.length > 1 ? "s" : ""}`;
+  $("progress").hidden = batch?.task !== "save";
+  const saving = batch?.task === "save";
+  button.classList.toggle("cancel", saving);
+  button.title = saving ? "Frames being saved now finish; the rest don't start" : SAVE_SHORTCUT;
+  if (saving) {
+    button.textContent = "Stop saving";
     button.disabled = false;
     return;
   }
   button.textContent = selected.size ? `Save ${selected.size} DNG${selected.size > 1 ? "s" : ""}` : "Save DNG";
-  button.disabled = !selected.size && !current;
+  button.disabled = !!batch || (!selected.size && !current);
   const box = $("select-all-box");
   box.checked = frames.length > 0 && selected.size === frames.length;
   box.indeterminate = selected.size > 0 && selected.size < frames.length;
@@ -350,6 +526,9 @@ function markCurrent(name) {
     b.setAttribute("aria-current", String(b.dataset.name === name));
     if (b.dataset.name === name) b.scrollIntoView({ block: "nearest" });
   }
+  const at = frames.findIndex((f) => f.name === name);
+  $("position-name").textContent = at < 0 ? "" : name;
+  $("position-index").textContent = at < 0 ? "" : `${at + 1} of ${frames.length}`;
 }
 
 // ---------- Remembering settings ----------
@@ -395,14 +574,12 @@ async function open(name) {
   try {
     const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
     if (opening !== name) return;  // another frame was chosen meanwhile
-    current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent };
+    current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent, warning: data.warning, baseFound: data.baseFound };
     current.settings.hints ??= {};
     current.remembered = JSON.stringify(current.settings);
     syncControls();
     await refresh();
     status("");
-    $("setup-note").textContent = data.warning ?? "";
-    $("setup-note").hidden = !data.warning;
   } catch (e) {
     if (opening === name) $("message").textContent = `Could not open ${name}: ${e.message}`;
   } finally {
@@ -415,6 +592,8 @@ async function open(name) {
 
 function setBusy(busy) {
   $("reset").disabled = busy || !current;
+  const empty = !current && !opening;
+  for (const part of ["frame-tools", "develop", "setup"]) $(part).inert = empty;
   updateSaveButton();
   if (busy && !batch) $("export").disabled = true;
 }
@@ -422,30 +601,50 @@ function setBusy(busy) {
 // ---------- Controls ----------
 function fmt(id, v) {
   if (id === "straighten") return `${v > 0 ? "+" : ""}${v.toFixed(1)}°`;
+  if (id === "area-percent") return `${Math.round(v)}%`;
   return `${v > 0 ? "+" : ""}${Math.round(v)}`;
+}
+
+function showValue(id, v) {
+  const range = $(id), box = $(`${id}-val`);
+  range.value = v;
+  paintSlider(range);
+  if (document.activeElement !== box) box.value = fmt(id, Number(v));
+}
+
+// The filled part of a track runs from the center, or from the low end for a size.
+function paintSlider(range) {
+  const min = Number(range.min), max = Number(range.max);
+  const at = (Number(range.value) - min) / (max - min);
+  const origin = range.classList.contains("from-min") ? 0 : 0.5;
+  range.style.setProperty("--from", Math.min(at, origin));
+  range.style.setProperty("--to", Math.max(at, origin));
+}
+
+// What could spoil this frame's conversion stays in view with the controls that fix it.
+function showSetupNote() {
+  const guessing = !current.baseFound && !hints().base && !hints().base_rgb;
+  const note = current.warning ?? (guessing ? "No clear film found on this frame, so its colors may be off. Pick the film base, or match it across the roll." : "");
+  $("setup-note").textContent = note;
+  $("setup-note").hidden = !note;
 }
 
 function syncControls() {
   const a = adj();
-  for (const id of [...SLIDERS, "straighten"]) {
-    $(id).value = a[id];
-    document.querySelector(`output[for=${id}]`).textContent = fmt(id, a[id]);
-  }
+  for (const id of [...SLIDERS, "straighten"]) showValue(id, a[id]);
   for (const look of LOOKS) $(`look-${look}`).setAttribute("aria-pressed", String(a.look === look));
   const percent = hints().area_percent ?? current.defaultAreaPercent;
-  $("area-percent").value = percent;
-  document.querySelector("output[for=area-percent]").textContent = `${Math.round(percent)}%`;
+  showValue("area-percent", percent);
   $("flip").setAttribute("aria-pressed", String(a.flip_h));
   const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.area) ? "frame" : "draw";
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
   $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
   $("area-draw").setAttribute("aria-pressed", String(!!hints().analysis || tool === "area"));
   $("base-auto").setAttribute("aria-pressed", String(!hints().base && !hints().base_rgb));
-  $("base-roll").setAttribute("aria-pressed", String(!hints().base && !!hints().base_rgb));
+  $("roll-state").hidden = !!hints().base || !hints().base_rgb;
+  showSetupNote();
   $("base-draw").setAttribute("aria-pressed", String(!!hints().base || tool === "base"));
   $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
-  $("h-setup").textContent = `Setup: ${current.file}`;
-  $("h-setup").title = current.file;
 }
 
 const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a[k] - b[k]) < 1e-4);
@@ -480,6 +679,43 @@ function setAreaPercent(percent) {
 $("area-percent").addEventListener("input", (e) => setAreaPercent(Number(e.target.value)));
 $("area-percent").addEventListener("dblclick", () => setAreaPercent(null));
 
+// A value box drives its slider, so a typed number goes the same way as a drag.
+for (const id of [...SLIDERS, "straighten", "area-percent"]) {
+  const range = $(id), box = $(`${id}-val`);
+  const set = (v) => {
+    const clamped = Math.min(Number(range.max), Math.max(Number(range.min), v));
+    if (clamped === Number(range.value)) return;
+    range.value = clamped;
+    range.dispatchEvent(new Event("input"));
+  };
+  const typed = () => parseFloat(box.value.replace("−", "-").replace(/[^\d.+-]/g, ""));
+  const restore = () => { box.value = fmt(id, Number(range.value)); };
+  // The first click takes the whole value: without this, letting go of the mouse drops the
+  // selection in WebKit and typing lands beside the old number.
+  box.addEventListener("mousedown", (e) => {
+    if (document.activeElement !== box) { e.preventDefault(); box.focus(); }
+  });
+  box.addEventListener("focus", () => box.select());
+  box.addEventListener("blur", () => {
+    const v = typed();
+    if (!Number.isNaN(v)) set(v);
+    restore();
+  });
+  box.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") box.blur();
+    else if (e.key === "Escape") { restore(); box.blur(); }
+    else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const step = Number(range.step) * (e.shiftKey ? 10 : 1);
+      set(Number(range.value) + (e.key === "ArrowUp" ? step : -step));
+      restore();
+      box.select();
+    }
+  });
+}
+document.querySelectorAll("input[type=range]").forEach(paintSlider);
+
 // Mirror the image as it is shown now: with an odd quarter turn the stored
 // "mirror, then rotate" order needs the opposite rotation.
 $("flip").addEventListener("click", () => {
@@ -499,9 +735,31 @@ $("base-draw").addEventListener("click", () => setTool(tool === "base" ? null : 
 $("show-areas").addEventListener("click", () => setTool(tool === "show" ? null : "show"));
 $("area-auto").addEventListener("click", () => setHint("analysis", null));
 $("base-auto").addEventListener("click", () => setHint("base", null));
-$("base-roll").addEventListener("click", measureRoll);
+$("base-roll").addEventListener("click", openRollFlow);
 $("tool-done").addEventListener("click", () => setTool(null));
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tool) setTool(null); });
+document.addEventListener("keydown", (e) => {
+  if ($("roll-flow").open) return;
+  if (e.key === "Escape") {
+    if (tool) setTool(null);
+    showDetails(false);
+    return;
+  }
+  // ⌘S or Ctrl+S saves, and never stops a save already running.
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    e.preventDefault();
+    if (batch?.task !== "save" && !$("export").disabled) $("export").click();
+    return;
+  }
+  // Up and down walk the frames, unless a slider or text box has the keys.
+  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.target.matches("input[type=range], input[type=text]")) {
+    e.preventDefault();
+    const at = frames.findIndex((f) => f.name === (opening ?? current?.file));
+    const next = frames[e.key === "ArrowUp" ? Math.max(at - 1, 0) : Math.min(at + 1, frames.length - 1)];
+    if (next && next.name !== (opening ?? current?.file)) open(next.name);
+  }
+});
+// In the app, a right-click shouldn't offer a web page's Reload.
+if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text], #status, #status-more")) e.preventDefault(); });
 
 $("reset").addEventListener("click", () => {
   if (!current) return;
@@ -513,7 +771,7 @@ $("reset").addEventListener("click", () => {
 
 $("export").addEventListener("click", async () => {
   if (batch) {
-    api("/api/export/cancel", {}).catch(() => {});
+    if (batch.task === "save") api("/api/export/cancel", {}).catch(() => {});
     return;
   }
   const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
@@ -529,19 +787,188 @@ $("export").addEventListener("click", async () => {
   }
 });
 
-async function measureRoll() {
-  if (batch) return;
-  const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : frames.map((f) => f.name);
-  if (files.length < 2) { status("Tick at least two frames of the roll."); return; }
-  $("reveal").hidden = true;
+// ---------- Matching the film base across a roll ----------
+// Three steps, because this reaches past the frame on screen: say what will happen, read every
+// frame without changing anything, then let the user choose which readings count.
+let roll = null;  // { step, files, readings, ticked, voted }
+const SOURCE = { picked: "Your pick", detected: "Detected", unsure: "No clear film" };
+
+function rollFrames() {
+  const names = frames.map((f) => f.name);
+  return selected.size ? names.filter((n) => selected.has(n)) : names;
+}
+
+function openRollFlow() {
+  if (batch) { status("Wait for the current work to finish."); return; }
+  roll = { step: "intro", files: rollFrames() };
+  showRollFlow();
+  $("roll-flow").showModal();
+}
+
+function closeRollFlow() {
+  roll = null;
+  if ($("roll-flow").open) $("roll-flow").close();
+}
+
+function rollButtons(cancel, go, enabled = true) {
+  $("roll-cancel").textContent = cancel;
+  $("roll-go").hidden = !go;
+  $("roll-go").textContent = go ?? "";
+  $("roll-go").disabled = !enabled;
+}
+
+function showRollFlow() {
+  const body = $("roll-body");
+  const count = roll.files?.length ?? 0;
+  if (roll.step === "intro") {
+    const scope = selected.size ? `the ${count} ticked frame${count > 1 ? "s" : ""}` : `all ${count} frames in this folder`;
+    body.innerHTML = `<p>Frames from one roll have the same clear film, so they can share one film base. This helps when some scans don't show the film's edge.</p>
+      <p>Reversal reads the film base on <b></b>: your pick where a frame has one, otherwise the clear film it detects. Nothing changes yet. You then see each reading and choose which ones count.</p>
+      <p>Color curves and exposure stay each frame's own.</p>`;
+    body.querySelector("b").textContent = scope;
+    if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Tick at least two frames, or none to use the whole folder.</p>`);
+    rollButtons("Cancel", `Read ${count} frame${count === 1 ? "" : "s"}`, count >= 2);
+  } else if (roll.step === "reading" || roll.step === "applying") {
+    body.innerHTML = `<p id="roll-progress"></p><div class="progress"><div></div></div>`;
+    showRollProgress();
+    rollButtons("Stop", null);
+  } else {
+    showRollReview();
+  }
+}
+
+function showRollProgress() {
+  const progress = $("roll-progress");
+  if (!progress || !batch) return;
+  const verb = roll.step === "reading" ? "Reading the film base on frame" : "Preparing frame";
+  progress.textContent = `${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`;
+  progress.nextElementSibling.firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
+}
+
+// A rough look at a linear base color, so a stray one stands out.
+const chipColor = (rgb) => `rgb(${rgb.map((v) => Math.round(255 * Math.pow(v, 1 / 2.2))).join(" ")})`;
+
+function showRollReview() {
+  const body = $("roll-body");
+  const scroll = body.querySelector("#roll-table")?.scrollTop ?? 0;
+  const applied = roll.readings.filter((r) => r.source !== "picked");
+  const lost = roll.issues.length ? `<p class="warn" id="roll-issues"></p>` : "";
+  const noClear = roll.readings.every((r) => r.source === "unsure");
+  body.innerHTML = `<p>${noClear
+      ? `<span style="color:var(--warn)">No frame shows clear film.</span> Cancel, pick the film base on a frame that does, and start again.`
+      : "Ticked frames decide the roll's film base. Untick any that look wrong; a good one or two is enough."}</p>
+    ${lost}<div id="roll-table"></div><div id="roll-result"></div>`;
+  if (lost) body.querySelector("#roll-issues").textContent = roll.issues.map((i) => `${i.file}: ${i.message}`).join("\n");
+  const table = body.querySelector("#roll-table");
+  roll.readings.forEach((r, i) => {
+    const row = document.createElement("label");
+    row.className = "roll-row";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = roll.ticked.has(r.file);
+    box.addEventListener("change", () => {
+      box.checked ? roll.ticked.add(r.file) : roll.ticked.delete(r.file);
+      voteRoll();
+    });
+    const chip = document.createElement("span");
+    chip.className = "base-chip";
+    chip.style.background = chipColor(r.base_rgb);
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = r.file;
+    const note = document.createElement("span");
+    const differs = roll.voted?.differs[r.file];
+    note.className = `note${r.source === "unsure" || differs ? " warn" : ""}`;
+    note.textContent = differs ? `${SOURCE[r.source]}, differs` : SOURCE[r.source];
+    if (differs) note.title = "This reading is far from the roll's. It may be misread, or from different film.";
+    row.append(box, chip, name, note);
+    table.append(row);
+  });
+  table.scrollTop = scroll;
+  const result = body.querySelector("#roll-result");
+  const voters = roll.ticked.size;
+  if (roll.voted?.base_rgb && voters) {
+    const chip = document.createElement("span");
+    chip.className = "base-chip";
+    chip.style.background = chipColor(roll.voted.base_rgb);
+    const keeps = roll.readings.length - applied.length;
+    const text = document.createElement("span");
+    text.textContent = `Film base from ${voters} frame${voters > 1 ? "s" : ""}.${keeps ? ` ${keeps} with a pick keep${keeps > 1 ? "" : "s"} it.` : ""}`;
+    result.append(chip, text);
+  } else {
+    result.textContent = "Tick at least one frame.";
+  }
+  rollButtons("Cancel", `Use on ${applied.length} frame${applied.length === 1 ? "" : "s"}`, voters > 0 && applied.length > 0);
+}
+
+// The median and what strays from it come from the engine, like every other measurement.
+async function voteRoll() {
+  const review = roll;
+  const voters = review.readings.filter((r) => review.ticked.has(r.file));
+  if (!voters.length) { review.voted = null; showRollReview(); return; }
+  try {
+    const { base_rgb, differs } = await (await api("/api/roll/vote", { bases: voters.map((r) => r.base_rgb), readings: review.readings.map((r) => r.base_rgb) })).json();
+    if (roll !== review) return;
+    review.voted = { base_rgb, differs: Object.fromEntries(review.readings.map((r, i) => [r.file, differs[i]])) };
+    showRollReview();
+  } catch (e) {
+    closeRollFlow();
+    status(`Could not measure the roll: ${e.message}`);
+  }
+}
+
+async function startRollTask(step, url, body) {
+  roll.step = step;
+  showRollFlow();
   try {
     await rememberSettings();
-    batch = await (await api("/api/roll", { files })).json();
+    batch = await (await api(url, body)).json();
     updateSaveButton();
     followBatch();
   } catch (e) {
+    closeRollFlow();
     status(`Could not measure the roll: ${e.message}`);
   }
+}
+
+$("roll-go").addEventListener("click", () => {
+  if (roll?.step === "intro") {
+    $("reveal").hidden = true;
+    startRollTask("reading", "/api/roll", { files: roll.files });
+  } else if (roll?.step === "review") {
+    const bases = roll.readings.filter((r) => roll.ticked.has(r.file)).map((r) => r.base_rgb);
+    startRollTask("applying", "/api/roll/apply", { files: roll.readings.map((r) => r.file), bases });
+  }
+});
+function cancelRollFlow() {
+  if (roll?.step === "reading" || roll?.step === "applying") {
+    $("roll-cancel").disabled = true;
+    $("roll-cancel").textContent = "Stopping…";
+    api("/api/export/cancel", {}).catch(() => {});
+  } else {
+    closeRollFlow();
+  }
+}
+$("roll-cancel").addEventListener("click", cancelRollFlow);
+// Escape means the same as the button beside the action.
+$("roll-flow").addEventListener("cancel", (e) => { e.preventDefault(); cancelRollFlow(); });
+
+async function rollReadingsDone(finished) {
+  $("roll-cancel").disabled = false;
+  if (finished.canceled) {
+    closeRollFlow();
+    status("Stopped. No frame changed.");
+    return;
+  }
+  const readings = await (await api("/api/roll/readings")).json();
+  // Frames in list order, whichever finished first; a frame with no clear film gets no say.
+  const order = frames.map((f) => f.name);
+  readings.sort((a, b) => order.indexOf(a.file) - order.indexOf(b.file));
+  roll ??= {};
+  Object.assign(roll, { step: "review", readings, issues: finished.issues, ticked: new Set(readings.filter((r) => r.source !== "unsure").map((r) => r.file)), voted: null });
+  showRollFlow();
+  if (!$("roll-flow").open) $("roll-flow").showModal();
+  voteRoll();
 }
 
 async function followBatch() {
@@ -553,15 +980,35 @@ async function followBatch() {
     status(`Lost track of saving: ${e.message}`);
     return;
   }
+  const inRoll = batch.task === "roll" || batch.task === "roll-read";
+  // Reloaded during a roll: the flow picks up where it was.
+  if (inRoll && !roll) {
+    roll = { step: batch.task === "roll" ? "applying" : "reading" };
+    showRollFlow();
+    if (!$("roll-flow").open) $("roll-flow").showModal();
+  }
   if (batch.running) {
-    const verb = batch.task === "roll" ? "Measuring" : "Saving";
-    status(`${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`);
+    if (inRoll) {
+      showRollProgress();
+    } else {
+      status(`Saving ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`);
+      $("progress").firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
+    }
     showFrameStates();
     setTimeout(followBatch, 150);
     return;
   }
   const finished = batch;
   batch = null;
+  if (finished.task === "roll-read") {
+    updateSaveButton();
+    rollReadingsDone(finished).catch((e) => {
+      closeRollFlow();
+      status(`Could not measure the roll: ${e.message}`);
+    });
+    return;
+  }
+  if (inRoll) { $("roll-cancel").disabled = false; closeRollFlow(); }
   await loadFiles();
   if (finished.task === "roll") {
     await reopenAfterRoll();
@@ -590,7 +1037,7 @@ async function reopenAfterRoll() {
 }
 
 function rollSummary({ done, total, issues, canceled }) {
-  const head = canceled ? "Stopped; no frame changed."
+  const head = canceled ? "Stopped. No frame changed."
     : issues.length ? "The roll's film base didn't reach every frame."
     : `${total} frames now share one film base. Detect on a frame goes back to its own.`;
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
@@ -616,9 +1063,9 @@ async function setHint(key, rect) {
     const estimate = await (await api("/api/estimate", { file, hints: hints() })).json();
     if (current?.file !== file) return;
     current.settings.estimate = estimate;
-    $("setup-note").hidden = true;
+    current.warning = null;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
-    status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
+    status(key === "base" ? (rect ? "Film base set from your selection." : "Film base now read from this frame.")
                           : (rect ? "Image area set from your selection." : "Measuring the center of the scan."));
   } catch (e) {
     if (current?.file === file) status(`Could not measure: ${e.message}`);
@@ -772,16 +1219,19 @@ function histogram(img, storedClipped) {
   });
   g.globalCompositeOperation = "source-over";
   const pct = (v) => `${(100 * v / n).toFixed(v / n < 0.01 ? 2 : 1)}%`;
-  $("clip-low").textContent = `Shadows clipped ${pct(low)}`;
-  $("clip-high").textContent = `Highlights clipped ${pct(high)}`;
+  $("clip-low").textContent = `Shadows ${pct(low)}`;
+  $("clip-high").textContent = `Highlights ${pct(high)}`;
   $("clip-low").classList.toggle("over", low / n > 0.005);
   $("clip-high").classList.toggle("over", high / n > 0.005);
   $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
   $("stored").hidden = storedClipped < 0.0005;
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
+  $("stored").title = $("stored").textContent;
 }
 
-$("choose-folder").hidden = !shell;
+$("choose-folder").disabled = !shell;
+updateSaveButton();
+setBusy(false);
 $("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
 loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });

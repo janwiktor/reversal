@@ -10,8 +10,13 @@
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
 //! POST /api/export/cancel                  frames not started yet don't start
-//! POST /api/roll     {files}               measure one film base across frames and use it on
-//!                                          each; runs like an export, with the same progress
+//! POST /api/roll     {files}               read each frame's film base, changing nothing; runs
+//!                                          like an export, with the same progress
+//! GET  /api/roll/readings                  what that read
+//! POST /api/roll/vote {bases, readings}    the roll's base from `bases`, and which readings
+//!                                          stray from it
+//! POST /api/roll/apply {files, bases}      use the base from `bases` on `files`; nothing is
+//!                                          written unless all of them can be read
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -28,6 +33,7 @@ use serde_json::json;
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::batch::{Batch, Done};
+use crate::folder::RollReading;
 use crate::folder::{saved_settings, Folder};
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -46,6 +52,7 @@ struct State {
     folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
     batch: Batch,
+    roll_readings: Arc<Mutex<Vec<RollReading>>>,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +75,20 @@ struct SaveSettings {
 #[derive(Deserialize)]
 struct ExportJob {
     files: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct RollVote {
+    /// The frames that count.
+    bases: Vec<[f32; 3]>,
+    /// All frames' readings, each compared with the result.
+    readings: Vec<[f32; 3]>,
+}
+
+#[derive(Deserialize)]
+struct RollApply {
+    files: Vec<String>,
+    bases: Vec<[f32; 3]>,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +126,7 @@ pub fn serve(
         folder: Arc::new(Folder::new(dir)),
         cache: HashMap::new(),
         batch: Batch::default(),
+        roll_readings: Arc::default(),
     };
     for mut req in server.incoming_requests() {
         let resp = state
@@ -233,7 +255,28 @@ impl State {
             }
             (Method::Post, "/api/roll") => {
                 let job: ExportJob = read_body(req)?;
-                self.measure_roll(job.files)
+                self.read_roll(job.files)
+            }
+            (Method::Get, "/api/roll/readings") => {
+                let readings = self.roll_readings.lock().expect("no panics while locked");
+                Ok(json_resp(200, &json!(*readings)))
+            }
+            (Method::Post, "/api/roll/vote") => {
+                let vote: RollVote = read_body(req)?;
+                let base_rgb = voted_base(&vote.bases)?;
+                let differs: Vec<bool> = vote
+                    .readings
+                    .iter()
+                    .map(|&base| invert::differs_from_roll(base, base_rgb))
+                    .collect();
+                Ok(json_resp(
+                    200,
+                    &json!({ "base_rgb": base_rgb, "differs": differs }),
+                ))
+            }
+            (Method::Post, "/api/roll/apply") => {
+                let job: RollApply = read_body(req)?;
+                self.apply_roll(job)
             }
             (Method::Get, "/api/export/status") => Ok(json_resp(200, &self.batch.status())),
             (Method::Post, "/api/export/cancel") => {
@@ -286,6 +329,7 @@ impl State {
         let sidecar = std::fs::read(self.folder.sidecar(file));
         let loaded = self.ensure_loaded(file)?;
         let auto = loaded.auto.clone();
+        let base_found = invert::detect_base(&loaded.small).found;
         let (current, warning) = match sidecar {
             Ok(bytes) => saved_settings(&bytes, &auto, &loaded.small),
             Err(_) => (auto.clone(), None),
@@ -297,6 +341,7 @@ impl State {
                 "settings": current,
                 "warning": warning,
                 "defaultAreaPercent": invert::DEFAULT_AREA_PERCENT,
+                "baseFound": base_found,
             }),
         ))
     }
@@ -363,24 +408,58 @@ impl State {
 }
 
 impl State {
-    fn measure_roll(&self, files: Vec<String>) -> Handled {
+    fn read_roll(&self, files: Vec<String>) -> Handled {
         if files.len() < 2 {
             return Err((400, "a roll needs at least two frames".to_string()));
         }
         for file in &files {
             self.folder.resolve(file)?;
         }
-        let measured = Arc::new(Mutex::new(Vec::with_capacity(files.len())));
-        let total = files.len();
-        let (folder, collected) = (self.folder.clone(), measured.clone());
+        if self.batch.is_running() {
+            return Err((409, "still saving the previous DNGs".to_string()));
+        }
+        self.roll_readings
+            .lock()
+            .expect("no panics while locked")
+            .clear();
+        let (folder, readings) = (self.folder.clone(), self.roll_readings.clone());
+        let started = self.batch.start_then(
+            "roll-read",
+            files,
+            export_workers(),
+            move |file| {
+                let reading = folder.read_roll_base(file)?;
+                readings
+                    .lock()
+                    .expect("no panics while locked")
+                    .push(reading);
+                Ok(Done {
+                    path: String::new(),
+                    warning: None,
+                })
+            },
+            || None,
+        );
+        started.map_err(|e| (409, e))?;
+        Ok(json_resp(200, &self.batch.status()))
+    }
+
+    fn apply_roll(&self, job: RollApply) -> Handled {
+        let base_rgb = voted_base(&job.bases)?;
+        for file in &job.files {
+            self.folder.resolve(file)?;
+        }
+        let prepared = Arc::new(Mutex::new(Vec::with_capacity(job.files.len())));
+        let total = job.files.len();
+        let (folder, collected) = (self.folder.clone(), prepared.clone());
         let apply_folder = self.folder.clone();
         self.batch
             .start_then(
                 "roll",
-                files,
+                job.files,
                 1,
                 move |file| {
-                    let frame = folder.measure_for_roll(file)?;
+                    let frame = folder.prepare_roll_frame(file)?;
                     collected
                         .lock()
                         .expect("no panics while locked")
@@ -392,18 +471,26 @@ impl State {
                 },
                 move || {
                     let frames =
-                        std::mem::take(&mut *measured.lock().expect("no panics while locked"));
+                        std::mem::take(&mut *prepared.lock().expect("no panics while locked"));
                     if frames.len() < total {
                         return Some(
                             "Not every frame could be read, so nothing changed.".to_string(),
                         );
                     }
-                    apply_folder.apply_roll_base(&frames).err()
+                    apply_folder.apply_roll_base(&frames, base_rgb).err()
                 },
             )
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
     }
+}
+
+/// The roll's film base from the frames chosen to count.
+fn voted_base(bases: &[[f32; 3]]) -> Result<[f32; 3], (u16, String)> {
+    if bases.is_empty() {
+        return Err((400, "choose at least one frame to measure from".to_string()));
+    }
+    Ok(invert::roll_base(bases))
 }
 
 /// Frames saved at once. Each also uses all cores while converting, and holds a few hundred MB.

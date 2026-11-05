@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use reversal_core::dng::Compression;
 use reversal_core::image::Rgb32;
 use reversal_core::invert::{self, Adjust, Hints, Settings, MODEL_VERSION};
+use serde::Serialize;
 
 use crate::pipeline;
 
@@ -26,7 +27,16 @@ pub struct Folder {
 pub struct RollFrame {
     file: String,
     small: Rgb32,
-    base_rgb: [f32; 3],
+}
+
+/// What one frame's film base reads, for the user to review before a roll uses it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct RollReading {
+    pub file: String,
+    pub base_rgb: [f32; 3],
+    /// Where it came from: "picked" by hand, "detected" on clear film, or "unsure" if no clear
+    /// film was found.
+    pub source: &'static str,
 }
 
 pub struct FrameState {
@@ -214,31 +224,49 @@ impl Folder {
         reversal_core::write_atomic(&self.sidecar(file), &settings_json(settings))
     }
 
-    /// What a frame adds to a roll measurement: its analysis image and the film base its own
-    /// hints give, leaving out any earlier roll base.
-    pub fn measure_for_roll(&self, file: &str) -> Result<RollFrame, String> {
+    fn roll_image(&self, file: &str) -> Result<Rgb32, String> {
         let input = self.resolve(file).map_err(|(_, message)| message)?;
         let scan = reversal_core::decode::decode(&input).map_err(|e| e.to_string())?;
-        let small = invert::analysis_image(&scan);
+        Ok(invert::analysis_image(&scan))
+    }
+
+    /// The film base a frame gives on its own: the one picked on it, or the one detected.
+    /// Any earlier roll base is left out. Changes nothing.
+    pub fn read_roll_base(&self, file: &str) -> Result<RollReading, String> {
+        let small = self.roll_image(file)?;
         let sidecar = std::fs::read(self.sidecar(file)).ok();
         let (settings, _) = settings_from(sidecar.as_deref(), &small);
-        let hints = Hints {
-            base_rgb: None,
-            ..settings.hints
+        let reading = |base_rgb, source| RollReading {
+            file: file.to_string(),
+            base_rgb,
+            source,
         };
-        let base_rgb = invert::estimate_on(&small, &hints).base_rgb;
+        if settings.hints.base.is_some() {
+            let hints = Hints {
+                base_rgb: None,
+                ..settings.hints
+            };
+            return Ok(reading(
+                invert::estimate_on(&small, &hints).base_rgb,
+                "picked",
+            ));
+        }
+        let detected = invert::detect_base(&small);
+        let source = if detected.found { "detected" } else { "unsure" };
+        Ok(reading(detected.rgb, source))
+    }
+
+    /// What applying a roll base to a frame needs, read before anything is written.
+    pub fn prepare_roll_frame(&self, file: &str) -> Result<RollFrame, String> {
         Ok(RollFrame {
             file: file.to_string(),
-            small,
-            base_rgb,
+            small: self.roll_image(file)?,
         })
     }
 
-    /// Give frames the median of their bases, keeping everything else the user chose, also
-    /// what changed while measuring. A base picked by hand on a frame stays.
-    pub fn apply_roll_base(&self, frames: &[RollFrame]) -> Result<(), String> {
-        let bases: Vec<[f32; 3]> = frames.iter().map(|f| f.base_rgb).collect();
-        let base_rgb = invert::roll_base(&bases);
+    /// Give frames one film base, keeping everything else the user chose, also what changed
+    /// while preparing. A base picked by hand on a frame stays.
+    pub fn apply_roll_base(&self, frames: &[RollFrame], base_rgb: [f32; 3]) -> Result<(), String> {
         for frame in frames {
             let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
             let sidecar = std::fs::read(self.sidecar(&frame.file)).ok();
