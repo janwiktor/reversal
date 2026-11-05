@@ -1,22 +1,44 @@
-# Reversal
+<p align="center">
+  <img src="docs/images/icon.png" width="128" height="128" alt="Reversal app icon">
+</p>
 
-Minimal converter of film negative scans into DNG.
+<h1 align="center">Reversal</h1>
 
-Reversal takes a camera scan of a negative and writes a positive, losslessly compressed DNG. The result opens in a raw editor and edits like a normal photo: sliders work the right way round, and no plugin or profile needs to be installed to see it correctly.
+<p align="center">Film negative scans in, positive DNGs out. Pre-alpha.</p>
+
+Reversal takes a RAW scan of a negative and writes a positive, losslessly compressed DNG. Open it in a RAW editor of your choice, on desktop or mobile: sliders work the right way round, with no plugin or color profile to install. Your edits stay on the DNG, with no need to export massive TIFFs or lossy JPEGs.
+
+![Reversal showing a converted color negative, with a list of frames on the left and tone and color controls on the right](docs/images/screenshot.webp)
+
+## Status
+
+Reversal is pre-alpha, so expect rough edges and changes.
+
+- **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI.
+- **Film:** color negative only. Black and white and slide film aren't handled yet.
+- **Cameras:** limited testing, on files from a single DSLR (Nikon D5100, NEF and DNG) and one light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
+- **Editors:** DNG rendering is benchmarked against Adobe Camera Raw only. Other tools may show the same file differently.
+
+### What's next
+
+- Testing on files from more cameras and light sources, and on pixel shift files
+- [Black and white negative conversion](https://github.com/janwiktor/reversal/issues/14)
+- Support for scanner files
+- [Rendering correctness in other tools](https://github.com/janwiktor/reversal/issues/13)
+
+More in [GitHub issues](https://github.com/janwiktor/reversal/issues).
 
 ## How it works
 
-1. **Reads the raw scan** through LibRaw, as linear camera data with no color rendering applied.
-2. **Inverts in density.** It reads the film base from the unexposed edge of the film and finds how gray runs through the dye layers in each frame, so neutrals stay neutral from shadows to highlights. Color and exposure are measured on the center of the scan (85% of each side by default), which stays clear of the holder and rebate; you can change the size or draw the area.
-3. **Writes a scene-linear positive** as a 16-bit LinearRaw DNG in linear Rec.2020, with spare highlight range that a raw editor can recover.
+1. **Reads the RAW scan** through LibRaw, as linear camera data with no color rendering applied.
+2. **Inverts in density.** It reads the film base from the unexposed edge of the film, then finds how gray runs through the dye layers in each frame, so neutrals stay neutral from shadows to highlights. Color and exposure are measured on the center of the scan, 85% of each side by default, to stay clear of the holder and rebate. You can change the size or draw the area yourself.
+3. **Writes a scene-linear positive:** a 16-bit LinearRaw DNG in linear Rec.2020, with spare highlight range that a RAW editor can recover.
 
 Your source files are never changed. Each DNG stores its conversion settings in its metadata, and the web UI also saves them in a settings file next to the DNG, so a frame reopens as you left it.
 
 ## Install
 
-The Mac app needs Apple Silicon and macOS 13 or later. It isn't notarized yet, so the disk image includes the steps to open it the first time.
-
-To build from source on macOS with Homebrew:
+There are no prebuilt downloads yet, so build from source. On macOS with Homebrew:
 
 ```bash
 brew install rustup libraw pkgconf
@@ -32,19 +54,35 @@ cargo build --release
 
 If `cargo` isn't found, add `/opt/homebrew/opt/rustup/bin` to your `PATH`.
 
+### Mac app
+
+The Mac app needs Apple Silicon and macOS 13 or later. To build it you also need Xcode:
+
+```bash
+packaging/macos/build.sh
+```
+
+This writes a disk image to `dist/`. The app isn't notarized yet, so the disk image includes the steps to open it the first time.
+
 ## Use
 
-In the app, choose a folder of scans. From the command line, open the web UI on a folder; it runs locally at http://127.0.0.1:8787. Both save DNGs to a `positives` folder inside that folder.
+In the Mac app, choose a folder of scans. Without the app, open the web UI on a folder; it runs locally at http://127.0.0.1:8787.
 
 ```bash
 ./target/release/reversal ui path/to/scans
 ```
 
+Both save DNGs to a `positives` folder inside the folder you chose.
+
 Each frame remembers its settings as you change them. Tick several frames to save them together, each with its own settings; frames you haven't touched get the automatic conversion.
 
-Frames of one roll can share a film base: choose Match film base under Setup, review what each frame reads, and decide which frames count; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Color curves and exposure stay each frame's own.
+The centered measuring area doesn't suit full film strips: for those, draw the area and crop to it.
 
-Or convert from the command line:
+### Matching a roll
+
+Frames of one roll can share a film base. Choose Match film base under Setup, review what each frame reads, and decide which frames count; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Color curves and exposure stay each frame's own.
+
+### Command line
 
 ```bash
 ./target/release/reversal convert scan.NEF --flip --rotate 3 --crop-area
@@ -64,16 +102,7 @@ Or convert from the command line:
 | `--compression` | `ljpeg` (default) or `none` |
 | `-o` | Output file or folder; the default is `<name>-positive.dng` next to the input |
 
-To build the Mac app, run `packaging/macos/build.sh`, which writes a disk image to `dist/`. It builds LibRaw from source and needs Rust, pkgconf and Xcode.
-
-## Status
-
-Early and in active development.
-
-- Only tested with Nikon D5100 NEF and DNG scans of color negative film. Other cameras that LibRaw reads should open, but the color correction was fitted to this camera and one light source.
-- Color negative only. Black and white and slide film aren't handled yet.
-- The centered image area doesn't suit full film strips, so draw the area and crop there. Film-stock presets aren't there yet.
-- Camera EXIF isn't copied to the DNG.
+Camera EXIF isn't copied to the DNG yet.
 
 ## Development
 
@@ -91,4 +120,4 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 
 This product includes DNG technology under license by Adobe.
 
-Raw decoding uses [LibRaw](https://www.libraw.org/), linked as a system library.
+RAW decoding uses [LibRaw](https://www.libraw.org/), linked as a system library.
