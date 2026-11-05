@@ -19,6 +19,9 @@ const BLACKS_RANGE: f32 = 0.12;
 const BUMP_RANGE: f32 = 0.9;
 /// Saturation the Vivid profile adds, in its look table.
 const VIVID_SATURATION: f32 = 1.15;
+/// Display-linear value where a raw editor's highlight roll-off starts. Fitted to an
+/// editor's rendering of a Neutral frame.
+const ROLLOFF_KNEE: f32 = 0.2;
 
 /// Rendering styles carried as DNG profiles; a raw editor can switch between them.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,7 +106,7 @@ fn shoulder(l: f32, amount: f32) -> f32 {
     }
 }
 
-/// Exposure the profile adds to `BaselineExposure`: the curve then sees the whole stored
+/// Exposure the profile adds to the standard baseline: the curve then sees the whole stored
 /// range instead of only what reaches display white.
 fn exposure_offset(look: Look, tone: Tone) -> f32 {
     if white_amount(look, tone) < 0.0 {
@@ -168,23 +171,46 @@ fn srgb_encode(v: f32) -> f32 {
     }
 }
 
+/// Roll-off a raw editor applies to data above white when a profile's curve leaves it there:
+/// linear up to the knee, then an exponential that meets it with equal slope and approaches 1.
+fn highlight_rolloff(l: f32) -> f32 {
+    if l <= ROLLOFF_KNEE {
+        l
+    } else {
+        let range = 1.0 - ROLLOFF_KNEE;
+        ROLLOFF_KNEE + range * (1.0 - (-(l - ROLLOFF_KNEE) / range).exp())
+    }
+}
+
 /// Render a positive (frame white = 1) to 8-bit sRGB as a raw editor would open it under
 /// `profile`, interleaved. The curve applies in ProPhoto, the space raw editors use.
 pub fn to_srgb8(img: &Rgb32, profile: &dng::Profile) -> Vec<u8> {
     let to_prophoto = color::rec2020_to_prophoto();
     let to_srgb = color::prophoto_to_srgb();
     let lift = dng::DISPLAY_LIFT * 2f32.powf(profile.exposure_offset);
-    // Lookup for the curve, fine enough for curves steep near black.
+    // A negative offset already brings the whole stored range under the curve.
+    let rolls_off = profile.exposure_offset >= 0.0;
+    // Lookup over the stored range, spaced by square root to stay fine for curves steep
+    // near black.
     const N: usize = 16384;
     let lut: Vec<f32> = (0..N)
-        .map(|i| interp(&profile.tone_curve, i as f32 / (N - 1) as f32))
+        .map(|i| {
+            let t = i as f32 / (N - 1) as f32;
+            let x = t * t * STORED_REACH;
+            interp(
+                &profile.tone_curve,
+                if rolls_off { highlight_rolloff(x) } else { x },
+            )
+        })
         .collect();
+    let tone = |v: f32| {
+        let t = (v / STORED_REACH).clamp(0.0, 1.0).sqrt();
+        lut[(t * (N - 1) as f32 + 0.5) as usize]
+    };
     img.pixels()
         .flat_map(|p| {
             let p = invert::saturate(p.map(|v| v * lift), profile.saturation);
-            let p = color::apply(&to_prophoto, p);
-            let toned = p.map(|v| lut[(v.clamp(0.0, 1.0) * (N - 1) as f32) as usize]);
-            let s = color::apply(&to_srgb, toned);
+            let s = color::apply(&to_srgb, color::apply(&to_prophoto, p).map(tone));
             s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8)
         })
         .collect()
@@ -340,22 +366,53 @@ mod tests {
         assert!(spread(px(Look::Vivid)) > spread(px(Look::Flat)));
     }
 
-    #[test]
-    fn previews_keep_neutrals_on_the_curve() {
-        let p = profile(Look::Neutral, Tone::default());
-        for grey in [0.05, 0.3, 0.8] {
-            let img = Rgb32 {
-                width: 1,
-                height: 1,
-                data: vec![grey; 3],
-            };
-            let out = to_srgb8(&img, &p);
-            let want = srgb_encode(interp(&p.tone_curve, grey * dng::DISPLAY_LIFT)) * 255.0;
-            assert!(
-                out.iter().all(|&v| (v as f32 - want).abs() <= 2.0),
-                "{grey}"
-            );
+    fn grey(v: f32) -> Rgb32 {
+        Rgb32 {
+            width: 1,
+            height: 1,
+            data: vec![v; 3],
         }
+    }
+
+    #[test]
+    fn rolloff_is_linear_to_the_knee_then_keeps_the_stored_range_below_white() {
+        assert_eq!(highlight_rolloff(ROLLOFF_KNEE / 2.0), ROLLOFF_KNEE / 2.0);
+        let e = 1e-3;
+        let slope = (highlight_rolloff(ROLLOFF_KNEE + e) - ROLLOFF_KNEE) / e;
+        assert!((slope - 1.0).abs() < 2e-2);
+        let top = highlight_rolloff(STORED_REACH);
+        assert!(top > 0.98 && top < 1.0);
+        assert!(highlight_rolloff(1.5) > highlight_rolloff(1.0));
+    }
+
+    #[test]
+    fn previews_keep_neutrals_on_the_rolled_off_curve() {
+        let p = profile(Look::Neutral, Tone::default());
+        for v in [0.05, 0.3, 0.8] {
+            let out = to_srgb8(&grey(v), &p);
+            let x = highlight_rolloff(v * dng::DISPLAY_LIFT);
+            let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
+            assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0), "{v}");
+        }
+    }
+
+    #[test]
+    fn previews_keep_detail_above_white() {
+        let p = profile(Look::Neutral, Tone::default());
+        let g = |v| to_srgb8(&grey(v), &p)[1];
+        assert!(g(2.0) > g(1.0) + 5);
+        assert!(g(2.0) < 255);
+    }
+
+    #[test]
+    fn profiles_with_the_whole_range_under_the_curve_dont_roll_off() {
+        let p = profile(Look::Flat, Tone::default());
+        assert!(p.exposure_offset < 0.0);
+        let v = 3.0;
+        let x = v * dng::DISPLAY_LIFT * 2f32.powf(p.exposure_offset);
+        let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
+        let out = to_srgb8(&grey(v), &p);
+        assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0));
     }
 
     #[test]
