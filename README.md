@@ -64,7 +64,7 @@ Or convert from the command line:
 | `--compression` | `ljpeg` (default) or `none` |
 | `-o` | Output file or folder; the default is `<name>-positive.dng` next to the input |
 
-To build the Mac app, run `packaging/macos/build.sh`, which writes a disk image to `dist/`. It builds LibRaw from source and needs Rust, pkgconf and the Xcode command line tools.
+To build the Mac app, run `packaging/macos/build.sh`, which writes a disk image to `dist/`. It builds LibRaw from source and needs Rust, pkgconf and Xcode.
 
 ## Status
 

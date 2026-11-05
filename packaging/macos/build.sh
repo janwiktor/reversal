@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds dist/Reversal-<version>-arm64.dmg: an ad hoc signed app with LibRaw built in.
-# Needs Rust, pkgconf and the Xcode command line tools; no Homebrew libraries end up in the app.
+# Needs Rust, pkgconf and Xcode (for the icon); no Homebrew libraries end up in the app.
 set -euo pipefail
 
 LIBRAW_VERSION=0.22.3
@@ -47,6 +47,9 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licenses"
 swiftc -O -target "arm64-apple-macos$MACOS_TARGET" "$here/main.swift" -o "$app/Contents/MacOS/Reversal"
 cp "$build/target/release/reversal" "$app/Contents/MacOS/reversal-engine"
 sed "s/@VERSION@/$version/" "$here/Info.plist" >"$app/Contents/Info.plist"
+DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" xcrun actool "$here/Reversal.icon" \
+  --compile "$app/Contents/Resources" --app-icon Reversal --platform macosx \
+  --minimum-deployment-target "$MACOS_TARGET" --output-partial-info-plist "$build/icon.plist" >/dev/null
 
 # Licenses of what's inside.
 licenses="$app/Contents/Resources/Licenses"
