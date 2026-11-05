@@ -94,7 +94,7 @@ struct ConvertArgs {
     /// Fine rotation in degrees, clockwise positive.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     straighten: f32,
-    /// Size of the centerd image area that color and exposure are measured on, in percent.
+    /// Size of the centered image area that color and exposure are measured on, in percent.
     #[arg(long, default_value_t = invert::DEFAULT_AREA_PERCENT)]
     area_percent: f32,
     /// Crop to the image area (default keeps the whole scan).

@@ -58,7 +58,7 @@ Or convert from the command line:
 | `--temperature`, `--tint`, `--saturation` | Color, −100 to +100 |
 | `--flip` | Mirror left-right, for scans made emulsion side up |
 | `--rotate`, `--straighten` | Quarter turns (0–3), and fine rotation in degrees |
-| `--area-percent` | Size of the centerd area that color and exposure are measured on, default 85 |
+| `--area-percent` | Size of the centered area that color and exposure are measured on, default 85 |
 | `--crop-area` | Crop to that area; the default keeps the whole scan |
 | `--roll` | Measure one film base across the inputs and use it on each |
 | `--compression` | `ljpeg` (default) or `none` |
@@ -72,7 +72,7 @@ Early and in active development.
 
 - Only tested with Nikon D5100 NEF and DNG scans of color negative film. Other cameras that LibRaw reads should open, but the color correction was fitted to this camera and one light source.
 - Color negative only. Black and white and slide film aren't handled yet.
-- The centerd image area doesn't suit full film strips, so draw the area and crop there. Film-stock presets aren't there yet.
+- The centered image area doesn't suit full film strips, so draw the area and crop there. Film-stock presets aren't there yet.
 - Camera EXIF isn't copied to the DNG.
 
 ## Development

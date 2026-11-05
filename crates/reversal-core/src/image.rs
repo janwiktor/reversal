@@ -55,8 +55,8 @@ impl NRect {
         y1: 1.0,
     };
 
-    /// Centerd rectangle covering `share` (0.1…1) of each side.
-    pub fn centerd(share: f32) -> NRect {
+    /// Centered rectangle covering `share` (0.1…1) of each side.
+    pub fn centered(share: f32) -> NRect {
         let margin = (1.0 - share.clamp(0.1, 1.0)) / 2.0;
         NRect {
             x0: margin,

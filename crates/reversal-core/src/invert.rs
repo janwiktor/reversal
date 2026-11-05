@@ -36,7 +36,7 @@ const LOG10_2: f32 = std::f32::consts::LOG10_2;
 
 /// Pixels at or above this are light through holes or gaps, not film.
 const CLIPPED: f32 = 0.9;
-/// Share of each side of the scan, centerd, measured when nobody draws an area: clear of
+/// Share of each side of the scan, centered, measured when nobody draws an area: clear of
 /// holders and rebates on a framed scan. Tested at 70–95% against reference scans; 95%
 /// takes in holders.
 pub const DEFAULT_AREA_PERCENT: f32 = 85.0;
@@ -77,7 +77,7 @@ const TOE_FLOOR: f32 = -0.3;
 pub struct Hints {
     /// Image area used to measure density range and balance.
     pub analysis: Option<NRect>,
-    /// Size of the centerd image area when `analysis` isn't drawn, in percent of each side.
+    /// Size of the centered image area when `analysis` isn't drawn, in percent of each side.
     pub area_percent: Option<f32>,
     /// Unexposed film (rebate) to read the film base from.
     pub base: Option<NRect>,
@@ -509,7 +509,7 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         }
     };
     let area = hints.analysis.unwrap_or_else(|| {
-        NRect::centerd(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
+        NRect::centered(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
     });
 
     let density: Vec<[f32; 3]> = small
@@ -767,14 +767,14 @@ mod tests {
         for (got, want) in e.base_rgb.iter().zip(BASE) {
             assert!((got - want).abs() < 0.01, "base {:?}", e.base_rgb);
         }
-        assert_eq!(e.area, NRect::centerd(DEFAULT_AREA_PERCENT / 100.0));
+        assert_eq!(e.area, NRect::centered(DEFAULT_AREA_PERCENT / 100.0));
         let hints = Hints {
             area_percent: Some(60.0),
             ..Hints::default()
         };
         assert_eq!(
             estimate(&synthetic_scan(), &hints).area,
-            NRect::centerd(0.6)
+            NRect::centered(0.6)
         );
     }
 
