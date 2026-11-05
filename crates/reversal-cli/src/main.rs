@@ -160,14 +160,20 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         ..Hints::default()
     };
     let base_rgb = if args.roll {
-        let bases = args
+        let readings = args
             .inputs
             .iter()
             .map(|input| {
                 let scan = reversal_core::decode::decode(input)?;
-                Ok(invert::estimate(&scan, &area_hints).base_rgb)
+                Ok(invert::detect_base(&invert::analysis_image(&scan)))
             })
             .collect::<Result<Vec<_>, reversal_core::decode::DecodeError>>()?;
+        // Frames with no clear film don't get a say, unless none has any.
+        let mut bases: Vec<_> = readings.iter().filter(|r| r.found).map(|r| r.rgb).collect();
+        if bases.is_empty() {
+            eprintln!("warning: no frame shows clear film, so the roll's film base is a guess");
+            bases = readings.iter().map(|r| r.rgb).collect();
+        }
         Some(invert::roll_base(&bases))
     } else {
         None
