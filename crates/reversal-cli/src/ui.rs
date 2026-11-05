@@ -6,29 +6,31 @@
 //! POST /api/estimate {file, hints}         re-run the analysis with manual areas
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
-//! POST /api/export   {file, settings}      write positives/<name>-positive.dng
+//! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
+//! POST /api/export   {files}               save DNGs in the background, each with its own settings
+//! GET  /api/export/status                  progress of that
+//! POST /api/export/cancel                  frames not started yet don't start
+//! POST /api/roll     {files}               measure one film base across frames and use it on
+//!                                          each; runs like an export, with the same progress
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use reversal_core::dng::{self, Compression};
+use reversal_core::dng;
 use reversal_core::image::{NRect, Rgb32};
-use reversal_core::invert::{self, Adjust, Hints, Settings, MODEL_VERSION};
+use reversal_core::invert::{self, Adjust, Hints, Settings};
 use reversal_core::render;
 use serde::Deserialize;
 use serde_json::json;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::pipeline;
+use crate::batch::{Batch, Done};
+use crate::folder::{saved_settings, Folder};
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
-/// What `convert` writes next to the scans; these are results, not frames to invert.
-const POSITIVE_SUFFIX: &str = "-positive.dng";
-const RAW_EXTENSIONS: &[&str] = &[
-    "nef", "nrw", "cr2", "cr3", "arw", "raf", "rw2", "orf", "pef", "srw", "dng",
-];
 
 type Resp = Response<Cursor<Vec<u8>>>;
 type Handled = Result<Resp, (u16, String)>;
@@ -41,9 +43,9 @@ struct Loaded {
 
 struct State {
     port: u16,
-    dir: PathBuf,
-    out_dir: PathBuf,
+    folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
+    batch: Batch,
 }
 
 #[derive(Deserialize)]
@@ -55,24 +57,54 @@ struct Job {
 }
 
 #[derive(Deserialize)]
+struct SaveSettings {
+    file: String,
+    settings: Settings,
+    /// Only the adjustments count: a roll is rewriting the measurements.
+    #[serde(default)]
+    adjust_only: bool,
+}
+
+#[derive(Deserialize)]
+struct ExportJob {
+    files: Vec<String>,
+}
+
+#[derive(Deserialize)]
 struct EstimateJob {
     file: String,
     hints: Hints,
 }
 
-pub fn serve(dir: PathBuf, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+/// Serve `dir` on `port`, or on a free port if it's 0. With `exit_with_stdin` the process ends
+/// when stdin closes, so it can't outlive the app that started it.
+pub fn serve(
+    dir: PathBuf,
+    port: u16,
+    exit_with_stdin: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let dir = dir.canonicalize()?;
     let server = Server::http(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map_or(port, |address| address.port());
+    if exit_with_stdin {
+        std::thread::spawn(|| {
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+            std::process::exit(0);
+        });
+    }
     println!(
         "Reversal UI: http://127.0.0.1:{port}  (folder: {})",
         dir.display()
     );
     let mut state = State {
         port,
-        out_dir: dir.join("positives"),
-        dir,
+        folder: Arc::new(Folder::new(dir)),
         cache: HashMap::new(),
+        batch: Batch::default(),
     };
     for mut req in server.incoming_requests() {
         let resp = state
@@ -155,42 +187,6 @@ fn request_allowed(
         && (!is_post || content_type.is_some_and(is_json))
 }
 
-/// The parts of a sidecar that are the user's, readable from any model version.
-#[derive(serde::Deserialize)]
-struct SavedChoices {
-    #[serde(default)]
-    model: u32,
-    #[serde(default)]
-    hints: Hints,
-    #[serde(default)]
-    adjust: Adjust,
-}
-
-/// Settings from a sidecar, for a frame with analysis image `small` and automatic settings
-/// `auto`. Anything the user should know about the result comes back as a warning.
-fn saved_settings(sidecar: &[u8], auto: &Settings, small: &Rgb32) -> (Settings, Option<String>) {
-    let unreadable = |e: serde_json::Error| {
-        let warning = format!("Saved settings couldn't be read ({e}). Saving will replace them.");
-        (auto.clone(), Some(warning))
-    };
-    let choices: SavedChoices = match serde_json::from_slice(sidecar) {
-        Ok(c) => c,
-        Err(e) => return unreadable(e),
-    };
-    if choices.model == MODEL_VERSION {
-        return match serde_json::from_slice(sidecar) {
-            Ok(saved) => (saved, None),
-            Err(e) => unreadable(e),
-        };
-    }
-    // An older model's measurements mean nothing now: measure again, keep the user's choices.
-    let mut settings = Settings::new(invert::estimate_on(small, &choices.hints), choices.adjust);
-    settings.hints = choices.hints;
-    let warning = "These settings came from an older version. Colours were measured again, \
-                   and your adjustments may need another look.";
-    (settings, Some(warning.to_string()))
-}
-
 fn read_body<T: for<'de> Deserialize<'de>>(req: &mut Request) -> Result<T, (u16, String)> {
     serde_json::from_reader(req.as_reader()).map_err(|e| (400, format!("bad request body: {e}")))
 }
@@ -227,89 +223,49 @@ impl State {
                 let job: Job = read_body(req)?;
                 self.preview(&job)
             }
+            (Method::Post, "/api/settings") => {
+                let job: SaveSettings = read_body(req)?;
+                self.save_settings(&job)
+            }
             (Method::Post, "/api/export") => {
-                let job: Job = read_body(req)?;
-                self.export(&job)
+                let job: ExportJob = read_body(req)?;
+                self.export(job.files)
+            }
+            (Method::Post, "/api/roll") => {
+                let job: ExportJob = read_body(req)?;
+                self.measure_roll(job.files)
+            }
+            (Method::Get, "/api/export/status") => Ok(json_resp(200, &self.batch.status())),
+            (Method::Post, "/api/export/cancel") => {
+                self.batch.cancel();
+                Ok(json_resp(200, &self.batch.status()))
             }
             _ => Err((404, format!("not found: {path}"))),
         }
     }
 
-    fn raw_files(&self) -> Vec<String> {
-        let mut files: Vec<String> = std::fs::read_dir(&self.dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|e| e.path().is_file())
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| {
-                let ext = Path::new(n)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("");
-                RAW_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
-                    && !n.to_ascii_lowercase().ends_with(POSITIVE_SUFFIX)
-            })
-            .collect();
-        files.sort();
-        files
-    }
-
-    /// Only names listed in the folder are accepted (no path traversal).
-    fn resolve(&self, file: &str) -> Result<PathBuf, (u16, String)> {
-        if self.raw_files().iter().any(|f| f == file) {
-            Ok(self.dir.join(file))
-        } else {
-            Err((404, format!("unknown file: {file}")))
-        }
-    }
-
-    /// Keyed on the full file name: `a.NEF` and `a.DNG` are different frames.
-    fn sidecar(&self, file: &str) -> PathBuf {
-        let name = Path::new(file)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        self.out_dir.join(format!("{name}.reversal.json"))
-    }
-
-    /// The usual `<stem>-positive.dng`, or the full file name if another scan shares the stem.
-    fn output_path(&self, file: &str) -> PathBuf {
-        let stem = |n: &str| {
-            let stem = Path::new(n).file_stem().unwrap_or_default();
-            stem.to_string_lossy().to_ascii_lowercase()
-        };
-        let sharing = self
-            .raw_files()
-            .iter()
-            .filter(|f| stem(f) == stem(file))
-            .count();
-        self.out_dir.join(if sharing > 1 {
-            format!("{file}-positive.dng")
-        } else {
-            pipeline::output_name(Path::new(file))
-        })
-    }
-
     fn files(&self) -> Handled {
         let files: Vec<_> = self
+            .folder
             .raw_files()
             .into_iter()
             .map(|name| {
-                let exported = self.sidecar(&name).exists();
-                json!({ "name": name, "exported": exported })
+                let state = self.folder.frame_state(&name);
+                json!({
+                    "name": name,
+                    "saved": state.saved,
+                    "edited": state.edited,
+                    "manualSetup": state.manual_setup,
+                })
             })
             .collect();
-        Ok(json_resp(
-            200,
-            &json!({ "folder": self.dir.display().to_string(), "files": files }),
-        ))
+        let folder = self.folder.dir.display().to_string();
+        Ok(json_resp(200, &json!({ "folder": folder, "files": files })))
     }
 
     fn ensure_loaded(&mut self, file: &str) -> Result<&Loaded, (u16, String)> {
         if !self.cache.contains_key(file) {
-            let path = self.resolve(file)?;
+            let path = self.folder.resolve(file)?;
             let t = Instant::now();
             let scan = reversal_core::decode::decode(&path).map_err(|e| (500, e.to_string()))?;
             let small = invert::analysis_image(&scan);
@@ -327,7 +283,7 @@ impl State {
     }
 
     fn load(&mut self, file: &str) -> Handled {
-        let sidecar = std::fs::read(self.sidecar(file));
+        let sidecar = std::fs::read(self.folder.sidecar(file));
         let loaded = self.ensure_loaded(file)?;
         let auto = loaded.auto.clone();
         let (current, warning) = match sidecar {
@@ -368,34 +324,92 @@ impl State {
             .with_header(header("X-Clipped", &format!("{clipped:.6}"))))
     }
 
-    fn export(&mut self, job: &Job) -> Handled {
-        let input = self.resolve(&job.file)?;
-        let t = Instant::now();
-        let scan = reversal_core::decode::decode(&input).map_err(|e| (500, e.to_string()))?;
-        std::fs::create_dir_all(&self.out_dir).map_err(|e| (500, e.to_string()))?;
-        let out = self.output_path(&job.file);
-        let bytes = pipeline::export(
-            &input,
-            &scan,
-            &job.settings,
-            Compression::LosslessJpeg,
-            &out,
-        )
-        .map_err(|e| (500, e.to_string()))?;
-        let sidecar = serde_json::to_vec_pretty(&job.settings).expect("settings serialise");
-        reversal_core::write_atomic(&self.sidecar(&job.file), &sidecar)
-            .map_err(|e| (500, e.to_string()))?;
-        let secs = t.elapsed().as_secs_f64();
-        println!(
-            "exported {} ({:.1} MB, {secs:.1} s)",
-            out.display(),
-            bytes as f64 / 1e6
-        );
+    fn save_settings(&self, job: &SaveSettings) -> Handled {
+        self.folder.resolve(&job.file)?;
+        let saved = if job.adjust_only {
+            self.folder.save_adjustments(&job.file, &job.settings)
+        } else {
+            self.folder.save_settings(&job.file, &job.settings)
+        };
+        saved.map_err(|e| (500, e.to_string()))?;
+        let state = self.folder.frame_state(&job.file);
         Ok(json_resp(
             200,
-            &json!({ "path": out.display().to_string(), "bytes": bytes, "seconds": secs }),
+            &json!({ "saved": state.saved, "edited": state.edited, "manualSetup": state.manual_setup }),
         ))
     }
+
+    fn export(&self, files: Vec<String>) -> Handled {
+        for file in &files {
+            self.folder.resolve(file)?;
+        }
+        let folder = self.folder.clone();
+        self.batch
+            .start(files, export_workers(), move |file| {
+                let t = Instant::now();
+                let (out, bytes, warning) = folder.export_frame(file)?;
+                println!(
+                    "exported {} ({:.1} MB, {:.1} s)",
+                    out.display(),
+                    bytes as f64 / 1e6,
+                    t.elapsed().as_secs_f64()
+                );
+                let path = out.display().to_string();
+                Ok(Done { path, warning })
+            })
+            .map_err(|e| (409, e))?;
+        Ok(json_resp(200, &self.batch.status()))
+    }
+}
+
+impl State {
+    fn measure_roll(&self, files: Vec<String>) -> Handled {
+        if files.len() < 2 {
+            return Err((400, "a roll needs at least two frames".to_string()));
+        }
+        for file in &files {
+            self.folder.resolve(file)?;
+        }
+        let measured = Arc::new(Mutex::new(Vec::with_capacity(files.len())));
+        let total = files.len();
+        let (folder, collected) = (self.folder.clone(), measured.clone());
+        let apply_folder = self.folder.clone();
+        self.batch
+            .start_then(
+                "roll",
+                files,
+                1,
+                move |file| {
+                    let frame = folder.measure_for_roll(file)?;
+                    collected
+                        .lock()
+                        .expect("no panics while locked")
+                        .push(frame);
+                    Ok(Done {
+                        path: String::new(),
+                        warning: None,
+                    })
+                },
+                move || {
+                    let frames =
+                        std::mem::take(&mut *measured.lock().expect("no panics while locked"));
+                    if frames.len() < total {
+                        return Some(
+                            "Not every frame could be read, so nothing changed.".to_string(),
+                        );
+                    }
+                    apply_folder.apply_roll_base(&frames).err()
+                },
+            )
+            .map_err(|e| (409, e))?;
+        Ok(json_resp(200, &self.batch.status()))
+    }
+}
+
+/// Frames saved at once. Each also uses all cores while converting, and holds a few hundred MB.
+fn export_workers() -> usize {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    (cores / 3).clamp(1, 4)
 }
 
 #[cfg(test)]
@@ -440,52 +454,6 @@ mod tests {
             None
         ));
         assert!(!request_allowed(8787, false, None, None, None));
-    }
-
-    fn small_scan() -> Rgb32 {
-        Rgb32 {
-            width: 2,
-            height: 2,
-            data: vec![0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.1, 0.2, 0.3, 0.8, 0.7, 0.6],
-        }
-    }
-
-    fn settings() -> Settings {
-        Settings::new(
-            invert::estimate_on(&small_scan(), &Hints::default()),
-            Adjust::default(),
-        )
-    }
-
-    #[test]
-    fn saved_settings_warn_instead_of_failing_silently() {
-        let (auto, small) = (settings(), small_scan());
-        let mut mine = auto.clone();
-        mine.adjust.exposure = 20.0;
-
-        let (s, warning) = saved_settings(&serde_json::to_vec(&mine).unwrap(), &auto, &small);
-        assert_eq!((s, warning), (mine.clone(), None));
-
-        let (s, warning) = saved_settings(b"not json", &auto, &small);
-        assert_eq!(s, auto);
-        assert!(warning.is_some());
-    }
-
-    #[test]
-    fn older_settings_keep_the_users_choices_and_are_measured_again() {
-        let (auto, small) = (settings(), small_scan());
-        let old_sidecar = json!({
-            "model": 1,
-            "estimate": { "d_lo": [0, 0, 0], "log_range": 3 },
-            "hints": { "analysis": { "x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 0.5 } },
-            "adjust": { "exposure": 20.0 },
-        });
-        let (s, warning) =
-            saved_settings(&serde_json::to_vec(&old_sidecar).unwrap(), &auto, &small);
-        assert_eq!(s.model, MODEL_VERSION);
-        assert_eq!(s.adjust.exposure, 20.0);
-        assert_eq!(s.hints.analysis, Some(s.estimate.area));
-        assert!(warning.is_some());
     }
 
     #[test]

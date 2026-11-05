@@ -1,10 +1,11 @@
 //! Raw decoding through the system LibRaw (C API).
 //!
 //! Output is demosaiced, linear, *unbalanced* camera RGB: the negative is measured as
-//! transmittance, so no white balance or camera colour matrix is applied.
+//! transmittance, so no white balance or camera color matrix is applied.
 
 use std::ffi::{c_char, c_float, c_int, c_uint, c_ushort, c_void, CStr, CString};
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::image::Rgb32;
 
@@ -77,8 +78,13 @@ fn path_bytes(path: &Path) -> Vec<u8> {
     path.to_string_lossy().into_owned().into_bytes()
 }
 
+/// One decode at a time. We link plain `libraw`, not its thread-safe `libraw_r`, and a build
+/// with OpenMP slows to a crawl when several decodes each start a thread for every core.
+static DECODING: Mutex<()> = Mutex::new(());
+
 /// Decode a camera raw or DNG to linear camera RGB in [0, 1].
 pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
+    let _one_at_a_time = DECODING.lock().unwrap_or_else(|e| e.into_inner());
     let c_path = CString::new(path_bytes(path))
         .map_err(|_| DecodeError("path contains a NUL byte".into()))?;
     unsafe {
@@ -111,7 +117,7 @@ pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
         let (colors, bits) = ((*img).colors as usize, (*img).bits);
         let result = if colors != 3 || bits != 16 {
             Err(DecodeError(format!(
-                "unsupported output: {colors} colours, {bits} bits"
+                "unsupported output: {colors} colors, {bits} bits"
             )))
         } else {
             let samples = std::slice::from_raw_parts((*img).data.as_ptr() as *const u16, w * h * 3);

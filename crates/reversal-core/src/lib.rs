@@ -16,13 +16,14 @@ pub mod render;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use image::Rgb32;
 use invert::Settings;
 
 /// XMP packet stored in every positive: conversion settings and model version, plus `crs:WhiteBalance="As Shot"` so raw editors start from our neutral.
 pub fn xmp_packet(source_name: &str, settings: &Settings) -> String {
-    let json = serde_json::to_string(settings).expect("settings serialise");
+    let json = serde_json::to_string(settings).expect("settings serialize");
     let esc = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -80,9 +81,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    // Unique per write, so writers of one file can't share a half-written temporary file.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let write = WRITES.fetch_add(1, Ordering::Relaxed);
     let mut tmp_name = OsString::from(".");
     tmp_name.push(name);
-    tmp_name.push(format!(".{}.tmp", std::process::id()));
+    tmp_name.push(format!(".{}.{write}.tmp", std::process::id()));
     let tmp = path.with_file_name(tmp_name);
     let result = std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path));
     if result.is_err() {

@@ -1,5 +1,7 @@
 //! `reversal` — convert film negative scans to positive LinearRaw DNGs.
 
+mod batch;
+mod folder;
 mod pipeline;
 mod ui;
 
@@ -29,8 +31,12 @@ enum Command {
     Ui {
         /// Folder with raw negatives.
         dir: PathBuf,
+        /// Port on 127.0.0.1; 0 picks a free one.
         #[arg(long, default_value_t = 8787)]
         port: u16,
+        /// Exit when stdin closes. For an app that starts this as its engine.
+        #[arg(long, hide = true)]
+        exit_with_stdin: bool,
     },
 }
 
@@ -88,12 +94,15 @@ struct ConvertArgs {
     /// Fine rotation in degrees, clockwise positive.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     straighten: f32,
-    /// Size of the centred image area that colour and exposure are measured on, in percent.
+    /// Size of the centered image area that color and exposure are measured on, in percent.
     #[arg(long, default_value_t = invert::DEFAULT_AREA_PERCENT)]
     area_percent: f32,
     /// Crop to the image area (default keeps the whole scan).
     #[arg(long)]
     crop_area: bool,
+    /// Treat the inputs as one roll: measure one film base across them and use it on each.
+    #[arg(long)]
+    roll: bool,
     /// Mirror left-right (emulsion-up scans).
     #[arg(long)]
     flip: bool,
@@ -108,7 +117,11 @@ fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Convert(args) => convert(args),
-        Command::Ui { dir, port } => ui::serve(dir, port),
+        Command::Ui {
+            dir,
+            port,
+            exit_with_stdin,
+        } => ui::serve(dir, port, exit_with_stdin),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -142,12 +155,29 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         CompressionArg::None => reversal_core::dng::Compression::None,
     };
     let outs = pipeline::output_paths(&args.inputs, args.output.as_deref())?;
+    let area_hints = Hints {
+        area_percent: Some(args.area_percent),
+        ..Hints::default()
+    };
+    let base_rgb = if args.roll {
+        let bases = args
+            .inputs
+            .iter()
+            .map(|input| {
+                let scan = reversal_core::decode::decode(input)?;
+                Ok(invert::estimate(&scan, &area_hints).base_rgb)
+            })
+            .collect::<Result<Vec<_>, reversal_core::decode::DecodeError>>()?;
+        Some(invert::roll_base(&bases))
+    } else {
+        None
+    };
     for (input, out) in args.inputs.iter().zip(&outs) {
         let t = Instant::now();
         let scan = reversal_core::decode::decode(input)?;
         let hints = Hints {
-            area_percent: Some(args.area_percent),
-            ..Hints::default()
+            base_rgb,
+            ..area_hints.clone()
         };
         let mut settings = Settings::new(invert::estimate(&scan, &hints), adjust.clone());
         settings.hints = hints;

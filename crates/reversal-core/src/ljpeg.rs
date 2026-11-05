@@ -1,7 +1,7 @@
 //! Lossless JPEG (ITU T.81 process 14, "LJPEG-92") encoder for DNG tiles.
 //!
 //! 16-bit samples, interleaved components, predictor 1 (left), one Huffman table
-//! optimised per tile. Sufficient for DNG `Compression = 7`.
+//! optimized per tile. Sufficient for DNG `Compression = 7`.
 
 const PRECISION: u32 = 16;
 

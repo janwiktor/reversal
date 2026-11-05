@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::color;
 use crate::dng;
-use crate::image::Rgb32;
+use crate::image::{for_each_part, Rgb32};
 use crate::invert;
 
 /// Sample count of the tone curves written to the DNG and used for previews.
@@ -95,12 +95,15 @@ fn white_amount(look: Look, tone: Tone) -> f32 {
 }
 
 /// Display value of linear `l` before the S-curve. At −1 an extended Reinhard shoulder takes
-/// `STORED_REACH` to white; at 0 nothing happens; at +1 the top is pushed into clipping.
+/// `STORED_REACH` to white; at +1 the top is pushed into clipping. Below 0 the curve sees the
+/// stored range, so it does the raw editor's roll-off itself: that's what 0 looks like, and
+/// the image stays continuous as the slider passes it.
 fn shoulder(l: f32, amount: f32) -> f32 {
     if amount < 0.0 {
         let reach2 = STORED_REACH * STORED_REACH;
         let rolled = l * (1.0 + l / reach2) / (1.0 + l);
-        l + -amount * (rolled - l)
+        let start = highlight_rolloff(l);
+        start + -amount * (rolled - start)
     } else {
         l * (1.0 + amount * l)
     }
@@ -207,13 +210,16 @@ pub fn to_srgb8(img: &Rgb32, profile: &dng::Profile) -> Vec<u8> {
         let t = (v / STORED_REACH).clamp(0.0, 1.0).sqrt();
         lut[(t * (N - 1) as f32 + 0.5) as usize]
     };
-    img.pixels()
-        .flat_map(|p| {
+    let mut out = vec![0u8; img.data.len()];
+    for_each_part(&mut out, 3, |start, part| {
+        let pixels = img.data[start..].as_chunks::<3>().0;
+        for (out, &p) in part.as_chunks_mut::<3>().0.iter_mut().zip(pixels) {
             let p = invert::saturate(p.map(|v| v * lift), profile.saturation);
             let s = color::apply(&to_srgb, color::apply(&to_prophoto, p).map(tone));
-            s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8)
-        })
-        .collect()
+            *out = s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8);
+        }
+    });
+    out
 }
 
 /// Encode 8-bit sRGB pixels as a baseline JPEG, always without chroma subsampling
@@ -323,6 +329,27 @@ mod tests {
     }
 
     #[test]
+    fn whites_pass_through_zero_without_a_jump() {
+        let shown = |look, whites, v| {
+            let tone = Tone {
+                whites,
+                ..Tone::default()
+            };
+            to_srgb8(&gray(v), &profile(look, tone))[1] as i32
+        };
+        for look in [Look::Neutral, Look::Vivid] {
+            for i in 0..=100 {
+                let v = i as f32 / 100.0;
+                let at_zero = shown(look, 0.0, v);
+                for whites in [-1.0, 1.0] {
+                    let step = (shown(look, whites, v) - at_zero).abs();
+                    assert!(step <= 3, "{look:?} at {v}, whites {whites}: moved {step}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn each_slider_moves_its_own_part_of_the_curve() {
         let n = |tone: Tone, l: f32| display(Look::Neutral, tone, l);
         let d = Tone::default();
@@ -366,7 +393,7 @@ mod tests {
         assert!(spread(px(Look::Vivid)) > spread(px(Look::Flat)));
     }
 
-    fn grey(v: f32) -> Rgb32 {
+    fn gray(v: f32) -> Rgb32 {
         Rgb32 {
             width: 1,
             height: 1,
@@ -389,7 +416,7 @@ mod tests {
     fn previews_keep_neutrals_on_the_rolled_off_curve() {
         let p = profile(Look::Neutral, Tone::default());
         for v in [0.05, 0.3, 0.8] {
-            let out = to_srgb8(&grey(v), &p);
+            let out = to_srgb8(&gray(v), &p);
             let x = highlight_rolloff(v * dng::DISPLAY_LIFT);
             let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
             assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0), "{v}");
@@ -399,7 +426,7 @@ mod tests {
     #[test]
     fn previews_keep_detail_above_white() {
         let p = profile(Look::Neutral, Tone::default());
-        let g = |v| to_srgb8(&grey(v), &p)[1];
+        let g = |v| to_srgb8(&gray(v), &p)[1];
         assert!(g(2.0) > g(1.0) + 5);
         assert!(g(2.0) < 255);
     }
@@ -411,7 +438,7 @@ mod tests {
         let v = 3.0;
         let x = v * dng::DISPLAY_LIFT * 2f32.powf(p.exposure_offset);
         let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
-        let out = to_srgb8(&grey(v), &p);
+        let out = to_srgb8(&gray(v), &p);
         assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0));
     }
 
@@ -434,7 +461,7 @@ mod tests {
             };
             display(Look::Neutral, tone, l)
         };
-        // above mid-grey the hard curve is brighter, below it darker
+        // above mid-gray the hard curve is brighter, below it darker
         assert!(at(100.0, 0.7) > at(-100.0, 0.7) && at(100.0, 0.02) < at(-100.0, 0.02));
     }
 }

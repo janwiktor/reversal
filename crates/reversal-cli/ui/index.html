@@ -6,7 +6,7 @@
 <title>Reversal</title>
 <style>
   :root {
-    /* Neutral grey surround (no tint) so colour can be judged, as on a viewing booth. */
+    /* Neutral gray surround (no tint) so color can be judged, as on a viewing booth. */
     --surround: #3d3d3d;
     --panel: #2e2e2e;
     --panel-edge: #4a4a4a;
@@ -25,7 +25,7 @@
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--surround); color: var(--ink); font: 400 15px/1.4 var(--font);
-    display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; grid-template-rows: 100%;
+    display: grid; grid-template-columns: 260px minmax(0, 1fr) 280px; grid-template-rows: 100%;
     font-variant-numeric: tabular-nums;
   }
   button, input { font: inherit; color: inherit; }
@@ -33,16 +33,25 @@
   [hidden] { display: none !important; }
 
   /* Frames */
-  #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); overflow-y: auto; padding: 14px 0; }
+  #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); padding-top: 14px; display: flex; flex-direction: column; min-height: 0; }
   #roll h1 { font-size: 20px; font-weight: 600; margin: 0 16px 2px; }
   #folder { color: var(--ink-quiet); font-size: 13px; margin: 0 16px 14px; overflow-wrap: anywhere; }
-  #files { list-style: none; margin: 0; padding: 0; }
-  #files button { width: 100%; text-align: left; background: none; border: 0; padding: 7px 16px; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
-  #files button:hover { background: #383838; }
-  #files button[aria-current="true"] { background: #4a4a4a; font-weight: 600; }
-  #files .done { color: var(--ink-quiet); font-size: 13px; }
+  #choose-folder { align-self: flex-start; background: none; border: 0; padding: 0; margin: -10px 16px 10px; color: var(--ink-quiet); font-size: 13px; cursor: pointer; }
+  #choose-folder:hover { color: var(--ink); }
+  #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
+  #files li { display: flex; align-items: center; padding-left: 16px; }
+  #files li:hover { background: #383838; }
+  #files li:has(button[aria-current="true"]) { background: #4a4a4a; }
+  #files input, #select-all input { margin: 0 8px 0 0; accent-color: #cfcfcf; flex: none; }
+  #files button { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 7px 16px 7px 0; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+  #files button[aria-current="true"] { font-weight: 600; }
+  #files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #files .state { color: var(--ink-quiet); font-size: 13px; font-weight: 400; white-space: nowrap; }
+  #files .state.edited { color: var(--ink); }
+  #files .state.manual::before { content: "●"; color: var(--base); font-size: 9px; margin-right: 5px; vertical-align: 1px; }
+  #select-all { display: flex; align-items: center; color: var(--ink-quiet); font-size: 13px; padding: 0 16px 6px; cursor: pointer; }
 
-  /* Image: JS sizes #view to fit, so rotation always stays centred. */
+  /* Image: JS sizes #view to fit, so rotation always stays centered. */
   #stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
   #view { position: relative; flex: none; }
   #photo { display: block; width: 100%; height: 100%; }
@@ -58,7 +67,29 @@
   #toolbar button:hover { color: var(--ink); }
 
   /* Controls */
-  #head { background: var(--panel); border-left: 1px solid var(--panel-edge); overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+  #head { background: var(--panel); border-left: 1px solid var(--panel-edge); display: flex; flex-direction: column; min-height: 0; }
+  #controls { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 14px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+  #head .actions { padding: 10px 18px; border-top: 1px solid var(--panel-edge); }
+
+  /* Setup: how the scan is read. Pinned under the frames, away from the development controls. */
+  #setup { border-top: 1px solid var(--panel-edge); padding: 10px 16px 12px; display: grid; gap: 8px; }
+  #setup h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0; }
+  #setup h2 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #setup h2 button { background: none; border: 0; padding: 0; color: var(--ink-quiet); font-size: 13px; font-weight: 400; cursor: pointer; white-space: nowrap; }
+  #setup h2 button:hover, #setup h2 button[aria-pressed="true"] { color: var(--ink); }
+  .setup-row { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px; }
+  .setup-row > .group-label { margin: 0; white-space: nowrap; }
+  .setup-row .buttons { flex-wrap: nowrap; }
+  .setup-row .buttons button { padding: 3px 4px; min-width: 0; flex: 1 1 0; }
+  .setup-row .slider { grid-column: 2; margin: 0; }
+  .setup-row .slider label { font-size: 13px; color: var(--ink-quiet); }
+  #setup-note { color: var(--warn); font-size: 13px; margin: 0; }
+  #save { padding: 0 16px 12px; }
+  #save button { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: #1f1f1f; font-weight: 600; cursor: pointer; }
+  #save button:disabled { opacity: .45; cursor: default; }
+  #save button.cancel { background: var(--control); border-color: var(--panel-edge); color: var(--ink); font-weight: 400; }
+  #reveal { display: block; width: auto !important; background: none !important; border: 0 !important; color: var(--ink-quiet) !important; padding: 2px 0 0 !important; font-size: 13px; font-weight: 400 !important; }
+  #reveal:hover { color: var(--ink) !important; }
   section h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
   .hint { color: var(--ink-quiet); font-size: 13px; margin: 0; }
 
@@ -82,15 +113,16 @@
   .buttons button[aria-pressed="true"] { background: #5a5a5a; border-color: #8a8a8a; }
   .group-label { font-size: 14px; color: var(--ink-quiet); margin: 10px 0 4px; display: flex; align-items: center; gap: 6px; }
   .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
-  .actions { display: flex; gap: 8px; margin-top: auto; }
-  .actions .primary { background: var(--ink); color: #1f1f1f; border-color: var(--ink); font-weight: 600; }
+  .actions { display: flex; gap: 8px; }
   .actions button:disabled { opacity: .45; cursor: default; }
-  #status { color: var(--ink-quiet); font-size: 13px; min-height: 2.8em; margin: 0; overflow-wrap: anywhere; }
+  #status { color: var(--ink-quiet); font-size: 13px; margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-line; max-height: 7.5em; overflow-y: auto; }
 
   @media (max-width: 900px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; }
-    #roll { border-right: 0; border-bottom: 1px solid var(--panel-edge); max-height: 30vh; }
+    #roll { border-right: 0; border-bottom: 1px solid var(--panel-edge); }
+    #files { flex: none; max-height: 30vh; }
     #head { border-left: 0; }
+    #controls { overflow: visible; }
   }
 </style>
 </head>
@@ -98,7 +130,34 @@
 <nav id="roll" aria-label="Frames">
   <h1>Reversal</h1>
   <p id="folder"></p>
+  <button type="button" id="choose-folder" hidden>Open another folder…</button>
+  <label id="select-all"><input type="checkbox" id="select-all-box">Select all</label>
   <ul id="files"></ul>
+  <section id="setup" aria-labelledby="h-setup">
+    <h2><span id="h-setup">Setup</span><button type="button" id="show-areas" aria-pressed="false">Show areas</button></h2>
+    <div class="setup-row">
+      <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
+      <div class="buttons">
+        <button type="button" id="base-auto" aria-pressed="true">Detect</button>
+        <button type="button" id="base-draw" aria-pressed="false">Pick</button>
+        <button type="button" id="base-roll" aria-pressed="false" title="Measure one film base across the ticked frames, or all frames if none are ticked, and use it on each">Roll</button>
+      </div>
+    </div>
+    <div class="setup-row">
+      <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Measured</div>
+      <div class="buttons">
+        <button type="button" id="area-auto" aria-pressed="true">Center</button>
+        <button type="button" id="area-draw" aria-pressed="false">Draw</button>
+      </div>
+      <div class="slider"><label for="area-percent">Center size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
+    </div>
+    <p id="setup-note" hidden></p>
+  </section>
+  <div id="save">
+    <button type="button" id="export" disabled>Save DNG</button>
+    <p id="status" role="status"></p>
+    <button type="button" id="reveal" hidden>Show in Finder</button>
+  </div>
 </nav>
 
 <main id="stage">
@@ -110,7 +169,8 @@
   <p id="message">Choose a frame on the left to convert it.</p>
 </main>
 
-<aside id="head" aria-label="Conversion controls">
+<aside id="head" aria-label="Development controls">
+  <div id="controls">
   <section aria-labelledby="h-hist">
     <h2 id="h-hist">Histogram</h2>
     <canvas id="histogram" width="528" height="192" aria-label="RGB histogram of the preview"></canvas>
@@ -139,46 +199,27 @@
     <div class="slider"><label for="temperature">Temperature</label><output for="temperature">0</output><input id="temperature" type="range" min="-100" max="100" step="1" value="0"></div>
     <div class="slider"><label for="tint">Tint</label><output for="tint">0</output><input id="tint" type="range" min="-100" max="100" step="1" value="0"></div>
     <div class="slider"><label for="saturation">Saturation</label><output for="saturation">0</output><input id="saturation" type="range" min="-100" max="100" step="1" value="0"></div>
-    <p class="hint">Double-click a slider to reset it.</p>
   </section>
 
   <section aria-labelledby="h-frame">
     <h2 id="h-frame">Frame</h2>
     <div class="buttons">
-      <button type="button" id="flip" aria-pressed="false">Mirror</button>
       <button type="button" id="rotate">Rotate 90°</button>
+      <button type="button" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up">Mirror</button>
     </div>
     <div class="slider" style="margin-top:10px"><label for="straighten">Straighten</label><output for="straighten">0.0°</output><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"></div>
     <div class="group-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</div>
     <div class="buttons">
       <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
-      <button type="button" id="crop-frame" aria-pressed="false">Image area</button>
+      <button type="button" id="crop-frame" aria-pressed="false" title="Crop to the area measured in Setup">Measured area</button>
       <button type="button" id="crop-draw" aria-pressed="false">Draw</button>
     </div>
   </section>
 
-  <section aria-labelledby="h-analysis">
-    <h2 id="h-analysis">Analysis</h2>
-    <p class="hint">Where the conversion measures the image and the film base. Change these if colours look off.</p>
-    <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Image area</div>
-    <div class="buttons">
-      <button type="button" id="area-auto" aria-pressed="true">Centre</button>
-      <button type="button" id="area-draw" aria-pressed="false">Draw</button>
-    </div>
-    <div class="slider" style="margin-top:10px"><label for="area-percent">Centre size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
-    <div class="group-label"><span class="swatch" style="border-color:var(--base)"></span>Film base</div>
-    <div class="buttons">
-      <button type="button" id="base-auto" aria-pressed="true">Detect</button>
-      <button type="button" id="base-draw" aria-pressed="false">Pick</button>
-      <button type="button" id="show-areas" aria-pressed="false">Show areas</button>
-    </div>
-  </section>
-
-  <div class="actions">
-    <button type="button" id="reset" disabled>Reset sliders</button>
-    <button type="button" id="export" class="primary" disabled>Save DNG</button>
   </div>
-  <p id="status" role="status"></p>
+  <div class="actions">
+    <button type="button" id="reset" disabled>Reset tone &amp; color</button>
+  </div>
 </aside>
 
 <script>
@@ -187,22 +228,27 @@ const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "bla
 const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
   crop: "Drag over the image to set the crop.",
-  area: "Drag over the part of the scan that is picture (no rebate, no holder).",
+  area: "Drag over the part of the scan that is picture (no rebate, no holder). Color and exposure are measured here.",
   base: "Drag over clear, unexposed film between or beside the frames.",
 };
 
 let current = null;   // { file, auto, settings }
 let tool = null;      // null | "crop" | "area" | "base" | "show"
-let seq = 0;
 let timer = null;
+let saveTimer = null;
+let opening = null;       // the frame being loaded
+let frames = [];          // what the frame list shows
+const selected = new Set();
+let lastChecked = null;   // for shift-click
+let batch = null;         // the running export's progress
+let lastPath = null;
+let rendering = false;  // one preview at a time; changes meanwhile ask for one more
+let renderAgain = false;
 
-const store = {
-  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
-};
-
+// In the Mac app the shell does what a page can't.
+const shell = window.webkit?.messageHandlers?.reversal;
 async function api(path, body) {
-  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const res = await fetch(path, body ? { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!res.ok) {
     let msg = `${res.status}`;
     try { msg = (await res.json()).error; } catch {}
@@ -216,32 +262,130 @@ const hints = () => current.settings.hints;
 const status = (t) => { $("status").textContent = t; };
 
 // ---------- Files ----------
-async function loadFiles(selectName) {
+async function loadFiles() {
   const data = await (await api("/api/files")).json();
   $("folder").textContent = data.folder;
+  frames = data.files;
+  const names = new Set(frames.map((f) => f.name));
+  for (const name of selected) if (!names.has(name)) selected.delete(name);
   const list = $("files");
-  list.replaceChildren();
-  for (const f of data.files) {
-    const li = document.createElement("li");
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.name = f.name;
-    const name = document.createElement("span"); name.textContent = f.name;
-    const done = document.createElement("span"); done.className = "done"; done.textContent = f.exported ? "saved" : "";
-    b.append(name, done);
-    b.addEventListener("click", () => open(f.name));
-    li.append(b);
-    list.append(li);
+  const scroll = list.scrollTop;
+  list.replaceChildren(...frames.map(frameRow));
+  list.scrollTop = scroll;
+  if (!frames.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
+  markCurrent(opening ?? current?.file);
+  updateSaveButton();
+}
+
+function frameRow(f) {
+  const li = document.createElement("li");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = selected.has(f.name);
+  box.dataset.name = f.name;
+  box.setAttribute("aria-label", `Select ${f.name}`);
+  box.addEventListener("click", (e) => checkFrame(f.name, box.checked, e.shiftKey));
+  const b = document.createElement("button");
+  b.type = "button";
+  b.dataset.name = f.name;
+  const name = document.createElement("span"); name.className = "name"; name.textContent = f.name; name.title = f.name;
+  const state = document.createElement("span");
+  b.append(name, state);
+  b.addEventListener("click", () => open(f.name));
+  li.append(box, b);
+  showFrameState(f, state);
+  return li;
+}
+
+function showFrameState(f, state) {
+  const saving = batch?.active.includes(f.name);
+  state.textContent = saving ? "saving" : f.edited ? "edited" : f.saved ? "saved" : "";
+  state.className = `state${f.edited && !saving ? " edited" : ""}${f.manualSetup ? " manual" : ""}`;
+  state.title = f.manualSetup ? "Film base or measured area set by hand" : f.edited ? "Changes not saved to a DNG yet" : "";
+}
+
+function showFrameStates() {
+  for (const b of document.querySelectorAll("#files button")) {
+    const f = frames.find((x) => x.name === b.dataset.name);
+    if (f) showFrameState(f, b.querySelector(".state"));
   }
-  if (!data.files.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
-  markCurrent(selectName);
+}
+
+function checkFrame(name, on, range) {
+  const names = frames.map((f) => f.name);
+  const from = range && lastChecked ? names.indexOf(lastChecked) : -1;
+  const at = names.indexOf(name);
+  const span = from < 0 ? [name] : names.slice(Math.min(from, at), Math.max(from, at) + 1);
+  for (const n of span) on ? selected.add(n) : selected.delete(n);
+  lastChecked = name;
+  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
+  updateSaveButton();
+}
+
+$("select-all-box").addEventListener("change", (e) => {
+  selected.clear();
+  if (e.target.checked) for (const f of frames) selected.add(f.name);
+  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
+  updateSaveButton();
+});
+
+function updateSaveButton() {
+  const button = $("export");
+  shell?.postMessage({ action: "busy", busy: !!batch });
+  button.classList.toggle("cancel", !!batch);
+  if (batch) {
+    button.textContent = "Stop after these frames";
+    button.disabled = false;
+    return;
+  }
+  button.textContent = selected.size ? `Save ${selected.size} DNG${selected.size > 1 ? "s" : ""}` : "Save DNG";
+  button.disabled = !selected.size && !current;
+  const box = $("select-all-box");
+  box.checked = frames.length > 0 && selected.size === frames.length;
+  box.indeterminate = selected.size > 0 && selected.size < frames.length;
 }
 
 function markCurrent(name) {
-  for (const b of document.querySelectorAll("#files button")) b.setAttribute("aria-current", String(b.dataset.name === name));
+  for (const b of document.querySelectorAll("#files button")) {
+    b.setAttribute("aria-current", String(b.dataset.name === name));
+    if (b.dataset.name === name) b.scrollIntoView({ block: "nearest" });
+  }
+}
+
+// ---------- Remembering settings ----------
+// Each frame keeps its settings on disk from the first change, so frames can be saved together.
+async function rememberSettings(leaving = false) {
+  clearTimeout(saveTimer);
+  // A roll is rewriting the sidecars. A frame that stays open sends its changes when the roll
+  // ends; one being left can't wait, so it sends only its adjustments.
+  const rolling = batch?.task === "roll";
+  if (!current || (rolling && !leaving)) return;
+  const frame = current;
+  const { file, settings } = frame;
+  const json = JSON.stringify(settings);
+  if (json === frame.remembered) return;
+  const state = await (await api("/api/settings", { file, settings, adjust_only: rolling })).json();
+  frame.remembered = json;
+  const f = frames.find((x) => x.name === file);
+  if (f) { Object.assign(f, state); showFrameStates(); }
+}
+
+function rememberSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not keep your settings: ${e.message}`)), 300);
 }
 
 async function open(name) {
+  try {
+    await rememberSettings(true);
+  } catch (e) {
+    status(`Could not keep your settings, so this frame stays open: ${e.message}`);
+    return;
+  }
+  clearTimeout(timer);
+  clearTimeout(areaTimer);
+  opening = name;
+  current = null;  // no edits while nothing is open
   markCurrent(name);
   setTool(null);
   $("message").textContent = "Decoding the raw file…";
@@ -250,22 +394,29 @@ async function open(name) {
   setBusy(true);
   try {
     const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
+    if (opening !== name) return;  // another frame was chosen meanwhile
     current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent };
     current.settings.hints ??= {};
+    current.remembered = JSON.stringify(current.settings);
     syncControls();
     await refresh();
-    status(data.warning ?? "");
+    status("");
+    $("setup-note").textContent = data.warning ?? "";
+    $("setup-note").hidden = !data.warning;
   } catch (e) {
-    current = null;
-    $("message").textContent = `Could not open ${name}: ${e.message}`;
+    if (opening === name) $("message").textContent = `Could not open ${name}: ${e.message}`;
   } finally {
-    setBusy(false);
+    if (opening === name) {
+      opening = null;
+      setBusy(false);
+    }
   }
 }
 
 function setBusy(busy) {
-  $("export").disabled = busy || !current;
   $("reset").disabled = busy || !current;
+  updateSaveButton();
+  if (busy && !batch) $("export").disabled = true;
 }
 
 // ---------- Controls ----------
@@ -289,22 +440,27 @@ function syncControls() {
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
   $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
   $("area-draw").setAttribute("aria-pressed", String(!!hints().analysis || tool === "area"));
-  $("base-auto").setAttribute("aria-pressed", String(!hints().base));
+  $("base-auto").setAttribute("aria-pressed", String(!hints().base && !hints().base_rgb));
+  $("base-roll").setAttribute("aria-pressed", String(!hints().base && !!hints().base_rgb));
   $("base-draw").setAttribute("aria-pressed", String(!!hints().base || tool === "base"));
   $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
+  $("h-setup").textContent = `Setup: ${current.file}`;
+  $("h-setup").title = current.file;
 }
 
 const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a[k] - b[k]) < 1e-4);
 
-function changed(delay = 90) {
+function changed(delay = 0) {
   if (!current) return;
   syncControls();
+  rememberSoon();
   clearTimeout(timer);
   timer = setTimeout(refresh, delay);
 }
 
 for (const id of [...SLIDERS, "straighten"]) {
-  $(id).addEventListener("input", (e) => { adj()[id] = Number(e.target.value); changed(); });
+  $(id).title = "Double-click to reset";
+  $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); changed(); } });
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
 }
 
@@ -315,7 +471,8 @@ for (const look of LOOKS) {
 let areaTimer = null;
 function setAreaPercent(percent) {
   if (!current) return;
-  hints().area_percent = percent;
+  // The default is no choice at all, however it was reached.
+  hints().area_percent = percent === current.defaultAreaPercent ? null : percent;
   syncControls();
   clearTimeout(areaTimer);
   areaTimer = setTimeout(() => setHint("analysis", null), 150);
@@ -342,6 +499,7 @@ $("base-draw").addEventListener("click", () => setTool(tool === "base" ? null : 
 $("show-areas").addEventListener("click", () => setTool(tool === "show" ? null : "show"));
 $("area-auto").addEventListener("click", () => setHint("analysis", null));
 $("base-auto").addEventListener("click", () => setHint("base", null));
+$("base-roll").addEventListener("click", measureRoll);
 $("tool-done").addEventListener("click", () => setTool(null));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tool) setTool(null); });
 
@@ -350,38 +508,122 @@ $("reset").addEventListener("click", () => {
   for (const id of SLIDERS) adj()[id] = 0;
   adj().look = "neutral";
   changed(0);
-  status("Tone and colour are back to the automatic conversion.");
+  status("Tone and color are back to the automatic conversion.");
 });
 
 $("export").addEventListener("click", async () => {
-  if (!current) return;
-  setBusy(true);
-  status("Saving DNG…");
+  if (batch) {
+    api("/api/export/cancel", {}).catch(() => {});
+    return;
+  }
+  const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
+  if (!files.length) return;
+  $("reveal").hidden = true;
   try {
-    const r = await (await api("/api/export", { file: current.file, settings: current.settings })).json();
-    status(`Saved ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB)`);
-    await loadFiles(current.file);
+    await rememberSettings();
+    batch = await (await api("/api/export", { files })).json();
+    updateSaveButton();
+    followBatch();
   } catch (e) {
     status(`Could not save: ${e.message}`);
-  } finally {
-    setBusy(false);
   }
 });
 
+async function measureRoll() {
+  if (batch) return;
+  const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : frames.map((f) => f.name);
+  if (files.length < 2) { status("Tick at least two frames of the roll."); return; }
+  $("reveal").hidden = true;
+  try {
+    await rememberSettings();
+    batch = await (await api("/api/roll", { files })).json();
+    updateSaveButton();
+    followBatch();
+  } catch (e) {
+    status(`Could not measure the roll: ${e.message}`);
+  }
+}
+
+async function followBatch() {
+  try {
+    batch = await (await api("/api/export/status")).json();
+  } catch (e) {
+    batch = null;
+    updateSaveButton();
+    status(`Lost track of saving: ${e.message}`);
+    return;
+  }
+  if (batch.running) {
+    const verb = batch.task === "roll" ? "Measuring" : "Saving";
+    status(`${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`);
+    showFrameStates();
+    setTimeout(followBatch, 150);
+    return;
+  }
+  const finished = batch;
+  batch = null;
+  await loadFiles();
+  if (finished.task === "roll") {
+    await reopenAfterRoll();
+    status(rollSummary(finished));
+    return;
+  }
+  if (finished.done === finished.total) selected.clear();
+  updateSaveButton();
+  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
+  status(batchSummary(finished));
+  lastPath = finished.last_path;
+  $("reveal").hidden = !(shell && lastPath);
+}
+
+// The open frame's base and measurements changed on disk: read them back, and keep the slider
+// moves made while measuring. A frame being opened already reads them.
+async function reopenAfterRoll() {
+  if (!current) return;
+  const { file, settings: { adjust } } = current;
+  current.remembered = JSON.stringify(current.settings);
+  await open(file);
+  if (current?.file === file) {
+    current.settings.adjust = adjust;
+    changed(0);
+  }
+}
+
+function rollSummary({ done, total, issues, canceled }) {
+  const head = canceled ? "Stopped; no frame changed."
+    : issues.length ? "The roll's film base didn't reach every frame."
+    : `${total} frames now share one film base. Detect on a frame goes back to its own.`;
+  return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
+}
+
+function batchSummary({ done, total, issues, canceled, last_path }) {
+  const where = last_path ? ` to ${last_path.slice(0, last_path.lastIndexOf("/"))}` : "";
+  const head = total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}.`;
+  return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
+}
+
+$("reveal").addEventListener("click", () => { if (shell && lastPath) shell.postMessage({ action: "reveal", path: lastPath }); });
+
 async function setHint(key, rect) {
   if (!current) return;
+  if (batch?.task === "roll") { status("Measuring the roll; try again when it's done."); return; }
+  const file = current.file;
   const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
   hints()[key] = rect;
+  if (key === "base") hints().base_rgb = null;
   status("Measuring…");
   try {
-    current.settings.estimate = await (await api("/api/estimate", { file: current.file, hints: hints() })).json();
+    const estimate = await (await api("/api/estimate", { file, hints: hints() })).json();
+    if (current?.file !== file) return;
+    current.settings.estimate = estimate;
+    $("setup-note").hidden = true;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
     status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
-                          : (rect ? "Image area set from your selection." : "Measuring the centre of the scan."));
+                          : (rect ? "Image area set from your selection." : "Measuring the center of the scan."));
   } catch (e) {
-    status(`Could not measure: ${e.message}`);
+    if (current?.file === file) status(`Could not measure: ${e.message}`);
   }
-  changed(0);
+  if (current?.file === file) changed(0);
 }
 
 // ---------- Tools and overlay ----------
@@ -390,11 +632,11 @@ function setTool(t) {
   tool = t;
   $("overlay").toggleAttribute("hidden", !t); // SVG elements don't reflect .hidden
   $("toolbar").hidden = !t;
-  $("tool-text").textContent = t === "show" ? "Showing the crop, image area and film base." : TOOL_TEXT[t] ?? "";
+  $("tool-text").textContent = t === "show" ? "Showing the crop, measured area and film base." : TOOL_TEXT[t] ?? "";
   if (current) changed(0);
 }
 
-// Scan (normalised, straightened) <-> displayed full view: mirror first, then quarter turns.
+// Scan (normalized, straightened) <-> displayed full view: mirror first, then quarter turns.
 function scanToView([x, y], a) {
   if (a.flip_h) x = 1 - x;
   switch (a.rotate % 4) {
@@ -459,25 +701,30 @@ $("overlay").addEventListener("pointerup", (ev) => {
 // ---------- Preview, fit and histogram ----------
 async function refresh() {
   if (!current) return;
-  const id = ++seq;
+  if (rendering) { renderAgain = true; return; }
+  rendering = true;
+  const file = current.file;
   try {
-    const res = await api("/api/preview", { file: current.file, settings: current.settings, full: !!tool });
+    const res = await api("/api/preview", { file, settings: current.settings, full: !!tool });
     const clipped = Number(res.headers.get("X-Clipped") || 0);
     const blob = await res.blob();
-    if (id !== seq) return;
+    if (file !== current?.file) return;
     const img = $("photo");
     const old = img.src;
-    img.src = URL.createObjectURL(blob);
-    await img.decode();
-    if (id !== seq) return;
+    // Not img.decode(): it can stay pending for as long as the page is hidden.
+    await new Promise((done) => { img.onload = img.onerror = done; img.src = URL.createObjectURL(blob); });
     if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+    if (file !== current?.file) return;
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
     drawOverlay();
     histogram(img, clipped);
   } catch (e) {
-    if (id === seq) status(`Preview failed: ${e.message}`);
+    if (file === current?.file) status(`Preview failed: ${e.message}`);
+  } finally {
+    rendering = false;
+    if (renderAgain) { renderAgain = false; refresh(); }
   }
 }
 
@@ -534,7 +781,13 @@ function histogram(img, storedClipped) {
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
 }
 
+$("choose-folder").hidden = !shell;
+$("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
+
 loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
+// Reloaded while saving: pick the progress back up.
+api("/api/export/status").then((r) => r.json()).then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
+addEventListener("pagehide", () => { rememberSettings(true).catch(() => {}); });
 </script>
 </body>
 </html>

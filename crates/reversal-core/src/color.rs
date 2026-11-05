@@ -1,4 +1,4 @@
-//! Colour-space matrices for the output DNG (linear Rec.2020) and previews (sRGB).
+//! Color-space matrices for the output DNG (linear Rec.2020) and previews (sRGB).
 
 pub type Mat3 = [[f64; 3]; 3];
 

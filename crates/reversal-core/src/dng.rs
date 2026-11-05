@@ -1,6 +1,6 @@
 //! Minimal writer for positive LinearRaw DNGs.
 //!
-//! Layout: IFD0 = 8-bit RGB thumbnail + DNG-level tags (colour, profiles, XMP);
+//! Layout: IFD0 = 8-bit RGB thumbnail + DNG-level tags (color, profiles, XMP);
 //! SubIFD 0 = the 16-bit LinearRaw image; SubIFD 1 = an sRGB JPEG preview.
 //! Pixels are stored `STORE_EV` stops under with `BaselineExposure` compensating,
 //! so highlights above frame white survive as recoverable headroom. A main profile that
