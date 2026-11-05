@@ -7,9 +7,8 @@ Guidance for AI coding agents (and humans) working in this repository.
 Reversal converts scanned or camera-captured **film negatives into positive images**.
 One shared engine serves every front end:
 
-1. **CLI and local web UI** — the `reversal` binary; these exist today.
-2. **Editor plugin** — planned, a thin launcher so conversion can happen inside the
-   photographer's normal workflow.
+1. **CLI and local web UI** — the `reversal` binary.
+2. **Mac app** — a small window around the web UI, with the same binary as its engine.
 
 Key design decisions: input is camera raw or
 DNG via LibRaw; output is a **positive, scene-linear LinearRaw DNG** (16-bit, linear
@@ -30,14 +29,11 @@ packaging/macos/        Mac app: a small Swift window around the UI, with the bi
 Samples/              Local sample scans (git-ignored)
 ```
 
-Planned later: editor plugin (thin launcher over the CLI/app), WASM and
-mobile bindings over `reversal-core`.
-
 Rules:
-- **All conversion logic lives in `reversal-core`.** The CLI, UI and future plugin are
+- **All conversion logic lives in `reversal-core`.** The CLI, UI and Mac app are
   thin adapters; never duplicate processing code between them.
-- `reversal-core` must not depend on UI frameworks, web servers or plugin-host SDKs, so
-  it can be tested headlessly and compiled for WASM/mobile later.
+- `reversal-core` must not depend on UI frameworks, web servers or host SDKs, so
+  it can be tested headlessly.
 - Keep the core API deterministic: same input + same parameters → bit-identical output.
 
 ## Domain notes (read before touching image code)
@@ -59,8 +55,7 @@ Rules:
   unless the user draws an area.
 - **Inputs** include camera RAW (DNG, CR2/CR3, NEF, ARW, RAF…) and scanner TIFFs.
   Preserve and write metadata (EXIF, ICC profile) where possible.
-- **Non-destructive.** Never overwrite source files. Output to new files or, in the
-  plugin, to host-supported non-destructive edits/layers.
+- **Non-destructive.** Never overwrite source files. Output to new files.
 
 ## Coding conventions
 

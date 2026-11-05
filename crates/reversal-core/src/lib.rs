@@ -2,7 +2,7 @@
 //!
 //! Camera scan of a negative → linear camera RGB ([`decode`]) → density-model
 //! inversion ([`invert`]) → positive, scene-linear LinearRaw DNG ([`dng`]).
-//! No UI or host APIs here: the CLI, web UI and future plugin are thin adapters.
+//! No UI or host APIs here: the CLI, web UI and Mac app are thin adapters.
 
 pub mod color;
 #[cfg(feature = "libraw")]
