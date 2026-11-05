@@ -3,7 +3,9 @@
 //! Layout: IFD0 = 8-bit RGB thumbnail + DNG-level tags (colour, profiles, XMP);
 //! SubIFD 0 = the 16-bit LinearRaw image; SubIFD 1 = an sRGB JPEG preview.
 //! Pixels are stored `STORE_EV` stops under with `BaselineExposure` compensating,
-//! so highlights above frame white survive as recoverable headroom.
+//! so highlights above frame white survive as recoverable headroom. A main profile that
+//! needs less exposure lowers `BaselineExposure` itself: Apple's renderer opens files too
+//! bright when the main profile carries a `BaselineExposureOffset`.
 
 use std::io;
 use std::path::Path;
@@ -37,7 +39,7 @@ pub struct Profile {
     pub name: String,
     /// Linear (x, y) pairs.
     pub tone_curve: Vec<(f32, f32)>,
-    /// EV added to `BaselineExposure` under this profile.
+    /// EV this profile adds to the standard `STORE_EV` baseline.
     pub exposure_offset: f32,
     /// Saturation applied by the profile's look table; 1 = none.
     pub saturation: f32,
@@ -179,7 +181,13 @@ impl Buf {
     }
 }
 
-fn profile_tags(p: &Profile) -> Vec<Tag> {
+/// `BaselineExposure` of a file: the standard baseline plus what its main profile adds.
+fn baseline_ev(main: &Profile) -> f32 {
+    STORE_EV + main.exposure_offset
+}
+
+/// Tags of a profile in a file with `baseline_ev`, so its offset is relative to that.
+fn profile_tags(p: &Profile, baseline_ev: f32) -> Vec<Tag> {
     let (color_matrix, forward) = color::dng_matrices();
     let flat = |m: color::Mat3| m.iter().flatten().copied().collect::<Vec<f64>>();
     let mut tags = vec![
@@ -194,10 +202,11 @@ fn profile_tags(p: &Profile) -> Vec<Tag> {
         50940, // ProfileToneCurve
         Val::Float(p.tone_curve.iter().flat_map(|&(x, y)| [x, y]).collect()),
     ));
-    if p.exposure_offset != 0.0 {
+    let offset = STORE_EV + p.exposure_offset - baseline_ev;
+    if offset != 0.0 {
         tags.push(Tag(
             51109, // BaselineExposureOffset
-            Val::SRational(vec![p.exposure_offset as f64]),
+            Val::SRational(vec![offset as f64]),
         ));
     }
     if p.saturation != 1.0 {
@@ -214,12 +223,12 @@ fn profile_tags(p: &Profile) -> Vec<Tag> {
 }
 
 /// A camera profile in DCP layout ("IIRC"), for ExtraCameraProfiles.
-fn profile_blob(p: &Profile) -> Vec<u8> {
+fn profile_blob(p: &Profile, baseline_ev: f32) -> Vec<u8> {
     let mut buf = Buf {
         data: b"IIRC".to_vec(),
     };
     buf.data.extend_from_slice(&8u32.to_le_bytes());
-    buf.ifd(profile_tags(p));
+    buf.ifd(profile_tags(p, baseline_ev));
     buf.data
 }
 
@@ -326,13 +335,14 @@ pub fn encode(img: &Rgb32, opts: &DngOptions) -> Vec<u8> {
     let thumb_px = render::to_srgb8(&thumb, &opts.profile);
     let thumb_off = buf.blob(&thumb_px);
 
+    let baseline = baseline_ev(&opts.profile);
     let extra: Vec<u32> = opts
         .extra_profiles
         .iter()
-        .map(|p| buf.blob(&profile_blob(p)))
+        .map(|p| buf.blob(&profile_blob(p, baseline)))
         .collect();
 
-    let mut tags = profile_tags(&opts.profile);
+    let mut tags = profile_tags(&opts.profile, baseline);
     tags.extend([
         Tag(254, Val::Long(vec![1])), // IFD0 = thumbnail
         Tag(256, Val::Long(vec![thumb.width as u32])),
@@ -353,7 +363,7 @@ pub fn encode(img: &Rgb32, opts: &DngOptions) -> Vec<u8> {
         Tag(50706, Val::Byte(vec![1, 4, 0, 0])),          // DNGVersion
         Tag(50707, Val::Byte(vec![1, 3, 0, 0])),          // DNGBackwardVersion
         Tag(50728, Val::Rational(vec![1.0; 3])),          // AsShotNeutral
-        Tag(50730, Val::SRational(vec![STORE_EV as f64])), // BaselineExposure
+        Tag(50730, Val::SRational(vec![baseline as f64])), // BaselineExposure
     ]);
     if !extra.is_empty() {
         tags.push(Tag(50933, Val::Long(extra))); // ExtraCameraProfiles
@@ -385,7 +395,7 @@ mod tests {
 
     #[test]
     fn profile_tags_carry_only_what_the_look_needs() {
-        let has = |p: &Profile, id: u16| profile_tags(p).iter().any(|t| t.0 == id);
+        let has = |p: &Profile, id: u16| profile_tags(p, STORE_EV).iter().any(|t| t.0 == id);
         let tone = render::Tone::default();
         let neutral = render::profile(render::Look::Neutral, tone);
         let flat = render::profile(render::Look::Flat, tone);
@@ -393,6 +403,59 @@ mod tests {
         assert!(has(&neutral, 50940) && !has(&neutral, 51109) && !has(&neutral, 50982));
         assert!(has(&flat, 51109) && !has(&flat, 50982));
         assert!(has(&vivid, 50981) && has(&vivid, 50982) && !has(&vivid, 51109));
+    }
+
+    #[test]
+    fn main_profile_never_carries_an_offset_and_other_looks_stay_relative_to_it() {
+        let tone = render::Tone::default();
+        let neutral = render::profile(render::Look::Neutral, tone);
+        let flat = render::profile(render::Look::Flat, tone);
+        assert_eq!(baseline_ev(&neutral), STORE_EV);
+        assert_eq!(baseline_ev(&flat), 0.0);
+        let offset = |p: &Profile, main: &Profile| {
+            profile_tags(p, baseline_ev(main))
+                .into_iter()
+                .find(|t| t.0 == 51109)
+                .map(|t| match t.1 {
+                    Val::SRational(v) => v[0],
+                    _ => panic!("offset is a signed rational"),
+                })
+        };
+        assert_eq!(offset(&neutral, &neutral), None);
+        assert_eq!(offset(&flat, &flat), None);
+        assert_eq!(offset(&neutral, &flat), Some(STORE_EV as f64));
+        assert_eq!(offset(&flat, &neutral), Some(-STORE_EV as f64));
+    }
+
+    #[test]
+    fn written_baseline_follows_the_main_profile() {
+        let img = Rgb32 {
+            width: 4,
+            height: 4,
+            data: vec![0.5; 48],
+        };
+        let baseline = |look| {
+            let tone = render::Tone::default();
+            let bytes = encode(
+                &img,
+                &DngOptions {
+                    compression: Compression::None,
+                    profile: render::profile(look, tone),
+                    extra_profiles: vec![],
+                    xmp: None,
+                    software: "t",
+                },
+            );
+            let ifd = u32_at(&bytes, 4) as usize;
+            let entry = (0..u16_at(&bytes, ifd) as usize)
+                .map(|i| ifd + 2 + 12 * i)
+                .find(|&e| u16_at(&bytes, e) == 50730)
+                .unwrap();
+            let value = u32_at(&bytes, entry + 8) as usize;
+            u32_at(&bytes, value) as f64 / u32_at(&bytes, value + 4) as f64
+        };
+        assert_eq!(baseline(render::Look::Neutral), STORE_EV as f64);
+        assert_eq!(baseline(render::Look::Flat), 0.0);
     }
 
     fn u16_at(b: &[u8], o: usize) -> u16 {
