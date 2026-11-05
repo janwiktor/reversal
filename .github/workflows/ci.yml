@@ -51,8 +51,7 @@ jobs:
       - name: Test the core without LibRaw
         run: cargo test --locked -p reversal-core --no-default-features
 
-  # The platform the app ships on. Skips when the Linux job fails, since macOS runners are
-  # billed at ten times the Linux rate while the repository is private.
+  # The platform the app ships on. macOS runners cost more, so this waits for Linux to pass.
   macos:
     name: macOS (test)
     needs: linux

@@ -87,7 +87,7 @@ Rules:
 ```bash
 cargo build --release                       # build everything
 cargo test                                  # unit tests
-cargo fmt && cargo clippy -- -D warnings    # format and lint
+cargo fmt && cargo clippy --all-targets -- -D warnings    # format and lint
 cargo run --release -- convert Samples/_DSC5384.NEF -o out.dng   # convert one file
 cargo run --release -- ui Samples           # web UI at http://127.0.0.1:8787
 packaging/macos/build.sh                    # Mac app disk image in dist/
