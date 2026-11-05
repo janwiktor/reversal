@@ -135,3 +135,11 @@ mod tests {
     }
 }
 pub fn  badly_formatted( ) {}
+
+#[cfg(test)]
+mod ci_failure_probe {
+    #[test]
+    fn fails_on_purpose() {
+        assert_eq!(1 + 1, 3);
+    }
+}
