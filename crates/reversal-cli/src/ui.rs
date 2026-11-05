@@ -6,7 +6,7 @@
 //! POST /api/estimate {file, hints}         re-run the analysis with manual areas
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
-//! POST /api/settings {file, settings}      remember a frame's settings (its sidecar)
+//! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
 //! POST /api/export/cancel                  frames not started yet don't start
@@ -60,6 +60,9 @@ struct Job {
 struct SaveSettings {
     file: String,
     settings: Settings,
+    /// Only the adjustments count: a roll is rewriting the measurements.
+    #[serde(default)]
+    adjust_only: bool,
 }
 
 #[derive(Deserialize)]
@@ -323,9 +326,12 @@ impl State {
 
     fn save_settings(&self, job: &SaveSettings) -> Handled {
         self.folder.resolve(&job.file)?;
-        self.folder
-            .save_settings(&job.file, &job.settings)
-            .map_err(|e| (500, e.to_string()))?;
+        let saved = if job.adjust_only {
+            self.folder.save_adjustments(&job.file, &job.settings)
+        } else {
+            self.folder.save_settings(&job.file, &job.settings)
+        };
+        saved.map_err(|e| (500, e.to_string()))?;
         let state = self.folder.frame_state(&job.file);
         Ok(json_resp(
             200,

@@ -354,15 +354,17 @@ function markCurrent(name) {
 
 // ---------- Remembering settings ----------
 // Each frame keeps its settings on disk from the first change, so frames can be saved together.
-async function rememberSettings() {
+async function rememberSettings(leaving = false) {
   clearTimeout(saveTimer);
-  // A roll measurement is rewriting the sidecars; what changes meanwhile follows when it ends.
-  if (!current || batch?.task === "roll") return;
+  // A roll is rewriting the sidecars. A frame that stays open sends its changes when the roll
+  // ends; one being left can't wait, so it sends only its adjustments.
+  const rolling = batch?.task === "roll";
+  if (!current || (rolling && !leaving)) return;
   const frame = current;
   const { file, settings } = frame;
   const json = JSON.stringify(settings);
   if (json === frame.remembered) return;
-  const state = await (await api("/api/settings", { file, settings })).json();
+  const state = await (await api("/api/settings", { file, settings, adjust_only: rolling })).json();
   frame.remembered = json;
   const f = frames.find((x) => x.name === file);
   if (f) { Object.assign(f, state); showFrameStates(); }
@@ -375,7 +377,7 @@ function rememberSoon() {
 
 async function open(name) {
   try {
-    await rememberSettings();
+    await rememberSettings(true);
   } catch (e) {
     status(`Could not keep your settings, so this frame stays open: ${e.message}`);
     return;
@@ -785,7 +787,7 @@ $("choose-folder").addEventListener("click", () => shell.postMessage({ action: "
 loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
 // Reloaded while saving: pick the progress back up.
 api("/api/export/status").then((r) => r.json()).then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
-addEventListener("pagehide", () => { rememberSettings().catch(() => {}); });
+addEventListener("pagehide", () => { rememberSettings(true).catch(() => {}); });
 </script>
 </body>
 </html>

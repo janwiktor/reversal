@@ -123,7 +123,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
             proceed()
         }
         web.callAsyncJavaScript(
-            "await rememberSettings()", arguments: [:], in: nil, in: .page,
+            "await rememberSettings(true)", arguments: [:], in: nil, in: .page,
             completionHandler: { _ in finish() })
         // A page that doesn't answer mustn't stop the app from closing.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: finish)

@@ -193,6 +193,22 @@ impl Folder {
         self.write_settings(file, settings)
     }
 
+    /// Keep a frame's adjustments and whatever is measured on disk: the page's measurements
+    /// may be older, when a roll is rewriting them.
+    pub fn save_adjustments(&self, file: &str, settings: &Settings) -> std::io::Result<()> {
+        let _changing = self.sidecars.lock().unwrap_or_else(|e| e.into_inner());
+        let on_disk = std::fs::read(self.sidecar(file))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Settings>(&bytes).ok());
+        match on_disk {
+            Some(mut saved) => {
+                saved.adjust = settings.adjust.clone();
+                self.write_settings(file, &saved)
+            }
+            None => self.write_settings(file, settings),
+        }
+    }
+
     fn write_settings(&self, file: &str, settings: &Settings) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.out_dir)?;
         reversal_core::write_atomic(&self.sidecar(file), &settings_json(settings))
@@ -325,6 +341,39 @@ mod tests {
         assert!(folder.frame_state("a.NEF").edited);
         folder.save_settings("a.NEF", &changed).unwrap();
         assert!(!folder.frame_state("a.NEF").edited);
+    }
+
+    #[test]
+    fn saving_adjustments_keeps_what_a_roll_measured() {
+        let temp = TempFolder::new("adjustments");
+        let folder = &temp.0;
+        let before_roll = self::settings();
+        let mut rolled = before_roll.clone();
+        rolled.hints.base_rgb = Some([0.3, 0.4, 0.25]);
+        rolled.estimate.base_rgb = [0.3, 0.4, 0.25];
+        folder.save_settings("a.NEF", &rolled).unwrap();
+
+        let mut edited = before_roll;
+        edited.adjust.exposure = 42.0;
+        folder.save_adjustments("a.NEF", &edited).unwrap();
+
+        let bytes = std::fs::read(folder.sidecar("a.NEF")).unwrap();
+        let saved: Settings = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved.adjust.exposure, 42.0);
+        assert_eq!(saved.hints, rolled.hints);
+        assert_eq!(saved.estimate.base_rgb, rolled.estimate.base_rgb);
+    }
+
+    #[test]
+    fn saving_adjustments_of_a_frame_without_a_sidecar_writes_them_all() {
+        let temp = TempFolder::new("first-adjustments");
+        let folder = &temp.0;
+        let mut edited = self::settings();
+        edited.adjust.exposure = 42.0;
+        folder.save_adjustments("a.NEF", &edited).unwrap();
+        let bytes = std::fs::read(folder.sidecar("a.NEF")).unwrap();
+        let saved: Settings = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved, edited);
     }
 
     fn small_scan() -> Rgb32 {
