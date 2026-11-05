@@ -151,10 +151,6 @@
       </div>
       <div class="slider"><label for="area-percent">Center size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
     </div>
-    <div class="setup-row">
-      <div class="group-label">Scan</div>
-      <div class="buttons"><button type="button" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up">Mirror</button></div>
-    </div>
     <p id="setup-note" hidden></p>
   </section>
   <div id="save">
@@ -209,6 +205,7 @@
     <h2 id="h-frame">Frame</h2>
     <div class="buttons">
       <button type="button" id="rotate">Rotate 90°</button>
+      <button type="button" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up">Mirror</button>
     </div>
     <div class="slider" style="margin-top:10px"><label for="straighten">Straighten</label><output for="straighten">0.0°</output><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"></div>
     <div class="group-label"><span class="swatch" style="border-color:var(--crop)"></span>Crop</div>
