@@ -1,0 +1,71 @@
+#!/bin/bash
+# Builds dist/Reversal-<version>-arm64.dmg: an ad hoc signed app with LibRaw built in.
+# Needs Rust and the Xcode command line tools; no Homebrew libraries end up in the app.
+set -euo pipefail
+
+LIBRAW_VERSION=0.22.3
+LIBRAW_SHA256=789f3c33466210a1a0907f747a97c715d21bbf4af712f257fcbbd90111b227e4
+MACOS_TARGET=13.0
+
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+here="$root/packaging/macos"
+build="$root/dist/build"
+version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
+export MACOSX_DEPLOYMENT_TARGET="$MACOS_TARGET"
+mkdir -p "$build"
+
+# LibRaw, static and with only what the conversion uses: the Homebrew library only runs on
+# the macOS it was built for. Colour management is ours and OpenMP isn't needed.
+prefix="$build/libraw-$LIBRAW_VERSION"
+source_dir="$build/LibRaw-$LIBRAW_VERSION"
+if [ ! -f "$prefix/lib/libraw.a" ]; then
+  tarball="$build/LibRaw-$LIBRAW_VERSION.tar.gz"
+  [ -f "$tarball" ] || curl -fsSL -o "$tarball" "https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
+  echo "$LIBRAW_SHA256  $tarball" | shasum -a 256 -c -
+  rm -rf "$source_dir"
+  tar -xzf "$tarball" -C "$build"
+  (cd "$source_dir" &&
+    ./configure --prefix="$prefix" --disable-shared --enable-static --disable-openmp \
+      --disable-lcms --disable-jpeg --enable-zlib --disable-examples >/dev/null &&
+    make -j"$(sysctl -n hw.ncpu)" install >/dev/null)
+fi
+
+# Engine. Its own target folder, so this build doesn't disturb a development build.
+PKG_CONFIG_PATH="$prefix/lib/pkgconfig" CARGO_TARGET_DIR="$build/target" \
+  CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_STRIP=true \
+  cargo build --release --locked --manifest-path "$root/Cargo.toml"
+
+# App bundle.
+app="$build/Reversal.app"
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licences"
+swiftc -O -target "arm64-apple-macos$MACOS_TARGET" "$here/main.swift" -o "$app/Contents/MacOS/Reversal"
+cp "$build/target/release/reversal" "$app/Contents/MacOS/reversal-engine"
+sed "s/@VERSION@/$version/" "$here/Info.plist" >"$app/Contents/Info.plist"
+
+# Licences of what's inside.
+licences="$app/Contents/Resources/Licences"
+cp "$source_dir/LICENSE.CDDL" "$source_dir/COPYRIGHT" "$licences/"
+{
+  echo "LibRaw $LIBRAW_VERSION is used under the CDDL 1.0, see LICENSE.CDDL."
+  echo "Its source code is at https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
+} >"$licences/LibRaw.txt"
+(cd "$root" && cargo tree -e normal --target aarch64-apple-darwin --prefix none --format '{p}' --locked |
+  python3 "$here/notices.py") >"$licences/Rust crates.txt"
+
+# Inside out: the engine first, then the bundle that seals it.
+codesign --force --sign - "$app/Contents/MacOS/reversal-engine"
+codesign --force --sign - "$app"
+codesign --verify --deep --strict "$app"
+
+# Disk image, with a link to drag the app onto.
+stage="$build/dmg"
+rm -rf "$stage"
+mkdir -p "$stage"
+cp -R "$app" "$stage/"
+cp "$here/Read me first.txt" "$stage/"
+ln -s /Applications "$stage/Applications"
+dmg="$root/dist/Reversal-$version-arm64.dmg"
+rm -f "$dmg"
+hdiutil create -quiet -volname "Reversal" -srcfolder "$stage" -format ULMO -fs APFS "$dmg"
+echo "$dmg ($(du -h "$dmg" | cut -f1 | xargs))"

@@ -29,8 +29,12 @@ enum Command {
     Ui {
         /// Folder with raw negatives.
         dir: PathBuf,
+        /// Port on 127.0.0.1; 0 picks a free one.
         #[arg(long, default_value_t = 8787)]
         port: u16,
+        /// Exit when stdin closes. For an app that starts this as its engine.
+        #[arg(long, hide = true)]
+        exit_with_stdin: bool,
     },
 }
 
@@ -108,7 +112,11 @@ fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Convert(args) => convert(args),
-        Command::Ui { dir, port } => ui::serve(dir, port),
+        Command::Ui {
+            dir,
+            port,
+            exit_with_stdin,
+        } => ui::serve(dir, port, exit_with_stdin),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");

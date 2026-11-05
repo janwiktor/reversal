@@ -26,6 +26,7 @@ Naming an app is fine only for compatibility testing (does it open our DNG corre
 crates/reversal-core/   Conversion engine — decode, invert, DNG writer; no UI, no host APIs
 crates/reversal-cli/    `reversal` binary: `convert` command + `ui` (local web UI server)
 crates/reversal-cli/ui/ Web UI assets (plain HTML/JS, embedded in the binary)
+packaging/macos/        Mac app: a small Swift window around the UI, with the binary as its engine
 Samples/              Local sample scans (git-ignored)
 ```
 
@@ -83,6 +84,7 @@ Rules:
 - **LibRaw** (system library via FFI; `brew install libraw pkgconf` on macOS) for raw decoding.
 - Own minimal **DNG writer** in `reversal-core` (no Adobe DNG SDK in the product).
 - **Web UI:** plain HTML/CSS/JS served by the `reversal ui` command; no frontend build step.
+- **Mac app:** `packaging/macos/build.sh`. The window adds only what a page can't do (start the engine, choose a folder), so features belong in the engine and the page, not in Swift.
 
 ## Commands
 
@@ -92,6 +94,7 @@ cargo test                                  # unit tests
 cargo fmt && cargo clippy -- -D warnings    # format and lint
 cargo run --release -- convert Samples/_DSC5384.NEF -o out.dng   # convert one file
 cargo run --release -- ui Samples           # web UI at http://127.0.0.1:8787
+packaging/macos/build.sh                    # Mac app disk image in dist/
 ```
 
 ## Experiments and docs

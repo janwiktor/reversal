@@ -14,7 +14,9 @@ Your source files are never changed. Each DNG stores its conversion settings in 
 
 ## Install
 
-Reversal is built from source. These steps are for macOS with Homebrew.
+The Mac app needs Apple Silicon and macOS 13 or later. It isn't notarised yet, so the disk image includes the steps to open it the first time.
+
+To build from source on macOS with Homebrew:
 
 ```bash
 brew install rustup libraw pkgconf
@@ -32,7 +34,7 @@ If `cargo` isn't found, add `/opt/homebrew/opt/rustup/bin` to your `PATH`.
 
 ## Use
 
-Open the web UI on a folder of scans. It runs locally at http://127.0.0.1:8787 and saves DNGs to a `positives` folder inside that folder.
+In the app, choose a folder of scans. From the command line, open the web UI on a folder; it runs locally at http://127.0.0.1:8787. Both save DNGs to a `positives` folder inside that folder.
 
 ```bash
 ./target/release/reversal ui path/to/scans
@@ -56,6 +58,8 @@ Or convert from the command line:
 | `--crop-area` | Crop to that area; the default keeps the whole scan |
 | `--compression` | `ljpeg` (default) or `none` |
 | `-o` | Output file or folder; the default is `<name>-positive.dng` next to the input |
+
+To build the Mac app, run `packaging/macos/build.sh`, which writes a disk image to `dist/`. It builds LibRaw from source and needs Rust and the Xcode command line tools.
 
 ## Status
 

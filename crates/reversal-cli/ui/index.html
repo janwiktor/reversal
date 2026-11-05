@@ -36,6 +36,8 @@
   #roll { background: var(--panel); border-right: 1px solid var(--panel-edge); padding-top: 14px; display: flex; flex-direction: column; min-height: 0; }
   #roll h1 { font-size: 20px; font-weight: 600; margin: 0 16px 2px; }
   #folder { color: var(--ink-quiet); font-size: 13px; margin: 0 16px 14px; overflow-wrap: anywhere; }
+  #choose-folder { align-self: flex-start; background: none; border: 0; padding: 0; margin: -10px 16px 10px; color: var(--ink-quiet); font-size: 13px; cursor: pointer; }
+  #choose-folder:hover { color: var(--ink); }
   #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
   #files button { width: 100%; text-align: left; background: none; border: 0; padding: 7px 16px; display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
   #files button:hover { background: #383838; }
@@ -117,6 +119,7 @@
 <nav id="roll" aria-label="Frames">
   <h1>Reversal</h1>
   <p id="folder"></p>
+  <button type="button" id="choose-folder" hidden>Open another folder…</button>
   <ul id="files"></ul>
   <section id="setup" aria-labelledby="h-setup">
     <h2><span id="h-setup">Setup</span><button type="button" id="show-areas" aria-pressed="false">Show areas</button></h2>
@@ -575,6 +578,11 @@ function histogram(img, storedClipped) {
   $("stored").hidden = storedClipped < 0.0005;
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
 }
+
+// In the Mac app the shell does what a page can't.
+const shell = window.webkit?.messageHandlers?.reversal;
+$("choose-folder").hidden = !shell;
+$("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
 loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
 </script>

@@ -60,10 +60,26 @@ struct EstimateJob {
     hints: Hints,
 }
 
-pub fn serve(dir: PathBuf, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+/// Serve `dir` on `port`, or on a free port if it's 0. With `exit_with_stdin` the process ends
+/// when stdin closes, so it can't outlive the app that started it.
+pub fn serve(
+    dir: PathBuf,
+    port: u16,
+    exit_with_stdin: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let dir = dir.canonicalize()?;
     let server = Server::http(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map_or(port, |address| address.port());
+    if exit_with_stdin {
+        std::thread::spawn(|| {
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+            std::process::exit(0);
+        });
+    }
     println!(
         "Reversal UI: http://127.0.0.1:{port}  (folder: {})",
         dir.display()
