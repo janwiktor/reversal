@@ -369,7 +369,7 @@ mod tests {
         assert!(spread(px(Look::Vivid)) > spread(px(Look::Flat)));
     }
 
-    fn grey(v: f32) -> Rgb32 {
+    fn gray(v: f32) -> Rgb32 {
         Rgb32 {
             width: 1,
             height: 1,
@@ -392,7 +392,7 @@ mod tests {
     fn previews_keep_neutrals_on_the_rolled_off_curve() {
         let p = profile(Look::Neutral, Tone::default());
         for v in [0.05, 0.3, 0.8] {
-            let out = to_srgb8(&grey(v), &p);
+            let out = to_srgb8(&gray(v), &p);
             let x = highlight_rolloff(v * dng::DISPLAY_LIFT);
             let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
             assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0), "{v}");
@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn previews_keep_detail_above_white() {
         let p = profile(Look::Neutral, Tone::default());
-        let g = |v| to_srgb8(&grey(v), &p)[1];
+        let g = |v| to_srgb8(&gray(v), &p)[1];
         assert!(g(2.0) > g(1.0) + 5);
         assert!(g(2.0) < 255);
     }
@@ -414,7 +414,7 @@ mod tests {
         let v = 3.0;
         let x = v * dng::DISPLAY_LIFT * 2f32.powf(p.exposure_offset);
         let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
-        let out = to_srgb8(&grey(v), &p);
+        let out = to_srgb8(&gray(v), &p);
         assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0));
     }
 
@@ -437,7 +437,7 @@ mod tests {
             };
             display(Look::Neutral, tone, l)
         };
-        // above mid-grey the hard curve is brighter, below it darker
+        // above mid-gray the hard curve is brighter, below it darker
         assert!(at(100.0, 0.7) > at(-100.0, 0.7) && at(100.0, 0.02) < at(-100.0, 0.02));
     }
 }

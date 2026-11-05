@@ -2,16 +2,16 @@
 //!
 //! Per channel c, with transmittance T relative to the film base:
 //!   D  = -log10(T / T_base)                      density above base
-//!   E  = equivalent green density of D           per-frame grey curve for red and blue
+//!   E  = equivalent green density of D           per-frame gray curve for red and blue
 //!   E' = crosstalk and toe corrections of E      fixed, in density
 //!   L  = 10^((E' - anchor) / gamma + offsets)    scene-linear positive
-//! A neutral scene patch lands on the grey curve, so its three E are equal and it stays
+//! A neutral scene patch lands on the gray curve, so its three E are equal and it stays
 //! neutral at every density. `anchor` sets exposure from the frame's highlights and
-//! average density; `offsets` hold the exposure and colour balance sliders. A small
+//! average density; `offsets` hold the exposure and color balance sliders. A small
 //! saturation step follows.
 //!
 //! Geometry: scan → straighten → crop → invert → mirror → quarter turns.
-//! Regions (crop, analysis area, base sample) are normalised scan coordinates.
+//! Regions (crop, analysis area, base sample) are normalized scan coordinates.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,28 +36,28 @@ const LOG10_2: f32 = std::f32::consts::LOG10_2;
 
 /// Pixels at or above this are light through holes or gaps, not film.
 const CLIPPED: f32 = 0.9;
-/// Share of each side of the scan, centred, measured when nobody draws an area: clear of
+/// Share of each side of the scan, centerd, measured when nobody draws an area: clear of
 /// holders and rebates on a framed scan. Tested at 70–95% against reference scans; 95%
 /// takes in holders.
 pub const DEFAULT_AREA_PERCENT: f32 = 85.0;
 
-/// Starting grey curves (bend, slope) for red and blue: the average across rolls.
-/// Each frame's fit is pulled toward these by `GREY_PULL`.
-const GREY_PRIOR: [[f32; 2]; 2] = [[-0.2008, 0.9564], [0.1883, 0.8340]];
-const GREY_PULL: f32 = 0.003;
-/// Pixels within this density of the curve count as grey. The band narrows over the
-/// iterations, so a frame dominated by one colour can't capture the fit early on.
-const GREY_BANDS: [f32; 5] = [0.15, 0.10, 0.07, 0.05, 0.04];
+/// Starting gray curves (bend, slope) for red and blue: the average across rolls.
+/// Each frame's fit is pulled toward these by `GRAY_PULL`.
+const GRAY_PRIOR: [[f32; 2]; 2] = [[-0.2008, 0.9564], [0.1883, 0.8340]];
+const GRAY_PULL: f32 = 0.003;
+/// Pixels within this density of the curve count as gray. The band narrows over the
+/// iterations, so a frame dominated by one color can't capture the fit early on.
+const GRAY_BANDS: [f32; 5] = [0.15, 0.10, 0.07, 0.05, 0.04];
 /// Below this green density the film toe and any error in the base dominate.
-const GREY_MIN_DENSITY: f32 = 0.15;
-const GREY_BIN_EDGES: [f32; 19] = [
+const GRAY_MIN_DENSITY: f32 = 0.15;
+const GRAY_BIN_EDGES: [f32; 19] = [
     0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.45,
     1.7,
 ];
-const GREY_MIN_BIN_PIXELS: usize = 40;
-/// Bins count equally: each density range is its own evidence for grey, however many
+const GRAY_MIN_BIN_PIXELS: usize = 40;
+/// Bins count equally: each density range is its own evidence for gray, however many
 /// pixels of it a scene happens to contain.
-const GREY_BIN_WEIGHT: f32 = 0.25;
+const GRAY_BIN_WEIGHT: f32 = 0.25;
 
 /// Density crosstalk between the dye layers and the sensor, for a D5100 and one light
 /// source: rows give new E_r - E_g, E_b - E_g and the green shift from the old differences.
@@ -77,7 +77,7 @@ const TOE_FLOOR: f32 = -0.3;
 pub struct Hints {
     /// Image area used to measure density range and balance.
     pub analysis: Option<NRect>,
-    /// Size of the centred image area when `analysis` isn't drawn, in percent of each side.
+    /// Size of the centerd image area when `analysis` isn't drawn, in percent of each side.
     pub area_percent: Option<f32>,
     /// Unexposed film (rebate) to read the film base from.
     pub base: Option<NRect>,
@@ -88,13 +88,13 @@ pub struct Hints {
 /// Red or blue density as a function of green density for a neutral:
 /// `D = bend · g² + slope · g` up to `top`, a straight tangent above, through the base.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
-pub struct GreyCurve {
+pub struct GrayCurve {
     pub bend: f32,
     pub slope: f32,
     pub top: f32,
 }
 
-impl GreyCurve {
+impl GrayCurve {
     fn value(&self, g: f32) -> f32 {
         (self.bend * g + self.slope) * g
     }
@@ -131,10 +131,11 @@ pub struct Estimate {
     pub base_rgb: [f32; 3],
     /// Where the base was read from.
     pub base_area: NRect,
-    /// Part of the scan the grey curves and exposure were measured on.
+    /// Part of the scan the gray curves and exposure were measured on.
     pub area: NRect,
-    /// Grey curves of the red and blue layers.
-    pub grey: [GreyCurve; 2],
+    /// Gray curves of the red and blue layers.
+    #[serde(alias = "grey")]
+    pub gray: [GrayCurve; 2],
     /// Density of `E'` that maps to linear 1.0.
     pub anchor: f32,
 }
@@ -213,7 +214,7 @@ impl Adjust {
     }
 }
 
-/// A frame's measurements and adjustments; serialised into the DNG's XMP. They reproduce
+/// A frame's measurements and adjustments; serialized into the DNG's XMP. They reproduce
 /// the conversion only under the same `model`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
@@ -387,14 +388,14 @@ pub fn analysis_image(scan: &Rgb32) -> Rgb32 {
     scan.downsample(ANALYSIS_FACTOR)
 }
 
-fn in_band(px: &[f32; 3], grey: &[GreyCurve; 2], band: f32) -> bool {
-    (px[0] - grey[0].value(px[1])).abs() < band && (px[2] - grey[1].value(px[1])).abs() < band
+fn in_band(px: &[f32; 3], gray: &[GrayCurve; 2], band: f32) -> bool {
+    (px[0] - gray[0].value(px[1])).abs() < band && (px[2] - gray[1].value(px[1])).abs() < band
 }
 
 /// Weighted fit of `bend, slope` to (x, y), pulled toward `prior`.
 fn fit_pulled(points: &[(f32, f32)], prior: [f32; 2]) -> [f32; 2] {
-    let w2 = GREY_BIN_WEIGHT * GREY_BIN_WEIGHT;
-    let (mut aa, mut ab, mut bb, mut ra, mut rb) = (GREY_PULL, 0.0, GREY_PULL, 0.0, 0.0);
+    let w2 = GRAY_BIN_WEIGHT * GRAY_BIN_WEIGHT;
+    let (mut aa, mut ab, mut bb, mut ra, mut rb) = (GRAY_PULL, 0.0, GRAY_PULL, 0.0, 0.0);
     for &(x, y) in points {
         let (a, b) = (x * x, x);
         let residual = y - (prior[0] * a + prior[1] * b);
@@ -411,46 +412,46 @@ fn fit_pulled(points: &[(f32, f32)], prior: [f32; 2]) -> [f32; 2] {
     ]
 }
 
-/// Grey curves of one frame from density-above-base pixels, without any reference: repeatedly
+/// Gray curves of one frame from density-above-base pixels, without any reference: repeatedly
 /// take the pixels near the current curves, and fit the median of each density bin.
-fn fit_grey(density: &[[f32; 3]]) -> [GreyCurve; 2] {
+fn fit_gray(density: &[[f32; 3]]) -> [GrayCurve; 2] {
     let dense: Vec<[f32; 3]> = density
         .iter()
-        .filter(|p| p[1] > GREY_MIN_DENSITY)
+        .filter(|p| p[1] > GRAY_MIN_DENSITY)
         .copied()
         .collect();
-    let curve = |c: [f32; 2], top: f32| GreyCurve {
+    let curve = |c: [f32; 2], top: f32| GrayCurve {
         bend: c[0],
         slope: c[1],
         top,
     };
-    let mut grey = GREY_PRIOR.map(|c| curve(c, 1.0));
-    for band in GREY_BANDS {
-        let mut bins = vec![Vec::new(); GREY_BIN_EDGES.len() - 1];
-        for p in dense.iter().filter(|p| in_band(p, &grey, band)) {
-            let i = GREY_BIN_EDGES.partition_point(|&e| e <= p[1]);
-            if (1..GREY_BIN_EDGES.len()).contains(&i) {
+    let mut gray = GRAY_PRIOR.map(|c| curve(c, 1.0));
+    for band in GRAY_BANDS {
+        let mut bins = vec![Vec::new(); GRAY_BIN_EDGES.len() - 1];
+        for p in dense.iter().filter(|p| in_band(p, &gray, band)) {
+            let i = GRAY_BIN_EDGES.partition_point(|&e| e <= p[1]);
+            if (1..GRAY_BIN_EDGES.len()).contains(&i) {
                 bins[i - 1].push(*p);
             }
         }
         let medians: Vec<[f32; 3]> = bins
             .iter()
-            .filter(|b| b.len() >= GREY_MIN_BIN_PIXELS)
+            .filter(|b| b.len() >= GRAY_MIN_BIN_PIXELS)
             .map(|b| [0, 1, 2].map(|c| median(&mut b.iter().map(|p| p[c]).collect::<Vec<_>>())))
             .collect();
         if medians.len() < 4 {
             break;
         }
         let points = |c: usize| medians.iter().map(|m| (m[1], m[c])).collect::<Vec<_>>();
-        grey = [
-            curve(fit_pulled(&points(0), GREY_PRIOR[0]), 1.0),
-            curve(fit_pulled(&points(2), GREY_PRIOR[1]), 1.0),
+        gray = [
+            curve(fit_pulled(&points(0), GRAY_PRIOR[0]), 1.0),
+            curve(fit_pulled(&points(2), GRAY_PRIOR[1]), 1.0),
         ];
     }
-    let band = GREY_BANDS[GREY_BANDS.len() - 1];
+    let band = GRAY_BANDS[GRAY_BANDS.len() - 1];
     let mut near: Vec<f32> = dense
         .iter()
-        .filter(|p| in_band(p, &grey, band))
+        .filter(|p| in_band(p, &gray, band))
         .map(|p| p[1])
         .collect();
     let top = if near.len() > 200 {
@@ -460,15 +461,15 @@ fn fit_grey(density: &[[f32; 3]]) -> [GreyCurve; 2] {
     } else {
         1.0
     };
-    grey.map(|g| GreyCurve { top, ..g })
+    gray.map(|g| GrayCurve { top, ..g })
 }
 
-/// `E` of a density-above-base pixel: grey curves, then crosstalk.
+/// `E` of a density-above-base pixel: gray curves, then crosstalk.
 #[inline]
-fn equivalent_density(d: [f32; 3], grey: &[GreyCurve; 2]) -> [f32; 3] {
+fn equivalent_density(d: [f32; 3], gray: &[GrayCurve; 2]) -> [f32; 3] {
     let green = d[1];
-    let x = grey[0].equivalent(d[0]) - green;
-    let y = grey[1].equivalent(d[2]) - green;
+    let x = gray[0].equivalent(d[0]) - green;
+    let y = gray[1].equivalent(d[2]) - green;
     let g = green + CROSSTALK[2][0] * x + CROSSTALK[2][1] * y;
     [
         g + CROSSTALK[0][0] * x + CROSSTALK[0][1] * y,
@@ -479,10 +480,10 @@ fn equivalent_density(d: [f32; 3], grey: &[GreyCurve; 2]) -> [f32; 3] {
 
 /// Exposure from the highlights and the scene average together: highlights alone misjudge
 /// frames with small bright lights, the average alone misjudges low-key frames.
-fn fit_anchor(density: &[[f32; 3]], grey: &[GreyCurve; 2]) -> f32 {
+fn fit_anchor(density: &[[f32; 3]], gray: &[GrayCurve; 2]) -> f32 {
     let mut e_g: Vec<f32> = density
         .iter()
-        .map(|&d| equivalent_density(d, grey)[1])
+        .map(|&d| equivalent_density(d, gray)[1])
         .collect();
     // Bare film says nothing about the scene.
     let (mut sum, mut n) = (0.0f64, 0usize);
@@ -508,7 +509,7 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         }
     };
     let area = hints.analysis.unwrap_or_else(|| {
-        NRect::centred(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
+        NRect::centerd(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
     });
 
     let density: Vec<[f32; 3]> = small
@@ -517,18 +518,18 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         .filter(|p| p[0].max(p[1]).max(p[2]) < CLIPPED)
         .map(|p| [0, 1, 2].map(|c| density_above_base(p[c], base_rgb[c])))
         .collect();
-    let grey = fit_grey(&density);
+    let gray = fit_gray(&density);
     Estimate {
         base_rgb,
         base_area,
         area,
-        grey,
-        anchor: fit_anchor(&density, &grey),
+        gray,
+        anchor: fit_anchor(&density, &gray),
     }
 }
 
 /// One film base for a roll from its frames' bases: stock and processing don't change from
-/// frame to frame, and the median outvotes a frame whose base was misread. Grey curves stay
+/// frame to frame, and the median outvotes a frame whose base was misread. Gray curves stay
 /// per frame, which matched finished scans better than curves pooled over a roll.
 pub fn roll_base(frame_bases: &[[f32; 3]]) -> [f32; 3] {
     [0, 1, 2].map(|c| median(&mut frame_bases.iter().map(|b| b[c]).collect::<Vec<_>>()))
@@ -539,7 +540,7 @@ pub fn roll_base(frame_bases: &[[f32; 3]]) -> [f32; 3] {
 pub fn positive(rgb: [f32; 3], e: &Estimate, a: &Adjust) -> [f32; 3] {
     let gains = a.gains_ev();
     let d = [0, 1, 2].map(|c| density_above_base(rgb[c], e.base_rgb[c]));
-    let eq = equivalent_density(d, &e.grey);
+    let eq = equivalent_density(d, &e.gray);
     [0, 1, 2].map(|c| {
         let toe = TOE_AMOUNT * (-eq[c].max(TOE_FLOOR) / TOE_SCALE).exp();
         10f32.powf((eq[c] - toe - e.anchor) / GAMMA_REF + gains[c] * LOG10_2)
@@ -581,13 +582,13 @@ mod tests {
     use super::*;
 
     const BASE: [f32; 3] = [0.3, 0.4, 0.25];
-    const CURVES: [GreyCurve; 2] = [
-        GreyCurve {
+    const CURVES: [GrayCurve; 2] = [
+        GrayCurve {
             bend: -0.15,
             slope: 0.9,
             top: 1.2,
         },
-        GreyCurve {
+        GrayCurve {
             bend: 0.25,
             slope: 0.85,
             top: 1.2,
@@ -599,7 +600,7 @@ mod tests {
             base_rgb: BASE,
             base_area: NRect::FULL,
             area: NRect::FULL,
-            grey: CURVES,
+            gray: CURVES,
             anchor: 0.7,
         }
     }
@@ -628,12 +629,12 @@ mod tests {
     }
 
     /// A neutral of green density `g` on the given curves.
-    fn neutral(g: f32, grey: &[GreyCurve; 2]) -> [f32; 3] {
-        [grey[0].value(g), g, grey[1].value(g)]
+    fn neutral(g: f32, gray: &[GrayCurve; 2]) -> [f32; 3] {
+        [gray[0].value(g), g, gray[1].value(g)]
     }
 
     #[test]
-    fn grey_curve_inverts_and_continues_past_its_ends() {
+    fn gray_curve_inverts_and_continues_past_its_ends() {
         for curve in CURVES {
             let end = curve.value(curve.top);
             for i in 1..=20 {
@@ -647,7 +648,7 @@ mod tests {
             assert!(curve.equivalent(end + 0.5) > curve.top);
             assert!(curve.equivalent(-0.1) < 0.0);
         }
-        let straight = GreyCurve {
+        let straight = GrayCurve {
             bend: 0.0,
             slope: 0.8,
             top: 1.0,
@@ -657,7 +658,7 @@ mod tests {
 
     #[test]
     fn falling_curve_stays_invertible_past_its_turning_point() {
-        let curve = GreyCurve {
+        let curve = GrayCurve {
             bend: -0.6,
             slope: 0.9,
             top: 1.2,
@@ -674,7 +675,7 @@ mod tests {
         let e = est();
         for i in 1..=12 {
             let p = positive(
-                pixel(neutral(i as f32 * 0.1, &e.grey)),
+                pixel(neutral(i as f32 * 0.1, &e.gray)),
                 &e,
                 &Adjust::default(),
             );
@@ -687,7 +688,7 @@ mod tests {
     fn denser_film_is_brighter_and_the_anchor_sets_exposure() {
         let e = est();
         let at =
-            |g: f32, e: &Estimate| positive(pixel(neutral(g, &e.grey)), e, &Adjust::default())[1];
+            |g: f32, e: &Estimate| positive(pixel(neutral(g, &e.gray)), e, &Adjust::default())[1];
         assert!(at(1.0, &e) > at(0.5, &e));
         assert!(at(0.5, &e) > at(0.1, &e));
         let darker = Estimate {
@@ -727,8 +728,8 @@ mod tests {
 
     #[test]
     fn saturation_keeps_neutrals_and_luminance() {
-        let grey = saturate([0.4, 0.4, 0.4], 2.0);
-        assert!(grey.iter().all(|v| (v - 0.4).abs() < 1e-6));
+        let gray = saturate([0.4, 0.4, 0.4], 2.0);
+        assert!(gray.iter().all(|v| (v - 0.4).abs() < 1e-6));
         let c = [0.5, 0.3, 0.2];
         let s = saturate(c, 1.5);
         let luma = |p: [f32; 3]| p.iter().zip(REC2020_LUMA).map(|(v, w)| v * w).sum::<f32>();
@@ -761,19 +762,19 @@ mod tests {
     }
 
     #[test]
-    fn estimate_finds_base_and_measures_the_centre_on_synthetic_scan() {
+    fn estimate_finds_base_and_measures_the_center_on_synthetic_scan() {
         let e = estimate(&synthetic_scan(), &Hints::default());
         for (got, want) in e.base_rgb.iter().zip(BASE) {
             assert!((got - want).abs() < 0.01, "base {:?}", e.base_rgb);
         }
-        assert_eq!(e.area, NRect::centred(DEFAULT_AREA_PERCENT / 100.0));
+        assert_eq!(e.area, NRect::centerd(DEFAULT_AREA_PERCENT / 100.0));
         let hints = Hints {
             area_percent: Some(60.0),
             ..Hints::default()
         };
         assert_eq!(
             estimate(&synthetic_scan(), &hints).area,
-            NRect::centred(0.6)
+            NRect::centerd(0.6)
         );
     }
 
@@ -787,9 +788,9 @@ mod tests {
     }
 
     #[test]
-    fn fit_recovers_the_grey_curve_of_a_neutral_scene() {
+    fn fit_recovers_the_gray_curve_of_a_neutral_scene() {
         let e = estimate_on(&synthetic_scan(), &Hints::default());
-        for (got, want) in e.grey.iter().zip(CURVES) {
+        for (got, want) in e.gray.iter().zip(CURVES) {
             for g in [0.3, 0.6, 0.9] {
                 assert!(
                     (got.value(g) - want.value(g)).abs() < 0.02,
@@ -800,15 +801,15 @@ mod tests {
     }
 
     #[test]
-    fn a_dominant_colour_does_not_capture_the_fit() {
-        // Mostly one strong colour, with far fewer greys: a meadow under a small sky.
+    fn a_dominant_color_does_not_capture_the_fit() {
+        // Mostly one strong color, with far fewer grays: a meadow under a small sky.
         let meadow = (0..12000).map(|i| {
             let d = neutral(0.2 + 0.9 * (i % 100) as f32 / 100.0, &CURVES);
             [d[0] + 0.25, d[1], d[2] - 0.25]
         });
         let sky = (0..2000).map(|i| neutral(0.5 + 0.65 * (i % 100) as f32 / 100.0, &CURVES));
-        let grey = fit_grey(&meadow.chain(sky).collect::<Vec<_>>());
-        for (got, want) in grey.iter().zip(CURVES) {
+        let gray = fit_gray(&meadow.chain(sky).collect::<Vec<_>>());
+        for (got, want) in gray.iter().zip(CURVES) {
             let (got, want) = (got.value(1.0), want.value(1.0));
             assert!((got - want).abs() < 0.03, "{got} {want}");
         }
@@ -817,10 +818,10 @@ mod tests {
     #[test]
     fn fit_falls_back_to_the_prior_without_evidence() {
         for density in [Vec::new(), vec![[0.01, 0.01, 0.01]; 500]] {
-            let grey = fit_grey(&density);
-            assert_eq!([grey[0].bend, grey[0].slope], GREY_PRIOR[0]);
-            assert_eq!([grey[1].bend, grey[1].slope], GREY_PRIOR[1]);
-            assert!(fit_anchor(&density, &grey).is_finite() || density.is_empty());
+            let gray = fit_gray(&density);
+            assert_eq!([gray[0].bend, gray[0].slope], GRAY_PRIOR[0]);
+            assert_eq!([gray[1].bend, gray[1].slope], GRAY_PRIOR[1]);
+            assert!(fit_anchor(&density, &gray).is_finite() || density.is_empty());
         }
     }
 

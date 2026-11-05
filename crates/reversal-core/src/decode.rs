@@ -1,7 +1,7 @@
 //! Raw decoding through the system LibRaw (C API).
 //!
 //! Output is demosaiced, linear, *unbalanced* camera RGB: the negative is measured as
-//! transmittance, so no white balance or camera colour matrix is applied.
+//! transmittance, so no white balance or camera color matrix is applied.
 
 use std::ffi::{c_char, c_float, c_int, c_uint, c_ushort, c_void, CStr, CString};
 use std::path::Path;
@@ -117,7 +117,7 @@ pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
         let (colors, bits) = ((*img).colors as usize, (*img).bits);
         let result = if colors != 3 || bits != 16 {
             Err(DecodeError(format!(
-                "unsupported output: {colors} colours, {bits} bits"
+                "unsupported output: {colors} colors, {bits} bits"
             )))
         } else {
             let samples = std::slice::from_raw_parts((*img).data.as_ptr() as *const u16, w * h * 3);

@@ -1,4 +1,4 @@
-"""Licence texts of the Rust crates in the app, from `cargo tree` output on stdin."""
+"""License texts of the Rust crates in the app, from `cargo tree` output on stdin."""
 
 import glob
 import json

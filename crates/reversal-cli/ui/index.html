@@ -6,7 +6,7 @@
 <title>Reversal</title>
 <style>
   :root {
-    /* Neutral grey surround (no tint) so colour can be judged, as on a viewing booth. */
+    /* Neutral gray surround (no tint) so color can be judged, as on a viewing booth. */
     --surround: #3d3d3d;
     --panel: #2e2e2e;
     --panel-edge: #4a4a4a;
@@ -51,7 +51,7 @@
   #files .state.manual::before { content: "●"; color: var(--base); font-size: 9px; margin-right: 5px; vertical-align: 1px; }
   #select-all { display: flex; align-items: center; color: var(--ink-quiet); font-size: 13px; padding: 0 16px 6px; cursor: pointer; }
 
-  /* Image: JS sizes #view to fit, so rotation always stays centred. */
+  /* Image: JS sizes #view to fit, so rotation always stays centerd. */
   #stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
   #view { position: relative; flex: none; }
   #photo { display: block; width: 100%; height: 100%; }
@@ -146,10 +146,10 @@
     <div class="setup-row">
       <div class="group-label"><span class="swatch" style="border-color:var(--area)"></span>Measured</div>
       <div class="buttons">
-        <button type="button" id="area-auto" aria-pressed="true">Centre</button>
+        <button type="button" id="area-auto" aria-pressed="true">Center</button>
         <button type="button" id="area-draw" aria-pressed="false">Draw</button>
       </div>
-      <div class="slider"><label for="area-percent">Centre size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
+      <div class="slider"><label for="area-percent">Center size</label><output for="area-percent">85%</output><input id="area-percent" type="range" min="50" max="100" step="1" value="85"></div>
     </div>
     <div class="setup-row">
       <div class="group-label">Scan</div>
@@ -221,7 +221,7 @@
 
   </div>
   <div class="actions">
-    <button type="button" id="reset" disabled>Reset tone &amp; colour</button>
+    <button type="button" id="reset" disabled>Reset tone &amp; color</button>
   </div>
 </aside>
 
@@ -231,7 +231,7 @@ const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "bla
 const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
   crop: "Drag over the image to set the crop.",
-  area: "Drag over the part of the scan that is picture (no rebate, no holder). Colour and exposure are measured here.",
+  area: "Drag over the part of the scan that is picture (no rebate, no holder). Color and exposure are measured here.",
   base: "Drag over clear, unexposed film between or beside the frames.",
 };
 
@@ -508,7 +508,7 @@ $("reset").addEventListener("click", () => {
   for (const id of SLIDERS) adj()[id] = 0;
   adj().look = "neutral";
   changed(0);
-  status("Tone and colour are back to the automatic conversion.");
+  status("Tone and color are back to the automatic conversion.");
 });
 
 $("export").addEventListener("click", async () => {
@@ -589,16 +589,16 @@ async function reopenAfterRoll() {
   }
 }
 
-function rollSummary({ done, total, issues, cancelled }) {
-  const head = cancelled ? "Stopped; no frame changed."
+function rollSummary({ done, total, issues, canceled }) {
+  const head = canceled ? "Stopped; no frame changed."
     : issues.length ? "The roll's film base didn't reach every frame."
     : `${total} frames now share one film base. Detect on a frame goes back to its own.`;
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
 
-function batchSummary({ done, total, issues, cancelled, last_path }) {
+function batchSummary({ done, total, issues, canceled, last_path }) {
   const where = last_path ? ` to ${last_path.slice(0, last_path.lastIndexOf("/"))}` : "";
-  const head = total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${cancelled ? ", then stopped" : ""}.`;
+  const head = total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}.`;
   return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
 }
 
@@ -619,7 +619,7 @@ async function setHint(key, rect) {
     $("setup-note").hidden = true;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
     status(key === "base" ? (rect ? "Film base set from your selection." : "Film base detected automatically.")
-                          : (rect ? "Image area set from your selection." : "Measuring the centre of the scan."));
+                          : (rect ? "Image area set from your selection." : "Measuring the center of the scan."));
   } catch (e) {
     if (current?.file === file) status(`Could not measure: ${e.message}`);
   }
@@ -636,7 +636,7 @@ function setTool(t) {
   if (current) changed(0);
 }
 
-// Scan (normalised, straightened) <-> displayed full view: mirror first, then quarter turns.
+// Scan (normalized, straightened) <-> displayed full view: mirror first, then quarter turns.
 function scanToView([x, y], a) {
   if (a.flip_h) x = 1 - x;
   switch (a.rotate % 4) {

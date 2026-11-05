@@ -3,7 +3,7 @@ Reversal alpha for Apple Silicon Macs, macOS 13 or later.
 Install
 1. Drag Reversal to Applications.
 2. Open it. macOS says it can't verify the developer, because this alpha isn't
-   notarised by Apple. Choose Done, not Move to Trash.
+   notarized by Apple. Choose Done, not Move to Trash.
 3. Open System Settings > Privacy & Security, scroll to Security and choose
    Open Anyway next to Reversal. Confirm with your password.
 
@@ -15,5 +15,5 @@ Choose a folder of raw scans, or drop one on the window. Reversal saves DNGs to 
 It doesn't connect to the internet: its window talks only to a program on your Mac.
 
 Known limits
-Tested with Nikon D5100 scans of colour negative film. Other cameras should open, but
-colour was fitted to this camera. DNGs with lossy JPEG compression can't be read.
+Tested with Nikon D5100 scans of color negative film. Other cameras should open, but
+color was fitted to this camera. DNGs with lossy JPEG compression can't be read.

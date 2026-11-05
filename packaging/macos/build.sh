@@ -15,7 +15,7 @@ export MACOSX_DEPLOYMENT_TARGET="$MACOS_TARGET"
 mkdir -p "$build"
 
 # LibRaw, static and with only what the conversion uses: the Homebrew library only runs on
-# the macOS it was built for. Colour management is ours and OpenMP isn't needed.
+# the macOS it was built for. Color management is ours and OpenMP isn't needed.
 prefix="$build/libraw-install-$LIBRAW_VERSION"
 source_dir="$build/LibRaw-$LIBRAW_VERSION"
 if [ ! -f "$prefix/lib/pkgconfig/libraw.pc" ]; then
@@ -43,20 +43,20 @@ fi
 # App bundle.
 app="$build/Reversal.app"
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licences"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licenses"
 swiftc -O -target "arm64-apple-macos$MACOS_TARGET" "$here/main.swift" -o "$app/Contents/MacOS/Reversal"
 cp "$build/target/release/reversal" "$app/Contents/MacOS/reversal-engine"
 sed "s/@VERSION@/$version/" "$here/Info.plist" >"$app/Contents/Info.plist"
 
-# Licences of what's inside.
-licences="$app/Contents/Resources/Licences"
-cp "$source_dir/LICENSE.CDDL" "$source_dir/COPYRIGHT" "$licences/"
+# Licenses of what's inside.
+licenses="$app/Contents/Resources/Licenses"
+cp "$source_dir/LICENSE.CDDL" "$source_dir/COPYRIGHT" "$licenses/"
 {
   echo "LibRaw $LIBRAW_VERSION is used under the CDDL 1.0, see LICENSE.CDDL."
   echo "Its source code is at https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
-} >"$licences/LibRaw.txt"
+} >"$licenses/LibRaw.txt"
 (cd "$root" && cargo tree -e normal --target aarch64-apple-darwin --prefix none --format '{p}' --locked |
-  python3 "$here/notices.py") >"$licences/Rust crates.txt"
+  python3 "$here/notices.py") >"$licenses/Rust crates.txt"
 
 # Inside out: the engine first, then the bundle that seals it.
 codesign --force --sign - "$app/Contents/MacOS/reversal-engine"

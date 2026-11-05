@@ -74,7 +74,7 @@ pub fn saved_settings(
     // An older model's measurements mean nothing now: measure again, keep the user's choices.
     let mut settings = Settings::new(invert::estimate_on(small, &choices.hints), choices.adjust);
     settings.hints = choices.hints;
-    let warning = "These settings came from an older version. Colours were measured again, \
+    let warning = "These settings came from an older version. Colors were measured again, \
                    and your adjustments may need another look.";
     (settings, Some(warning.to_string()))
 }
@@ -184,7 +184,7 @@ impl Folder {
 
     fn write_settings(&self, file: &str, settings: &Settings) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.out_dir)?;
-        let bytes = serde_json::to_vec_pretty(settings).expect("settings serialise");
+        let bytes = serde_json::to_vec_pretty(settings).expect("settings serialize");
         reversal_core::write_atomic(&self.sidecar(file), &bytes)
     }
 

@@ -37,7 +37,7 @@ impl Rect {
     }
 }
 
-/// Rectangle in normalised image coordinates (0..1, origin top-left), so the same
+/// Rectangle in normalized image coordinates (0..1, origin top-left), so the same
 /// region applies to the full scan and to any downsampled copy of it.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NRect {
@@ -55,8 +55,8 @@ impl NRect {
         y1: 1.0,
     };
 
-    /// Centred rectangle covering `share` (0.1…1) of each side.
-    pub fn centred(share: f32) -> NRect {
+    /// Centerd rectangle covering `share` (0.1…1) of each side.
+    pub fn centerd(share: f32) -> NRect {
         let margin = (1.0 - share.clamp(0.1, 1.0)) / 2.0;
         NRect {
             x0: margin,
@@ -95,7 +95,7 @@ impl NRect {
 }
 
 impl Rgb32 {
-    /// Rotate by `degrees` (clockwise positive) about the centre, same canvas size,
+    /// Rotate by `degrees` (clockwise positive) about the center, same canvas size,
     /// bilinear sampling; corners outside the source are filled from the nearest edge.
     pub fn straighten(&self, degrees: f32) -> Rgb32 {
         if degrees.abs() < 1e-3 {
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn straighten_zero_is_identity_and_small_angle_keeps_centre() {
+    fn straighten_zero_is_identity_and_small_angle_keeps_center() {
         let img = numbered(9, 7);
         assert_eq!(img.straighten(0.0).data, img.data);
         let r = img.straighten(3.0);

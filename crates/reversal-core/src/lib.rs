@@ -23,7 +23,7 @@ use invert::Settings;
 
 /// XMP packet stored in every positive: conversion settings and model version, plus `crs:WhiteBalance="As Shot"` so raw editors start from our neutral.
 pub fn xmp_packet(source_name: &str, settings: &Settings) -> String {
-    let json = serde_json::to_string(settings).expect("settings serialise");
+    let json = serde_json::to_string(settings).expect("settings serialize");
     let esc = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")

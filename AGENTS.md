@@ -14,7 +14,7 @@ One shared engine serves every front end:
 Key design decisions: input is camera raw or
 DNG via LibRaw; output is a **positive, scene-linear LinearRaw DNG** (16-bit, linear
 Rec.2020, own camera model "Reversal Positive", embedded profiles); inversion uses an
-explicit **density model** (film base, per-frame grey curves, density crosstalk, exposure).
+explicit **density model** (film base, per-frame gray curves, density crosstalk, exposure).
 
 Describe conversion methods on their own terms. Don't name or compare other
 converters or editors when discussing them, in docs, code comments or commit messages.
@@ -42,20 +42,20 @@ Rules:
 
 ## Domain notes (read before touching image code)
 
-- **Negative types differ.** Colour negative (C-41), black & white, and slide/E-6
-  (already positive) need different pipelines. Never assume colour negative.
-- **Orange mask.** Colour negative film has an orange base. Remove it by sampling
-  the film base (unexposed rebate/border) and neutralising per channel —
+- **Negative types differ.** Color negative (C-41), black & white, and slide/E-6
+  (already positive) need different pipelines. Never assume color negative.
+- **Orange mask.** Color negative film has an orange base. Remove it by sampling
+  the film base (unexposed rebate/border) and neutralizing per channel —
   do not just invert and white-balance afterwards.
 - **Work in linear light.** Do inversion and per-channel scaling on linear data
-  (decoded RAW or linearised TIFF), not gamma-encoded 8-bit values. Apply the
-  output transfer curve / colour space conversion last.
+  (decoded RAW or linearized TIFF), not gamma-encoded 8-bit values. Apply the
+  output transfer curve / color space conversion last.
 - **Precision.** Process internally in 32-bit float (or at least 16-bit). Only
-  quantise on export. Avoid clipping highlights/shadows mid-pipeline.
-- **Grey curves.** The dye layers have different contrast, and it varies with density:
-  map red and blue onto green with a per-frame grey curve (not a black/white point per
+  quantize on export. Avoid clipping highlights/shadows mid-pipeline.
+- **Gray curves.** The dye layers have different contrast, and it varies with density:
+  map red and blue onto green with a per-frame gray curve (not a black/white point per
   channel), so neutrals stay neutral at every density. Scene analysis must exclude the
-  holder around the film and light through holes: it measures a centred share of the scan
+  holder around the film and light through holes: it measures a centerd share of the scan
   unless the user draws an area.
 - **Inputs** include camera RAW (DNG, CR2/CR3, NEF, ARW, RAF…) and scanner TIFFs.
   Preserve and write metadata (EXIF, ICC profile) where possible.
@@ -67,8 +67,9 @@ Rules:
 - Prefer small, pure functions in `reversal-core` that operate on image buffers + a
   parameters struct; keep I/O at the edges.
 - Name parameters with units/meaning (`base_rgb_linear`, `gamma_out`), not `a`, `b`.
-- Document any colour-science formula with a short comment.
+- Document any color-science formula with a short comment.
 - Match the style of surrounding code; don't reformat unrelated files.
+- Use American spelling everywhere: labels, docs, comments and names (`color`, `center`, `gray`).
 
 ## Testing
 

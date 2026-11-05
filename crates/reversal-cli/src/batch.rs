@@ -27,7 +27,7 @@ pub struct Progress {
     pub done: usize,
     pub active: Vec<String>,
     pub issues: Vec<Issue>,
-    pub cancelled: bool,
+    pub canceled: bool,
     /// The latest file written.
     pub last_path: Option<String>,
     pub running: bool,
@@ -47,7 +47,7 @@ impl Batch {
         self.start_then("save", files, workers, work, || None)
     }
 
-    /// Like [`Batch::start`], with a last step once all frames are through: unless cancelled,
+    /// Like [`Batch::start`], with a last step once all frames are through: unless canceled,
     /// `then` runs on the last worker, and an error it returns is reported as an issue.
     pub fn start_then<F, T>(
         &self,
@@ -105,9 +105,9 @@ impl Batch {
         let Some(then) = then.lock().expect("no panics while locked").take() else {
             return;
         };
-        let cancelled = progress.cancelled;
+        let canceled = progress.canceled;
         drop(progress);
-        let issue = if cancelled {
+        let issue = if canceled {
             None
         } else {
             catch_unwind(AssertUnwindSafe(then))
@@ -154,13 +154,13 @@ impl Batch {
     /// Frames being worked on finish; the rest don't start.
     pub fn cancel(&self) {
         let mut progress = self.0.lock().expect("no panics while locked");
-        progress.cancelled |= !progress.queue.is_empty();
+        progress.canceled |= !progress.queue.is_empty();
         progress.queue.clear();
     }
 
     pub fn status(&self) -> serde_json::Value {
         let progress = self.0.lock().expect("no panics while locked");
-        serde_json::to_value(&*progress).expect("progress serialises")
+        serde_json::to_value(&*progress).expect("progress serializes")
     }
 }
 
@@ -260,7 +260,7 @@ mod tests {
         release.send(()).unwrap();
         let status = wait(&batch);
         assert_eq!(status["done"], 1);
-        assert_eq!(status["cancelled"], true);
+        assert_eq!(status["canceled"], true);
         batch
             .start(names(2), 1, |file| {
                 Ok(Done {
