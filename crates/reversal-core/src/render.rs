@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::color;
 use crate::dng;
-use crate::image::Rgb32;
+use crate::image::{for_each_part, Rgb32};
 use crate::invert;
 
 /// Sample count of the tone curves written to the DNG and used for previews.
@@ -207,13 +207,16 @@ pub fn to_srgb8(img: &Rgb32, profile: &dng::Profile) -> Vec<u8> {
         let t = (v / STORED_REACH).clamp(0.0, 1.0).sqrt();
         lut[(t * (N - 1) as f32 + 0.5) as usize]
     };
-    img.pixels()
-        .flat_map(|p| {
+    let mut out = vec![0u8; img.data.len()];
+    for_each_part(&mut out, 3, |start, part| {
+        let pixels = img.data[start..].as_chunks::<3>().0;
+        for (out, &p) in part.as_chunks_mut::<3>().0.iter_mut().zip(pixels) {
             let p = invert::saturate(p.map(|v| v * lift), profile.saturation);
             let s = color::apply(&to_srgb, color::apply(&to_prophoto, p).map(tone));
-            s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8)
-        })
-        .collect()
+            *out = s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8);
+        }
+    });
+    out
 }
 
 /// Encode 8-bit sRGB pixels as a baseline JPEG, always without chroma subsampling

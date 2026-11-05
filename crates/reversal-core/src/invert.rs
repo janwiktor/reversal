@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::image::{NRect, Rgb32};
+use crate::image::{for_each_part, NRect, Rgb32};
 use crate::render::{Look, Tone};
 
 /// Film gamma assumed when turning density into scene log exposure; sets scene contrast.
@@ -549,9 +549,11 @@ pub fn convert_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) ->
     let crop = crop_override.or(a.crop).unwrap_or(NRect::FULL);
     let mut img = straight.crop(crop.to_pixels(straight.width, straight.height));
     let gain = a.saturation_gain();
-    for px in img.data.as_chunks_mut::<3>().0 {
-        *px = saturate(positive(*px, &s.estimate, a), gain);
-    }
+    for_each_part(&mut img.data, 3, |_, part| {
+        for px in part.as_chunks_mut::<3>().0 {
+            *px = saturate(positive(*px, &s.estimate, a), gain);
+        }
+    });
     if a.flip_h {
         img = img.flip_h();
     }

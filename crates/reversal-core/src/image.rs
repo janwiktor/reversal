@@ -248,6 +248,25 @@ impl Rgb32 {
     }
 }
 
+/// Run `f(start, part)` on parts of `data` on all cores; parts hold whole `unit`s, and
+/// `start` is the index of a part's first element. For work that treats each element on its
+/// own, so the result doesn't depend on the split. Runs in place where threads can't start.
+pub fn for_each_part<T: Send>(data: &mut [T], unit: usize, f: impl Fn(usize, &mut [T]) + Sync) {
+    /// Below this a thread costs more than it saves.
+    const MIN_UNITS: usize = 16 * 1024;
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let units = (data.len() / unit).div_ceil(cores).max(MIN_UNITS);
+    if units * unit >= data.len() {
+        return f(0, data);
+    }
+    std::thread::scope(|scope| {
+        for (i, part) in data.chunks_mut(units * unit).enumerate() {
+            let f = &f;
+            scope.spawn(move || f(i * units * unit, part));
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +301,20 @@ mod tests {
         let img = numbered(3, 2); // pixel 0 at top-left
         let r = img.rotate_cw(1);
         assert_eq!(r.get(r.width - 1, 0)[0], 0.0);
+    }
+
+    #[test]
+    fn for_each_part_reaches_every_element_once_with_its_index() {
+        for len in [0, 9, 3 * 100_000 + 3] {
+            let mut data = vec![0usize; len];
+            for_each_part(&mut data, 3, |start, part| {
+                assert_eq!(part.len() % 3, 0);
+                for (i, v) in part.iter_mut().enumerate() {
+                    *v = start + i + 1;
+                }
+            });
+            assert!(data.iter().enumerate().all(|(i, &v)| v == i + 1));
+        }
     }
 
     #[test]
