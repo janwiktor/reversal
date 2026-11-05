@@ -469,7 +469,8 @@ for (const look of LOOKS) {
 let areaTimer = null;
 function setAreaPercent(percent) {
   if (!current) return;
-  hints().area_percent = percent;
+  // The default is no choice at all, however it was reached.
+  hints().area_percent = percent === current.defaultAreaPercent ? null : percent;
   syncControls();
   clearTimeout(areaTimer);
   areaTimer = setTimeout(() => setHint("analysis", null), 150);
