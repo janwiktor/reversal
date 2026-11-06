@@ -61,7 +61,7 @@
   <!-- How the scan is read. These can break the conversion, so they always stay in view. -->
   <div class="panel-head">
     <span id="h-setup">Setup</span>
-    <button type="button" class="head-btn" id="show-areas" aria-pressed="false" title="Show the crop, measured area and film base on the whole scan">Show areas</button>
+    <button type="button" class="head-btn" id="show-areas" aria-pressed="false" title="Show the crop, measured area, film base and the holder left out of measuring on the whole scan">Show areas</button>
   </div>
   <section id="setup" aria-labelledby="h-setup">
     <div class="row first">
@@ -73,7 +73,7 @@
     </div>
     <div class="row">
       <div class="row-label" id="l-area"><span class="swatch area"></span>Measured</div>
-      <div class="seg" role="group" aria-labelledby="l-area" title="Where this frame's color and exposure are measured. This doesn't change the crop.">
+      <div class="seg" role="group" aria-labelledby="l-area" title="Where this frame's color and exposure are measured. Center ignores the film holder, and Draw area measures exactly what you draw. This doesn't change the crop.">
         <button type="button" id="area-auto" aria-pressed="true">Center</button>
         <button type="button" id="area-draw" aria-pressed="false">Draw area</button>
       </div>

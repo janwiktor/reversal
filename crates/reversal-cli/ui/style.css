@@ -24,6 +24,7 @@
   --crop: #ffffff;
   --area: #5ec8ff;
   --base: #ffb547;
+  --holder: #d0009a;
   --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --left: 220px;
   --right: 272px;
@@ -160,6 +161,8 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(
 #overlay .crop { stroke: var(--crop); }
 #overlay .area { stroke: var(--area); stroke-dasharray: 6 4; }
 #overlay .base { stroke: var(--base); }
+#overlay .holder { fill: url(#holder-hatch); }
+#overlay .hatch { fill: var(--holder); stroke: none; }
 #overlay .drag { stroke: var(--crop); stroke-dasharray: 3 3; }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
 #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); padding: 6px 6px 6px 12px; display: flex; gap: 12px; align-items: center; }

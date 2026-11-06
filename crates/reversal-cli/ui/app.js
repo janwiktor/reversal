@@ -687,7 +687,7 @@ function setTool(t) {
   tool = t;
   $("overlay").toggleAttribute("hidden", !t); // SVG elements don't reflect .hidden
   $("toolbar").hidden = !t;
-  $("tool-text").textContent = t === "show" ? "Showing the crop, measured area and film base." : TOOL_TEXT[t] ?? "";
+  $("tool-text").textContent = t === "show" ? "Showing the crop, measured area and film base. Hatched is the holder, left out of measuring." : TOOL_TEXT[t] ?? "";
   if (current) changed(0);
 }
 
@@ -719,10 +719,27 @@ function svgRect(r, cls) {
   const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
   return `<rect class="${cls}" x="${v.x0}" y="${v.y0}" width="${v.x1 - v.x0}" height="${v.y1 - v.y0}"/>`;
 }
+// What the analysis ignores as film holder, as one shape. A drawn area is measured as drawn.
+function holderShape() {
+  if (hints().analysis || !current.holder?.areas.length) return "";
+  const a = adj();
+  const d = current.holder.areas.map((r) => {
+    const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
+    return `M${v.x0} ${v.y0}H${v.x1}V${v.y1}H${v.x0}Z`;
+  }).join("");
+  // Hatched, because a holder can show in any color, and a tint would read as one of the others.
+  return `<pattern id="holder-hatch" width="0.016" height="0.016" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hatch" width="0.006" height="0.016"/></pattern><path class="holder" d="${d}"/>`;
+}
+async function loadHolder() {
+  const file = current.file, base_rgb = current.settings.estimate.base_rgb, key = base_rgb.join();
+  if (current.holder?.key === key) return;
+  const { areas } = await (await api("/api/holder", { file, base_rgb })).json();
+  if (current?.file === file) current.holder = { key, areas };
+}
 function drawOverlay(drag) {
   if (!current || !tool) return;
   const e = current.settings.estimate;
-  let s = svgRect(e.area, "area") + svgRect(e.base_area, "base");
+  let s = holderShape() + svgRect(e.area, "area") + svgRect(e.base_area, "base");
   if (adj().crop) s += svgRect(adj().crop, "crop");
   if (drag) s += `<rect class="drag" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
   $("overlay").innerHTML = s;
@@ -773,6 +790,10 @@ async function refresh() {
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
+    if (tool) {
+      await loadHolder();
+      if (file !== current?.file) return;
+    }
     drawOverlay();
     histogram(img, clipped);
   } catch (e) {

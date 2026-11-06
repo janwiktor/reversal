@@ -8,6 +8,7 @@
 //! GET  /api/files                          raw files in the folder
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
 //! POST /api/estimate {file, hints}         re-run the analysis with manual areas
+//! POST /api/holder   {file, base_rgb}       where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
@@ -104,6 +105,12 @@ struct RollVote {
 struct RollApply {
     files: Vec<String>,
     bases: Vec<[f32; 3]>,
+}
+
+#[derive(Deserialize)]
+struct HolderJob {
+    file: String,
+    base_rgb: [f32; 3],
 }
 
 #[derive(Deserialize)]
@@ -285,6 +292,12 @@ impl State {
                 let loaded = self.ensure_loaded(&job.file)?;
                 let estimate = invert::estimate_on(&loaded.small, &job.hints);
                 Ok(json_resp(200, &json!(estimate)))
+            }
+            (Method::Post, "/api/holder") => {
+                let job: HolderJob = read_body(req)?;
+                let loaded = self.ensure_loaded(&job.file)?;
+                let areas = invert::holder_areas(&loaded.small, job.base_rgb);
+                Ok(json_resp(200, &json!({ "areas": areas })))
             }
             (Method::Post, "/api/preview") => {
                 let job: Job = read_body(req)?;

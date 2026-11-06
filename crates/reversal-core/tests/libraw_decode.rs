@@ -329,8 +329,11 @@ fn decoded_negative_converts_to_a_positive_dng_that_reads_back() {
         x1: 0.25,
         y1: 0.5,
     };
+    // The gray scale fills the scan, so its densest patches touch the edge and would read as a
+    // holder. Drawing the area says where the picture is, as a user would on such a scan.
     let hints = Hints {
         base: Some(unexposed),
+        analysis: Some(NRect::centered(invert::DEFAULT_AREA_PERCENT / 100.0)),
         ..Hints::default()
     };
     let estimate = invert::estimate(&scan, &hints);

@@ -98,7 +98,7 @@ Here T is the signal, T\_base the film base, g\_c the frame's gray curve (identi
 | Value | How it's measured | Override |
 | --- | --- | --- |
 | Film base | The largest even patch of the brightest film, trying the film's edges first, then a strip across the scan such as the gap between frames. Holes, markings and picture detail break a patch's evenness, and the holder is darker. Saying detection failed is preferred to marking an unwanted area: when no patch looks like clear film, the app warns, keeps a best guess for the conversion, and asks for a pick or a roll base | Picked by hand, or shared across a roll |
-| Measured area | The centered 85% of each side, clear of holders and rebates on a framed scan | Size from 50 to 100%, or drawn by hand |
+| Measured area | The centered 85% of each side, leaving out the film holder: cells far denser than film (green density above 1.2) connected to the scan's edge, plus a small margin for the holder's soft edge. Dense cells that reach the middle of the scan are picture, so they don't count as holder. This only affects measuring, not how the holder renders | Size from 50 to 100%, or drawn by hand. A drawn area is measured exactly as drawn, holder included |
 | Gray curves | Fitted to the frame's own near-neutral pixels, with no reference. The band narrows from ±0.15 to ±0.04 density, bins count equally, and the fit is pulled lightly toward an average across rolls | None; there are no RGB or CMY controls |
 | Exposure anchor | The mean of the 99th percentile and the average of equivalent green density | The Exposure slider |
 
@@ -121,8 +121,8 @@ Setup decides how the scan is read. It stays pinned above the development contro
 | Control | Choices |
 | --- | --- |
 | Film base | Detect or Pick by hand. Match film base… shares one across frames |
-| Measured | Center (size 50–100%, default 85%), or Draw area by hand. Sets where color and exposure are measured, never the crop |
-| Show areas | Draws the crop, measured area and film base on the whole scan |
+| Measured | Center (size 50–100%, default 85%, without the holder), or Draw area by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
+| Show areas | Draws the crop, measured area and film base on the whole scan, with the holder left out of measuring hatched. With a drawn area nothing is left out, so no hatching shows |
 
 A dot in the frame list marks a film base or area set by hand.
 

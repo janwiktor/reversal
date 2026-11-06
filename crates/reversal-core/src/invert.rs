@@ -22,7 +22,7 @@ use crate::render::{Look, Tone};
 pub const GAMMA_REF: f32 = 0.7;
 /// Version of the conversion model. Bump when the inversion, `BASE_SATURATION`, the
 /// DNG's stored scale or the tone curve change, since old settings then render differently.
-pub const MODEL_VERSION: u32 = 2;
+pub const MODEL_VERSION: u32 = 3;
 /// Built-in saturation (linear, around Rec.2020 luminance). Matched the chroma of
 /// reference scans (22 frames, 6 rolls).
 pub const BASE_SATURATION: f32 = 1.25;
@@ -40,6 +40,20 @@ const CLIPPED: f32 = 0.9;
 /// holders and rebates on a framed scan. Tested at 70–95% against reference scans; 95%
 /// takes in holders.
 pub const DEFAULT_AREA_PERCENT: f32 = 85.0;
+
+/// A film holder blocks the light, so it reads far denser than film: above this green density,
+/// connected to the scan's edge. Picture this dense sits inside the frame, and at 1.0 real picture
+/// joined the holder on two of 44 tested frames.
+const HOLDER_DENSITY: f32 = 1.2;
+/// Grid the holder is searched on, in analysis pixels. Each cell reads its median, so grain can't
+/// break up the holder.
+const HOLDER_CELL: usize = 4;
+/// Margin around the holder, as a share of the scan's long side: its soft edge passes through
+/// every density and would otherwise mislead the gray fit.
+const HOLDER_MARGIN: f32 = 0.013;
+/// Share of each side, centered, that no holder reaches. Dense cells in there are picture that
+/// happens to touch the edge, as on a scan cropped into the picture, so nothing counts as holder.
+const HOLDER_CLEAR_CENTER: f32 = 0.5;
 
 /// Starting gray curves (bend, slope) for red and blue: the average across rolls.
 /// Each frame's fit is pulled toward these by `GRAY_PULL`.
@@ -280,11 +294,15 @@ fn channel_medians(img: &Rgb32) -> [f32; 3] {
 /// Clipped pixels and their surroundings, which catch glare from holes and gaps.
 fn near_clipped(small: &Rgb32) -> Vec<bool> {
     let (w, h) = (small.width, small.height);
-    let reach = w.max(h) / 200;
-    let mut out: Vec<bool> = small
+    let clipped = small
         .pixels()
         .map(|p| p[0].max(p[1]).max(p[2]) >= CLIPPED)
         .collect();
+    dilate(clipped, w, h, w.max(h) / 200)
+}
+
+/// Grows a mask by `reach` pixels in each direction, as a square.
+fn dilate(mut out: Vec<bool>, w: usize, h: usize, reach: usize) -> Vec<bool> {
     for horizontal in [true, false] {
         let src = out.clone();
         let (lines, len) = if horizontal { (h, w) } else { (w, h) };
@@ -314,6 +332,128 @@ fn near_clipped(small: &Rgb32) -> Vec<bool> {
         }
     }
     out
+}
+
+/// Pixels of the film holder, with a margin around it, on an image from [`analysis_image`]: cells
+/// denser than any film, connected to the scan's edge, so dense picture inside the frame stays.
+/// `None` when the scan shows no holder, or the cells reach its center and so aren't a holder.
+pub fn holder_pixels(small: &Rgb32, base_rgb: [f32; 3]) -> Option<Vec<bool>> {
+    let (w, h) = (small.width, small.height);
+    let (cols, rows) = (w / HOLDER_CELL, h / HOLDER_CELL);
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+    // Density above base as a level: green below this is denser than the limit.
+    let limit = base_rgb[1] * 10f32.powf(-HOLDER_DENSITY);
+    let mut greens = Vec::with_capacity(HOLDER_CELL * HOLDER_CELL);
+    let mut dense = vec![false; cols * rows];
+    for row in 0..rows {
+        for col in 0..cols {
+            greens.clear();
+            for y in row * HOLDER_CELL..(row + 1) * HOLDER_CELL {
+                for x in col * HOLDER_CELL..(col + 1) * HOLDER_CELL {
+                    greens.push(small.get(x, y)[1]);
+                }
+            }
+            dense[row * cols + col] = median(&mut greens) < limit;
+        }
+    }
+    let mut reached = vec![false; cols * rows];
+    let mut stack: Vec<usize> = (0..cols * rows)
+        .filter(|&i| {
+            let (row, col) = (i / cols, i % cols);
+            dense[i] && (row == 0 || col == 0 || row + 1 == rows || col + 1 == cols)
+        })
+        .collect();
+    while let Some(i) = stack.pop() {
+        if std::mem::replace(&mut reached[i], true) {
+            continue;
+        }
+        let (row, col) = (i / cols, i % cols);
+        if row > 0 && dense[i - cols] && !reached[i - cols] {
+            stack.push(i - cols);
+        }
+        if row + 1 < rows && dense[i + cols] && !reached[i + cols] {
+            stack.push(i + cols);
+        }
+        if col > 0 && dense[i - 1] && !reached[i - 1] {
+            stack.push(i - 1);
+        }
+        if col + 1 < cols && dense[i + 1] && !reached[i + 1] {
+            stack.push(i + 1);
+        }
+    }
+    if !reached.contains(&true) {
+        return None;
+    }
+    let center = NRect::centered(HOLDER_CLEAR_CENTER).to_pixels(cols, rows);
+    let in_center = (center.top..center.bottom)
+        .any(|row| (center.left..center.right).any(|col| reached[row * cols + col]));
+    if in_center {
+        return None;
+    }
+    let mut mask = vec![false; w * h];
+    for row in 0..rows {
+        for col in 0..cols {
+            if reached[row * cols + col] {
+                for y in row * HOLDER_CELL..(row + 1) * HOLDER_CELL {
+                    mask[y * w + col * HOLDER_CELL..y * w + (col + 1) * HOLDER_CELL].fill(true);
+                }
+            }
+        }
+    }
+    let margin = (w.max(h) as f32 * HOLDER_MARGIN).round() as usize;
+    Some(dilate(mask, w, h, HOLDER_CELL + margin))
+}
+
+/// The pixels of [`holder_pixels`] as rectangles, for showing what the analysis ignores.
+pub fn holder_areas(small: &Rgb32, base_rgb: [f32; 3]) -> Vec<NRect> {
+    let Some(mask) = holder_pixels(small, base_rgb) else {
+        return Vec::new();
+    };
+    let (w, h) = (small.width, small.height);
+    let mut done = Vec::new();
+    // Runs of the row above, as (left, right, top), which continue while a row repeats them.
+    let mut open: Vec<(usize, usize, usize)> = Vec::new();
+    for y in 0..=h {
+        let mut runs = Vec::new();
+        if y < h {
+            let line = &mask[y * w..(y + 1) * w];
+            let mut x = 0;
+            while x < w {
+                if line[x] {
+                    let left = x;
+                    while x < w && line[x] {
+                        x += 1;
+                    }
+                    runs.push((left, x));
+                } else {
+                    x += 1;
+                }
+            }
+        }
+        let mut next = Vec::with_capacity(runs.len());
+        for &(left, right, top) in &open {
+            if runs.contains(&(left, right)) {
+                next.push((left, right, top));
+            } else {
+                let rect = crate::image::Rect {
+                    left,
+                    top,
+                    right,
+                    bottom: y,
+                };
+                done.push(NRect::from_pixels(rect, w, h));
+            }
+        }
+        for &(left, right) in &runs {
+            if !next.iter().any(|&(l, r, _)| (l, r) == (left, right)) {
+                next.push((left, right, y));
+            }
+        }
+        open = next;
+    }
+    done
 }
 
 /// A film base read from one scan.
@@ -589,9 +729,16 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         NRect::centered(hints.area_percent.unwrap_or(DEFAULT_AREA_PERCENT) / 100.0)
     });
 
-    let density: Vec<[f32; 3]> = small
-        .crop(area.to_pixels(w, h))
-        .pixels()
+    // A drawn area is the user's word on where the picture is, so it's measured as drawn.
+    let holder = match hints.analysis {
+        Some(_) => None,
+        None => holder_pixels(small, base_rgb),
+    };
+    let r = area.to_pixels(w, h);
+    let density: Vec<[f32; 3]> = (r.top..r.bottom)
+        .flat_map(|y| (r.left..r.right).map(move |x| (x, y)))
+        .filter(|&(x, y)| holder.as_ref().is_none_or(|mask| !mask[y * w + x]))
+        .map(|(x, y)| small.get(x, y))
         .filter(|p| p[0].max(p[1]).max(p[2]) < CLIPPED)
         .map(|p| [0, 1, 2].map(|c| density_above_base(p[c], base_rgb[c])))
         .collect();
@@ -685,6 +832,104 @@ mod tests {
             gray: CURVES,
             anchor: 0.7,
         }
+    }
+
+    /// Film with varied neutral density in the middle of a scan, and holder on the sides.
+    fn scan_in_holder(holder: bool) -> Rgb32 {
+        let mut scan = Rgb32::new(400, 300);
+        for y in 0..300 {
+            for x in 0..400 {
+                let side = !(80..320).contains(&x);
+                let d = if holder && side {
+                    2.2
+                } else {
+                    0.2 + 0.9 * (((x * 7 + y * 13) % 97) as f32 / 96.0)
+                };
+                let px = pixel([d, d, d]);
+                scan.data[(y * 400 + x) * 3..(y * 400 + x) * 3 + 3].copy_from_slice(&px);
+            }
+        }
+        scan
+    }
+
+    fn with_base() -> Hints {
+        Hints {
+            base_rgb: Some(BASE),
+            ..Hints::default()
+        }
+    }
+
+    #[test]
+    fn a_holder_doesnt_set_the_exposure_and_a_drawn_area_overrides_it() {
+        let scan = scan_in_holder(true);
+        let mask = holder_pixels(&scan, BASE).unwrap();
+        assert!(mask[150 * 400 + 5] && mask[150 * 400 + 395], "holder");
+        assert!(!mask[150 * 400 + 200], "picture");
+
+        // Measured around the holder, as if only the film were in the scan.
+        let film = NRect::from_pixels(
+            crate::image::Rect {
+                left: 90,
+                top: 23,
+                right: 310,
+                bottom: 277,
+            },
+            400,
+            300,
+        );
+        let drawn = |analysis| Hints {
+            analysis: Some(analysis),
+            ..with_base()
+        };
+        let ignored = estimate_on(&scan, &with_base()).anchor;
+        assert!((ignored - estimate_on(&scan, &drawn(film)).anchor).abs() < 0.02);
+
+        // A drawn area is measured as drawn, holder included.
+        assert!(estimate_on(&scan, &drawn(NRect::FULL)).anchor > ignored + 0.3);
+    }
+
+    #[test]
+    fn a_scan_without_a_holder_measures_as_before() {
+        let scan = scan_in_holder(false);
+        assert_eq!(holder_pixels(&scan, BASE), None);
+        assert_eq!(holder_areas(&scan, BASE), Vec::new());
+    }
+
+    #[test]
+    fn dense_picture_is_not_a_holder() {
+        // Inside the frame, away from the edge.
+        let mut scan = scan_in_holder(false);
+        for y in 100..200 {
+            for x in 150..250 {
+                let px = pixel([2.2, 2.2, 2.2]);
+                scan.data[(y * 400 + x) * 3..(y * 400 + x) * 3 + 3].copy_from_slice(&px);
+            }
+        }
+        assert_eq!(holder_pixels(&scan, BASE), None);
+        // Touching the edge and running into the center: picture on a scan with no holder.
+        for y in 140..160 {
+            for x in 0..250 {
+                let px = pixel([2.2, 2.2, 2.2]);
+                scan.data[(y * 400 + x) * 3..(y * 400 + x) * 3 + 3].copy_from_slice(&px);
+            }
+        }
+        assert_eq!(holder_pixels(&scan, BASE), None);
+    }
+
+    #[test]
+    fn holder_areas_cover_exactly_the_holder_pixels() {
+        let scan = scan_in_holder(true);
+        let mask = holder_pixels(&scan, BASE).unwrap();
+        let areas = holder_areas(&scan, BASE);
+        assert!(!areas.is_empty() && areas.len() < 20);
+        let mut drawn = vec![false; mask.len()];
+        for area in areas {
+            let r = area.to_pixels(400, 300);
+            for y in r.top..r.bottom {
+                drawn[y * 400 + r.left..y * 400 + r.right].fill(true);
+            }
+        }
+        assert!(drawn == mask);
     }
 
     #[test]
