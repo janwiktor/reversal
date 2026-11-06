@@ -14,7 +14,7 @@ Open it in a RAW editor of your choice, on desktop or mobile, with no plugin or 
 
 ## Status
 
-Reversal is pre-alpha, so expect rough edges and changes.
+Reversal is pre-alpha, so expect rough edges and changes. Submit feedback via [GitHub issues](https://github.com/janwiktor/reversal/issues).
 
 - **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI.
 - **Film:** color negative only. Black and white not handled yet.
