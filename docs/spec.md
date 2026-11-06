@@ -47,7 +47,7 @@ The output is a 16-bit, scene-linear LinearRaw DNG in linear Rec.2020, with loss
 | Profiles | Reversal Neutral, Flat and Vivid; the chosen one is the main profile | Editors can switch, and Apple Photos applies only the main profile |
 | Compression | Lossless JPEG, tiled at 256 px; uncompressed as an option | Read everywhere |
 | Geometry | Applied to the pixels; orientation tag stays normal | Nothing depends on a reader honoring crops or rotation |
-| Crop | Whole scan unless the user crops | Keeps rebate and holder by default |
+| Crop | Entire scan unless the user crops | Keeps rebate and holder by default |
 | Previews | 256 px thumbnail, 1024 px sRGB JPEG | Fast browsing |
 | Metadata | Source file name and all settings in XMP | The conversion can be repeated |
 
@@ -83,7 +83,7 @@ Conversion happens in density and writes a scene-linear positive. Film records l
 6. **Toe.** A small toe shared by all channels, expanded near the base.
 7. **Back to linear.** Exposure anchor and film gamma turn density into scene-linear RGB, with the exposure and color sliders as per-channel offsets in stops.
 8. **Saturation.** Linear, around Rec.2020 luminance, 1.25 by default.
-9. **Geometry and writing.** Straighten and crop come before inversion, mirror and quarter turns after. Then the DNG is written.
+9. **Geometry and writing.** Straighten and crop come before inversion, mirror and quarter turns after. Measuring reads the straightened scan too, so the areas match what's shown. Then the DNG is written.
 
 Steps 3 to 7 per channel c:
 
@@ -120,11 +120,11 @@ Setup decides how the scan is read. It stays pinned above the development contro
 
 | Control | Choices |
 | --- | --- |
-| Film base | Detect or Pick by hand. Match film base… shares one across frames |
-| Measured | Center (size 50–100%, default 85%, without the holder), or Draw area by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
-| Show areas | Draws the crop, measured area and film base on the whole scan, with the holder left out of measuring hatched. With a drawn area nothing is left out, so no hatching shows |
+| Film base | Detect, or Custom to drag over clear film by hand. Match film base… shares one across frames |
+| Measured | Center (size 50–100%, default 85%, without the holder), or Custom to drag over the picture by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
+| Show areas | Draws the film base, measured area and crop on the entire scan, each in the color of its label. With Center, the detected holder is hatched in magenta and labeled Film holder (detected) under Measured. A custom area leaves nothing out, so neither the hatching nor the label shows |
 
-A dot in the frame list marks a film base or area set by hand.
+Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Done or Escape does too. A dot in the frame list marks a film base or area set by hand.
 
 ### Development
 
@@ -140,8 +140,8 @@ A dot in the frame list marks a film base or area set by hand.
 | Tint | Green against red and blue | Pixels |
 | Saturation | −100 is black and white | Pixels |
 | Rotate 90°, Mirror | Quarter turns, left-right flip; both act on the image as shown | Pixels |
-| Straighten | ±10° | Pixels |
-| Crop | Whole scan, Measured area, or Draw crop. Sets what the DNG keeps, never the colors | Pixels |
+| Straighten | ±10°. A new angle closes Show areas and any open drag tool. Film base and colors are measured again on letting go of the slider, or after a short pause for arrow keys and typed values, never while it's held | Pixels and measuring |
+| Crop | Entire scan, Measured area, or Custom. Sets what the DNG keeps, never the colors | Pixels |
 
 Reset, in the Develop header, returns the tone and color controls to 0 and the profile to Neutral. It leaves geometry, crop and Setup alone.
 
@@ -218,8 +218,8 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 
 - **Film:** color negative only; black and white and slide film need their own pipelines.
 - **Cameras:** tested only with Nikon D5100 scans. Others LibRaw reads should open, but the crosstalk correction was fitted to this camera and one light source.
-- **Full strips:** the centered area doesn't suit them, so draw the area and crop there.
-- **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Pick the base, or match it across the roll.
+- **Full strips:** the centered area doesn't suit them, so set a custom measured area and crop there.
+- **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Set a custom film base, or match it across the roll.
 - **Metadata:** camera EXIF isn't copied to the DNG.
 - **Mac app:** Apple Silicon only, and it can't read DNGs with lossy JPEG compression. It is ad hoc signed, so users approve it with Open Anyway.
 

@@ -176,7 +176,8 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .map(|input| {
                 let scan = reversal_core::decode::decode(input)?;
-                Ok(invert::detect_base(&invert::analysis_image(&scan)))
+                let small = invert::analysis_image(&scan).straighten(args.straighten);
+                Ok(invert::detect_base(&small))
             })
             .collect::<Result<Vec<_>, reversal_core::decode::DecodeError>>()?;
         // Frames with no clear film don't get a say, unless none has any.
@@ -196,7 +197,9 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             base_rgb,
             ..area_hints.clone()
         };
-        let mut settings = Settings::new(invert::estimate(&scan, &hints), adjust.clone());
+        // Measured as it will be seen, the same way the web UI does it.
+        let small = invert::analysis_image(&scan).straighten(args.straighten);
+        let mut settings = Settings::new(invert::estimate_on(&small, &hints), adjust.clone());
         settings.hints = hints;
         if args.crop_area {
             settings.adjust.crop = Some(settings.estimate.area);

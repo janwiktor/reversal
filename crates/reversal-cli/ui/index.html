@@ -23,9 +23,9 @@
     <span class="sep"></span>
     <span id="crop-label"><span class="swatch crop"></span>Crop</span>
     <div class="seg" role="group" aria-labelledby="crop-label" title="What the saved DNG keeps. This doesn't change the colors.">
-      <button type="button" id="crop-full" aria-pressed="true">Whole scan</button>
+      <button type="button" id="crop-full" aria-pressed="true">Entire scan</button>
       <button type="button" id="crop-frame" aria-pressed="false" title="Keep the area measured in Setup">Measured area</button>
-      <button type="button" id="crop-draw" aria-pressed="false" title="Draw what the saved DNG keeps. This doesn't change the colors.">Draw crop</button>
+      <button type="button" id="crop-draw" aria-pressed="false" title="Draw what the saved DNG keeps. This doesn't change the colors.">Custom</button>
     </div>
     <span class="sep"></span>
     <div class="slider"><label for="straighten">Straighten</label><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"><input class="val" id="straighten-val" type="text" inputmode="decimal" aria-label="Straighten value" value="0.0°"></div>
@@ -61,24 +61,27 @@
   <!-- How the scan is read. These can break the conversion, so they always stay in view. -->
   <div class="panel-head">
     <span id="h-setup">Setup</span>
-    <button type="button" class="head-btn" id="show-areas" aria-pressed="false" title="Show the crop, measured area, film base and the holder left out of measuring on the whole scan">Show areas</button>
+    <button type="button" class="head-btn" id="show-areas" aria-pressed="false" title="Show the film base, measured area, final crop and detected film holder on the entire scan">Show areas</button>
   </div>
   <section id="setup" aria-labelledby="h-setup">
     <div class="row first">
       <div class="row-label" id="l-base"><span class="swatch base"></span>Film base</div>
       <div class="seg" role="group" aria-labelledby="l-base" title="Clear, unexposed film, which sets the color conversion for this frame">
         <button type="button" id="base-auto" aria-pressed="true">Detect</button>
-        <button type="button" id="base-draw" aria-pressed="false">Pick</button>
+        <button type="button" id="base-draw" aria-pressed="false">Custom</button>
       </div>
     </div>
     <div class="row">
       <div class="row-label" id="l-area"><span class="swatch area"></span>Measured</div>
-      <div class="seg" role="group" aria-labelledby="l-area" title="Where this frame's color and exposure are measured. Center ignores the film holder, and Draw area measures exactly what you draw. This doesn't change the crop.">
+      <div class="seg" role="group" aria-labelledby="l-area" title="Where this frame's color and exposure are measured. Center ignores the film holder, and Custom measures exactly what you draw. This doesn't change the crop.">
         <button type="button" id="area-auto" aria-pressed="true">Center</button>
-        <button type="button" id="area-draw" aria-pressed="false">Draw area</button>
+        <button type="button" id="area-draw" aria-pressed="false">Custom</button>
       </div>
     </div>
-    <div class="slider"><label for="area-percent">Center size</label><input id="area-percent" class="from-min" type="range" min="50" max="100" step="1" value="85"><input class="val" id="area-percent-val" type="text" inputmode="numeric" aria-label="Center size value" value="85%"></div>
+    <div class="row" id="holder-legend" hidden>
+      <div class="row-label"><span class="swatch holder"></span>Film holder (detected)</div>
+    </div>
+    <div class="slider" id="area-percent-row"><label for="area-percent">Center size</label><input id="area-percent" class="from-min" type="range" min="50" max="100" step="1" value="85"><input class="val" id="area-percent-val" type="text" inputmode="numeric" aria-label="Center size value" value="85%"></div>
     <div class="row">
       <div class="row-label">Roll</div>
       <button type="button" class="btn" id="base-roll">Match film base…</button>

@@ -7,7 +7,7 @@
 //! GET  /api/license                        the license text
 //! GET  /api/files                          raw files in the folder
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
-//! POST /api/estimate {file, hints}         re-run the analysis with manual areas
+//! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual areas
 //! POST /api/holder   {file, base_rgb}       where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
@@ -111,12 +111,16 @@ struct RollApply {
 struct HolderJob {
     file: String,
     base_rgb: [f32; 3],
+    #[serde(default)]
+    straighten: f32,
 }
 
 #[derive(Deserialize)]
 struct EstimateJob {
     file: String,
     hints: Hints,
+    #[serde(default)]
+    straighten: f32,
 }
 
 /// Serve `dir` on `port`, or on a free port if it's 0. With `exit_with_stdin` the process ends
@@ -290,13 +294,21 @@ impl State {
             (Method::Post, "/api/estimate") => {
                 let job: EstimateJob = read_body(req)?;
                 let loaded = self.ensure_loaded(&job.file)?;
-                let estimate = invert::estimate_on(&loaded.small, &job.hints);
-                Ok(json_resp(200, &json!(estimate)))
+                // Areas are on the straightened scan, so that's what gets measured.
+                let small = loaded.small.straighten(job.straighten);
+                Ok(json_resp(
+                    200,
+                    &json!({
+                        "estimate": invert::estimate_on(&small, &job.hints),
+                        "baseFound": invert::detect_base(&small).found,
+                    }),
+                ))
             }
             (Method::Post, "/api/holder") => {
                 let job: HolderJob = read_body(req)?;
                 let loaded = self.ensure_loaded(&job.file)?;
-                let areas = invert::holder_areas(&loaded.small, job.base_rgb);
+                let small = loaded.small.straighten(job.straighten);
+                let areas = invert::holder_areas(&small, job.base_rgb);
                 Ok(json_resp(200, &json!({ "areas": areas })))
             }
             (Method::Post, "/api/preview") => {
@@ -388,11 +400,12 @@ impl State {
         let sidecar = std::fs::read(self.folder.sidecar(file));
         let loaded = &self.cache[file];
         let auto = loaded.auto.clone();
-        let base_found = invert::detect_base(&loaded.small).found;
         let (current, warning) = match sidecar {
             Ok(bytes) => saved_settings(&bytes, &auto, &loaded.small),
             Err(_) => (auto.clone(), None),
         };
+        let straight = loaded.small.straighten(current.adjust.straighten);
+        let base_found = invert::detect_base(&straight).found;
         Ok(json_resp(
             200,
             &json!({

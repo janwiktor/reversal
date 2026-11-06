@@ -21,7 +21,7 @@
   --focus: #4a94f0;
   --warn: #ffb547;
   /* Region overlays */
-  --crop: #ffffff;
+  --crop: #4fdc74;
   --area: #5ec8ff;
   --base: #ffb547;
   --holder: #d0009a;
@@ -163,7 +163,7 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(
 #overlay .base { stroke: var(--base); }
 #overlay .holder { fill: url(#holder-hatch); }
 #overlay .hatch { fill: var(--holder); stroke: none; }
-#overlay .drag { stroke: var(--crop); stroke-dasharray: 3 3; }
+#overlay .drag { stroke-dasharray: 3 3; }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
 #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); padding: 6px 6px 6px 12px; display: flex; gap: 12px; align-items: center; }
 
@@ -191,6 +191,8 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
 .swatch.crop { border-color: var(--crop); }
 .swatch.area { border-color: var(--area); }
 .swatch.base { border-color: var(--base); }
+.swatch.holder { border-color: var(--holder); }
+#holder-legend .row-label { grid-column: 1 / -1; }
 #setup .slider { margin-top: 4px; }
 #setup .row .btn { width: 100%; padding: 0 6px; }
 #roll-state { color: var(--ink-quiet); margin-top: 6px; }

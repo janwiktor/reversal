@@ -81,7 +81,11 @@ pub fn saved_settings(
         };
     }
     // An older model's measurements mean nothing now: measure again, keep the user's choices.
-    let mut settings = Settings::new(invert::estimate_on(small, &choices.hints), choices.adjust);
+    let straight = small.straighten(choices.adjust.straighten);
+    let mut settings = Settings::new(
+        invert::estimate_on(&straight, &choices.hints),
+        choices.adjust,
+    );
     settings.hints = choices.hints;
     let warning = "These settings came from an older version. Colors were measured again, \
                    and your adjustments may need another look.";
@@ -236,6 +240,7 @@ impl Folder {
         let small = self.roll_image(file)?;
         let sidecar = std::fs::read(self.sidecar(file)).ok();
         let (settings, _) = settings_from(sidecar.as_deref(), &small);
+        let small = small.straighten(settings.adjust.straighten);
         let reading = |base_rgb, source| RollReading {
             file: file.to_string(),
             base_rgb,
@@ -272,7 +277,8 @@ impl Folder {
             let sidecar = std::fs::read(self.sidecar(&frame.file)).ok();
             let (mut settings, _) = settings_from(sidecar.as_deref(), &frame.small);
             settings.hints.base_rgb = Some(base_rgb);
-            settings.estimate = invert::estimate_on(&frame.small, &settings.hints);
+            let straight = frame.small.straighten(settings.adjust.straighten);
+            settings.estimate = invert::estimate_on(&straight, &settings.hints);
             self.write_settings(&frame.file, &settings)
                 .map_err(|e| format!("{}: {e}", frame.file))?;
         }

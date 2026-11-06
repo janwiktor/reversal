@@ -87,7 +87,7 @@ Both save DNGs to a `positives` folder inside the folder you chose.
 
 Each frame remembers its settings as you change them. Tick several frames to save them together, each with its own settings; frames you haven't touched get the automatic conversion.
 
-The centered measuring area doesn't suit full film strips: for those, draw the area and crop to it.
+The centered measuring area doesn't suit full film strips: for those, set a custom measured area and crop to it.
 
 ### Matching a roll
 

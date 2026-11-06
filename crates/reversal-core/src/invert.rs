@@ -951,6 +951,36 @@ mod tests {
         assert_ne!(estimate_on(&scan, &hints).base_rgb, base);
     }
 
+    #[test]
+    fn a_drawn_base_reads_the_straightened_scan_it_was_drawn_on() {
+        let (side, off_center, degrees) = (400usize, 150.0f32, 10.0f32);
+        let center = (side as f32 - 1.0) / 2.0;
+        let mut scan = Rgb32::new(side, side);
+        scan.data.fill(0.2);
+        for y in 190..210 {
+            for x in 340..360 {
+                scan.data[(y * side + x) * 3..(y * side + x + 1) * 3].fill(0.8);
+            }
+        }
+        // Where straightening moves the patch: its offset, turned by the angle.
+        let (s, c) = degrees.to_radians().sin_cos();
+        let (x, y) = (
+            (center + c * off_center) / side as f32,
+            (center + s * off_center) / side as f32,
+        );
+        let hints = Hints {
+            base: Some(NRect {
+                x0: x - 0.01,
+                y0: y - 0.01,
+                x1: x + 0.01,
+                y1: y + 0.01,
+            }),
+            ..Hints::default()
+        };
+        assert!((estimate_on(&scan.straighten(degrees), &hints).base_rgb[1] - 0.8).abs() < 0.01);
+        assert!((estimate_on(&scan, &hints).base_rgb[1] - 0.2).abs() < 0.01);
+    }
+
     fn pixel(d: [f32; 3]) -> [f32; 3] {
         [0, 1, 2].map(|c| BASE[c] * 10f32.powf(-d[c]))
     }
