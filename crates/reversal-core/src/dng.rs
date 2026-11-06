@@ -7,7 +7,7 @@
 //! needs less exposure lowers `BaselineExposure` itself: Apple's renderer opens files too
 //! bright when the main profile carries a `BaselineExposureOffset`.
 
-use std::io;
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::color::{self, ILLUMINANT_D65};
@@ -387,6 +387,45 @@ pub fn write(path: &Path, img: &Rgb32, opts: &DngOptions) -> io::Result<()> {
     crate::write_atomic(path, &encode(img, opts))
 }
 
+/// Whether the file at `path` is a positive this writer produced: a little-endian TIFF whose
+/// first IFD names [`UNIQUE_CAMERA_MODEL`]. A camera's own DNG, or any other file, isn't.
+/// Only a file that can't be opened is an error; one that can't be read as a TIFF is `false`.
+pub fn is_reversal_positive(path: &Path) -> io::Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut header = [0u8; 8];
+    if file.read_exact(&mut header).is_err() || header[..4] != *b"II*\0" {
+        return Ok(false);
+    }
+    let ifd = u32::from_le_bytes(header[4..8].try_into().expect("4 bytes"));
+    let mut count = [0u8; 2];
+    if file.seek(SeekFrom::Start(ifd as u64)).is_err() || file.read_exact(&mut count).is_err() {
+        return Ok(false);
+    }
+    let mut entries = vec![0u8; u16::from_le_bytes(count) as usize * 12];
+    if file.read_exact(&mut entries).is_err() {
+        return Ok(false);
+    }
+    let wanted = [UNIQUE_CAMERA_MODEL.as_bytes(), b"\0"].concat();
+    for entry in entries.as_chunks::<12>().0 {
+        let tag = u16::from_le_bytes([entry[0], entry[1]]);
+        let kind = u16::from_le_bytes([entry[2], entry[3]]);
+        let len = u32::from_le_bytes(entry[4..8].try_into().expect("4 bytes")) as usize;
+        if tag != 50708 || kind != 2 || len != wanted.len() {
+            continue;
+        }
+        // An ASCII value this long sits where the entry's last four bytes point.
+        let offset = u32::from_le_bytes(entry[8..12].try_into().expect("4 bytes"));
+        let mut value = vec![0u8; len];
+        if file.seek(SeekFrom::Start(offset as u64)).is_err()
+            || file.read_exact(&mut value).is_err()
+        {
+            return Ok(false);
+        }
+        return Ok(value == wanted);
+    }
+    Ok(false)
+}
+
 /// Share of pixels in a positive above what the DNG can store.
 pub fn clipped_share(positive: &Rgb32) -> f64 {
     let clipped = positive
@@ -562,5 +601,37 @@ mod tests {
         assert_eq!(rational(1.0), (1, 1));
         assert_eq!(rational(2.0), (2, 1));
         assert_eq!(rational(-0.5), (-1, 2));
+    }
+
+    #[test]
+    fn only_our_own_positives_are_recognized() {
+        let dir = std::env::temp_dir().join(format!("reversal-is-ours-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let check = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            is_reversal_positive(&path).unwrap()
+        };
+        let opts = DngOptions {
+            compression: Compression::None,
+            profile: render::profile(render::Look::Neutral, render::Tone::default()),
+            extra_profiles: vec![],
+            xmp: None,
+            software: "t",
+        };
+        assert!(check("ours.dng", &encode(&Rgb32::new(8, 8), &opts)));
+        // A TIFF from another camera, with the same tag and another name of the same length.
+        let mut other = Buf {
+            data: b"II*\0\0\0\0\0".to_vec(),
+        };
+        let name = "X".repeat(UNIQUE_CAMERA_MODEL.len());
+        let ifd = other.ifd(vec![Tag(50708, Val::Ascii(name))]);
+        other.data[4..8].copy_from_slice(&ifd.to_le_bytes());
+        assert!(!check("other.dng", &other.data));
+        assert!(!check("raw.nef", b"not a tiff at all"));
+        assert!(!check("short.dng", b"II*\0\xff\xff\xff\xff"));
+        assert!(!check("empty.dng", b""));
+        assert!(is_reversal_positive(&dir.join("missing.dng")).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

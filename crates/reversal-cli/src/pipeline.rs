@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use reversal_core::dng::Compression;
+use reversal_core::dng::{self, Compression};
 use reversal_core::image::Rgb32;
 use reversal_core::invert::Settings;
 
@@ -28,8 +28,24 @@ fn resolved(path: &Path) -> PathBuf {
     })
 }
 
+/// Whether `out` may be written: nothing is there yet, or a positive of ours is. Anything
+/// else may be someone's only copy of a scan.
+pub fn replaceable(out: &Path) -> Result<(), String> {
+    if !out.exists() {
+        return Ok(());
+    }
+    match dng::is_reversal_positive(out) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!(
+            "{} exists and isn't a positive written by Reversal; refusing to replace it",
+            out.display()
+        )),
+        Err(e) => Err(format!("{}: {e}", out.display())),
+    }
+}
+
 /// Where each input goes. Fails before any work if an output would replace a source
-/// file or another output of this run.
+/// file, a file that isn't a positive of ours, or another output of this run.
 pub fn output_paths(inputs: &[PathBuf], output: Option<&Path>) -> Result<Vec<PathBuf>, String> {
     let sources: Vec<PathBuf> = inputs.iter().map(|i| resolved(i)).collect();
     let mut seen: Vec<PathBuf> = Vec::new();
@@ -53,6 +69,7 @@ pub fn output_paths(inputs: &[PathBuf], output: Option<&Path>) -> Result<Vec<Pat
                 out.display()
             ));
         }
+        replaceable(&out)?;
         seen.push(target);
         outs.push(out);
     }
@@ -98,6 +115,33 @@ mod tests {
         // The same file, spelled differently.
         let other = dir.join(".").join("x.dng");
         assert!(output_paths(std::slice::from_ref(&src), Some(&other)).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn replaces_only_positives_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("reversal-replace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = [dir.join("a.NEF")];
+        let out = dir.join("b.dng");
+        assert!(output_paths(&input, Some(&out)).is_ok());
+        // Another camera's DNG under the chosen name: someone's scan.
+        std::fs::write(&out, b"II*\0 another camera's raw").unwrap();
+        let err = output_paths(&input, Some(&out)).unwrap_err();
+        assert!(err.contains("isn't a positive"), "{err}");
+        // A positive from an earlier run can be written again.
+        let opts = dng::DngOptions {
+            compression: Compression::None,
+            profile: reversal_core::render::profile(
+                reversal_core::render::Look::Neutral,
+                reversal_core::render::Tone::default(),
+            ),
+            extra_profiles: vec![],
+            xmp: None,
+            software: SOFTWARE,
+        };
+        std::fs::write(&out, dng::encode(&Rgb32::new(4, 4), &opts)).unwrap();
+        assert!(output_paths(&input, Some(&out)).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
