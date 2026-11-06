@@ -571,6 +571,16 @@ mod tests {
     }
 
     #[test]
+    fn notices_name_libraw_and_adobe_wherever_a_copyright_shows() {
+        let plist = include_str!("../../../packaging/macos/Info.plist");
+        let read_me = include_str!("../../../packaging/macos/Read me first.txt");
+        for text in [INDEX_HTML, plist, read_me] {
+            assert!(text.contains("2008-2025 LibRaw LLC"));
+            assert!(text.contains("under license by Adobe"));
+        }
+    }
+
+    #[test]
     fn decodes_query_values() {
         assert_eq!(
             query_param("/api/load?file=_DSC5384.NEF", "file").as_deref(),

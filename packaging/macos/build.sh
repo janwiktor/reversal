@@ -3,18 +3,22 @@
 # Needs Rust, pkgconf and Xcode (for the icon); no Homebrew libraries end up in the app.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 here="$root/packaging/macos"
 build="$root/dist/build"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 
 # Rises with every commit on main, and anyone building a commit gets the same number. Needs the
 # whole history; a source archive has none and builds as 0.
-if [ "$(git -C "$root" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
-  echo "A shallow clone can't count commits for the build number: fetch the whole history." >&2
-  exit 1
+build_number=0
+# Only this repo's history counts, not that of a repo the archive happens to be unpacked in.
+if [ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || true)" = "$root" ]; then
+  if [ "$(git -C "$root" rev-parse --is-shallow-repository)" = true ]; then
+    echo "A shallow clone can't count commits for the build number: fetch the whole history." >&2
+    exit 1
+  fi
+  build_number="$(git -C "$root" rev-list --count HEAD)"
 fi
-build_number="$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 0)"
 
 # Sets prefix, source_dir, LIBRAW_VERSION and MACOS_TARGET.
 . "$here/libraw.sh"

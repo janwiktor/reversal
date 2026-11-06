@@ -125,4 +125,4 @@ Copyright © 2026 Jan Ambroziewicz. Reversal is free software under the [GNU Gen
 
 This product includes DNG technology under license by Adobe.
 
-RAW decoding uses [LibRaw](https://www.libraw.org/), under the GNU LGPL 2.1. It's a system library when you build from source, and built into the Mac app, whose releases include its source.
+RAW decoding uses [LibRaw](https://www.libraw.org/), under the GNU LGPL 2.1. It's a system library when you build from source, and built into the Mac app. Each release includes the source of LibRaw and of the Rust crates in the app. LibRaw is copyright © 2008-2025 LibRaw LLC.

@@ -24,3 +24,6 @@ version 3 or later, with no warranty. The license and the licenses of what's ins
 are in the app, under Contents/Resources/Licenses.
 Source code: https://github.com/janwiktor/reversal
 This product includes DNG technology under license by Adobe.
+RAW decoding uses LibRaw, copyright (C) 2008-2025 LibRaw LLC, under the GNU LGPL 2.1;
+see LICENSE.LGPL in the same folder. Each release also includes the source of LibRaw and
+of the Rust crates in the app.

@@ -376,7 +376,8 @@
   <p>Copyright © 2026 Jan Ambroziewicz</p>
   <p>Reversal is free software: you can redistribute it and modify it under the terms of the GNU General Public License, version 3 or any later version. It comes with no warranty, to the extent permitted by law.</p>
   <p>Source code: https://github.com/janwiktor/reversal</p>
-  <p>This product includes DNG technology under license by Adobe. RAW decoding uses LibRaw, under the GNU LGPL 2.1.</p>
+  <p>This product includes DNG technology under license by Adobe.</p>
+  <p>RAW decoding uses LibRaw, copyright © 2008-2025 LibRaw LLC, under the GNU LGPL 2.1: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html</p>
   <details id="about-details"><summary>License text</summary><pre id="about-license"></pre></details>
   <div class="dialog-actions"><button type="button" class="btn" id="about-close">Close</button></div>
 </dialog>
@@ -771,7 +772,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 // In the app, a right-click shouldn't offer a web page's Reload.
-if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text], #status, #status-more")) e.preventDefault(); });
+if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text], #status, #status-more") && !e.target.closest("#about")) e.preventDefault(); });
 
 $("reset").addEventListener("click", () => {
   if (!current) return;

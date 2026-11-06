@@ -53,7 +53,7 @@ Rules:
   channel), so neutrals stay neutral at every density. Scene analysis must exclude the
   holder around the film and light through holes: it measures a centered share of the scan
   unless the user draws an area.
-- **Inputs** include camera RAW (DNG, CR2/CR3, NEF, ARW, RAF…) and scanner TIFFs.
+- **Inputs** are camera RAW (DNG, CR2/CR3, NEF, ARW, RAF…) today. Scanner TIFFs may follow.
   Preserve and write metadata (EXIF, ICC profile) where possible.
 - **Non-destructive.** Never overwrite source files. Output to new files.
 
@@ -138,9 +138,10 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 - Reversal is under `GPL-3.0-or-later`, and new dependencies must be compatible with it. Check
   `cargo tree` when adding a crate.
 - The Mac app links LibRaw statically, under LibRaw's LGPL 2.1 option. Never its CDDL option,
-  which isn't compatible with the GPL. Each release carries the source of LibRaw.
-- Keep the notices in the web UI's About dialog, `Info.plist`, `Read me first.txt` and the README
-  in step. The Adobe DNG notice stays in all of them.
+  which isn't compatible with the GPL. Each release carries the source of LibRaw and the crates.
+- Keep the notices in the web UI's About dialog, `Info.plist`, `--version`, `Read me first.txt` and
+  the README in step. The Adobe DNG notice and LibRaw's copyright stay in all of them, as the LGPL
+  asks of a program that displays copyright notices.
 
 ## Experiments and docs
 

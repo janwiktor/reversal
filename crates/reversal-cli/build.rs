@@ -9,15 +9,28 @@ fn git(args: &[&str]) -> Option<String> {
     (output.status.success() && !text.trim().is_empty()).then(|| text.trim().to_string())
 }
 
+/// Whether git would answer for this workspace, not for a repo it happens to be unpacked in.
+fn in_own_repo() -> bool {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let top = git(&["rev-parse", "--show-toplevel"]);
+    match (root.canonicalize(), top.map(std::fs::canonicalize)) {
+        (Ok(root), Some(Ok(top))) => root == top,
+        _ => false,
+    }
+}
+
 fn main() {
+    let own_repo = in_own_repo();
     for name in ["HEAD", "logs/HEAD"] {
-        if let Some(path) = git(&["rev-parse", "--git-path", name]) {
+        if let Some(path) = git(&["rev-parse", "--git-path", name]).filter(|_| own_repo) {
             println!("cargo:rerun-if-changed={path}");
         }
     }
     println!("cargo:rerun-if-changed=build.rs");
     // Empty when built from a source archive, which has no git history.
-    let commit = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_default();
+    let commit = git(&["rev-parse", "--short=7", "HEAD"])
+        .filter(|_| own_repo)
+        .unwrap_or_default();
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let label = if commit.is_empty() {
         version
