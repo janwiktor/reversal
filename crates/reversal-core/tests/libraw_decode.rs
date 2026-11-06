@@ -33,6 +33,12 @@ const PATCH_MARGIN: usize = 6;
 /// Largest difference from the expected value, on the [0, 1] scale. Well under what any
 /// white balance, gamma or rescaling step in decoding would change.
 const TOLERANCE: f32 = 0.002;
+/// Mean error of AHD on the ripples, and how far a build of LibRaw may differ from it.
+const AHD_MEAN_ERROR: f32 = 0.0123;
+const AHD_ERROR_TOLERANCE: f32 = 0.001;
+/// Green samples at white in the bright ripples with clipping, and how far that may differ.
+const GREEN_AT_WHITE: i64 = 4874;
+const GREEN_AT_WHITE_TOLERANCE: i64 = 100;
 /// Largest difference when reading back a positive, which isn't demosaiced: a few 16-bit steps.
 const READ_BACK_TOLERANCE: f32 = 4.0 / 65535.0;
 /// Largest difference of red or blue from green on a gray patch of the positive, as a share.
@@ -239,6 +245,72 @@ fn decode_returns_linear_camera_rgb_without_white_balance() {
             );
         }
     }
+}
+
+#[test]
+fn clipped_sensor_values_stop_at_white_and_leave_the_other_channels_alone() {
+    let dir = TempDir::new("decode-clipped");
+    let clipped: [f32; 3] = [1.3, 0.5, 0.25];
+    let path = dir.write("clipped.dng", &raw_dng(|_, _| clipped));
+    let scan = decode(&path).unwrap();
+    let inner = (PATCH_MARGIN..WIDTH - PATCH_MARGIN).step_by(7);
+    for x in inner {
+        assert_close(
+            scan.get(x, HEIGHT / 2),
+            [1.0, 0.5, 0.25],
+            TOLERANCE,
+            "clipped",
+        );
+    }
+}
+
+/// Fine detail: concentric ripples in [0.05, 0.95], tightening toward the corners.
+fn ripples(x: usize, y: usize) -> f32 {
+    let (dx, dy) = (
+        x as f32 - WIDTH as f32 / 2.0,
+        y as f32 - HEIGHT as f32 / 2.0,
+    );
+    0.5 + 0.45 * ((dx * dx + dy * dy) / 120.0).sin()
+}
+
+/// Pins the demosaic method by how closely it recovers fine detail. AHD's error is measured;
+/// with this tolerance every other method LibRaw offers falls outside it.
+#[test]
+fn fine_detail_comes_out_as_ahd_demosaics_it() {
+    let dir = TempDir::new("decode-detail");
+    let path = dir.write("detail.dng", &raw_dng(|x, y| [ripples(x, y); 3]));
+    let scan = decode(&path).unwrap();
+    let (mut error, mut samples) = (0.0, 0);
+    for y in PATCH_MARGIN..HEIGHT - PATCH_MARGIN {
+        for x in PATCH_MARGIN..WIDTH - PATCH_MARGIN {
+            for value in scan.get(x, y) {
+                error += (value - ripples(x, y)).abs();
+                samples += 1;
+            }
+        }
+    }
+    let mean_error = error / samples as f32;
+    assert!(
+        (mean_error - AHD_MEAN_ERROR).abs() < AHD_ERROR_TOLERANCE,
+        "mean error {mean_error}"
+    );
+}
+
+/// Pins highlight clipping where it shows: the rebuilding modes lift values just under white
+/// to white, so more green samples reach it than the measured count.
+#[test]
+fn fine_detail_near_white_is_clipped_and_not_rebuilt() {
+    let dir = TempDir::new("decode-highlights");
+    let scene = |x, y| {
+        let level = ripples(x, y) * 1.6;
+        [level, level * 0.7, level * 0.4]
+    };
+    let scan = decode(&dir.write("highlights.dng", &raw_dng(scene))).unwrap();
+    let at_white = scan.pixels().filter(|px| px[1] >= 1.0).count() as i64;
+    assert!(
+        (at_white - GREEN_AT_WHITE).abs() < GREEN_AT_WHITE_TOLERANCE,
+        "{at_white} green samples at white"
+    );
 }
 
 #[test]
