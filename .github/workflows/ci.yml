@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore: &docs
+      - "**/*.md"
+      - "docs/**"
+  push:
+    branches: [main]
+    paths-ignore: *docs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # The fast gate: format, lint and tests. Everything else waits for it.
+  linux:
+    name: Linux (format, lint, test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install LibRaw
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libraw-dev pkg-config
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace
+      # The core has to stay usable without LibRaw or any other host library.
+      - name: Lint the core without LibRaw
+        run: cargo clippy --locked -p reversal-core --no-default-features --all-targets -- -D warnings
+      - name: Test the core without LibRaw
+        run: cargo test --locked -p reversal-core --no-default-features
+
+  # The platform the app ships on. macOS runners cost more, so this waits for Linux to pass.
+  macos:
+    name: macOS (test)
+    needs: linux
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pkgconf
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install pkgconf
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      # The same LibRaw the Mac app ships with, not Homebrew's, which has other features enabled.
+      - name: Restore LibRaw
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            dist/build/LibRaw-*
+            dist/build/libraw-install-*
+          key: libraw-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/macos/libraw.sh') }}
+      - name: Build LibRaw
+        run: |
+          build="$PWD/dist/build"
+          . packaging/macos/libraw.sh
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >>"$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=$MACOS_TARGET" >>"$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Test
+        run: cargo test --locked --workspace
+      - name: Check that the binary starts
+        run: cargo run --locked -- --version
+      - name: Check that LibRaw is linked statically
+        run: |
+          if otool -L target/debug/reversal | grep raw; then
+            echo "The tests ran against a shared LibRaw, not the one the app ships with." >&2
+            exit 1
+          fi

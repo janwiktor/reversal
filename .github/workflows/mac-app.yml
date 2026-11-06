@@ -1,0 +1,82 @@
+name: Mac app
+
+# Pull requests build the disk image only when something that goes into packaging changes, to
+# keep their checks fast. Every push to main builds it, so a code change that only breaks the
+# release build shows up as soon as it lands.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/mac-app.yml"
+      - "packaging/macos/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/*/Cargo.toml"
+      - "crates/reversal-core/build.rs"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the disk image
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install pkgconf
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install pkgconf
+      # The script reuses a built LibRaw, and takes its license files from the source folder.
+      - name: Restore LibRaw
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            dist/build/LibRaw-*
+            dist/build/libraw-install-*
+          key: libraw-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/macos/libraw.sh') }}
+      - name: Build
+        run: packaging/macos/build.sh
+      - name: Check the disk image
+        run: |
+          mount_point="$(mktemp -d)"
+          hdiutil attach dist/Reversal-*.dmg -nobrowse -readonly -mountpoint "$mount_point"
+          trap 'hdiutil detach "$mount_point"' EXIT
+          app="$mount_point/Reversal.app"
+          codesign --verify --deep --strict "$app"
+          "$app/Contents/MacOS/reversal-engine" --version
+          # Anything outside the system would be missing on other Macs.
+          for binary in "$app/Contents/MacOS/Reversal" "$app/Contents/MacOS/reversal-engine"; do
+            otool -L "$binary"
+            if otool -L "$binary" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/)'; then
+              echo "$binary links a library that isn't part of macOS." >&2
+              exit 1
+            fi
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Reversal-mac-app
+          path: dist/Reversal-*.dmg
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

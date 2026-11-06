@@ -87,11 +87,23 @@ Rules:
 ```bash
 cargo build --release                       # build everything
 cargo test                                  # unit tests
-cargo fmt && cargo clippy -- -D warnings    # format and lint
+cargo fmt && cargo clippy --all-targets -- -D warnings    # format and lint
 cargo run --release -- convert Samples/_DSC5384.NEF -o out.dng   # convert one file
 cargo run --release -- ui Samples           # web UI at http://127.0.0.1:8787
 packaging/macos/build.sh                    # Mac app disk image in dist/
 ```
+
+## CI
+
+- `.github/workflows/ci.yml` runs on every pull request and push to `main`, except docs-only
+  changes. Linux checks format, lint and tests, with and without LibRaw. macOS then runs the
+  tests, only once Linux passes, against the LibRaw the Mac app ships with
+  (`packaging/macos/libraw.sh`).
+- `.github/workflows/mac-app.yml` builds and checks the disk image on every push to `main`
+  except docs-only changes, on pull requests that change packaging or dependencies, and on
+  request. It keeps the image as a run artifact for 7 days.
+- No raw samples are in the repo, so CI doesn't decode a real file. Check conversions
+  locally when changing `decode.rs`.
 
 ## Experiments and docs
 
