@@ -106,6 +106,42 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
   can't check how a DNG opens in a raw editor. Check conversions locally when changing
   `decode.rs`, and check that a DNG still opens correctly when changing what's written.
 
+- `.github/workflows/release.yml` runs on a tag like `v0.1.0`: it checks the tag, builds the
+  disk image with `mac-app.yml` and creates a draft pre-release. It can't check that the app
+  opens on another Mac, so install from the draft before publishing.
+
+## Versioning and releases
+
+- **One version, x.y.z,** in `[workspace.package]` in `Cargo.toml`. The engine, web UI, Mac app,
+  disk image name and git tag all read it. Never write the number anywhere else.
+- **Which tier to bump:** z for fixes that don't change a conversion; y for new features and for
+  anything that changes a DNG's pixels or tags; x for 1.0 and later breaking changes. Bump in a PR
+  of its own, or as the last commit of a PR that needs it, and run `cargo check` so `Cargo.lock`
+  follows. Not every change needs a bump: only what ships in a release.
+- **Build identifiers come from git, so never set them by hand.** Every binary carries its short
+  commit hash, shown as `0.1.0 · abc1234` in the web UI and `0.1.0 (abc1234)` by `--version`. The
+  Mac app's `CFBundleVersion` is the commit count, so it always rises on `main`; the About panel
+  shows `Version 0.1.0 (50)`. It needs a full clone, and only builds from `main` count.
+- **Keep the commit out of DNGs.** The Software tag holds x.y.z only, so builds of one version
+  convert to identical bytes.
+- `MODEL_VERSION` in `invert.rs` is separate: it tracks the conversion model that settings files
+  were measured with. Raise it when the model changes, whatever the release number.
+- **To release:** merge the version bump to `main`, then tag that commit and push the tag
+  (`git tag v0.1.0 && git push origin v0.1.0`). Install the disk image from the draft on a Mac that
+  hasn't run this version, then publish. Publishing is the maintainer's decision. Stay on
+  pre-releases until 1.0.
+- The Mac app stays ad hoc signed through pre-alpha and alpha, with no Apple certificate; users
+  approve it with Open Anyway, as `Read me first.txt` explains.
+
+## License
+
+- Reversal is under `GPL-3.0-or-later`, and new dependencies must be compatible with it. Check
+  `cargo tree` when adding a crate.
+- The Mac app links LibRaw statically, under LibRaw's LGPL 2.1 option. Never its CDDL option,
+  which isn't compatible with the GPL. Each release carries the source of LibRaw.
+- Keep the notices in the web UI's About dialog, `Info.plist`, `Read me first.txt` and the README
+  in step. The Adobe DNG notice stays in all of them.
+
 ## Experiments and docs
 
 - The repo keeps product code, `README.md` for users of the tool, this file for how to work
