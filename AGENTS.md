@@ -102,8 +102,9 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 - `.github/workflows/mac-app.yml` builds and checks the disk image on every push to `main`
   except docs-only changes, on pull requests that change packaging or dependencies, and on
   request. It keeps the image as a run artifact for 7 days.
-- No raw samples are in the repo, so CI doesn't decode a real file. Check conversions
-  locally when changing `decode.rs`.
+- CI decodes small raw files that the tests write themselves, not real camera files, and it
+  can't check how a DNG opens in a raw editor. Check conversions locally when changing
+  `decode.rs`, and check that a DNG still opens correctly when changing what's written.
 
 ## Experiments and docs
 
