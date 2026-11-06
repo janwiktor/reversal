@@ -2,12 +2,11 @@ name: CI
 
 on:
   pull_request:
-    paths-ignore: &docs
-      - "**/*.md"
-      - "docs/**"
   push:
     branches: [main]
-    paths-ignore: *docs
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 permissions:
   contents: read
@@ -21,9 +20,34 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # The Linux and macOS checks are required on main, so they have to report on every pull request.
+  # A docs-only one skips them here, which counts as passing, rather than skipping the workflow.
+  changes:
+    name: Look for code changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.files.outputs.code }}
+    steps:
+      - id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          code=true
+          if [ -n "$PULL_REQUEST" ]; then
+            files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PULL_REQUEST/files" --jq '.[].filename')"
+            if ! grep -qvE '(\.md$|^docs/)' <<<"$files"; then
+              code=false
+            fi
+          fi
+          echo "code=$code" >>"$GITHUB_OUTPUT"
+
   # The fast gate: format, lint and tests. Everything else waits for it.
   linux:
     name: Linux (format, lint, test)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -54,7 +78,7 @@ jobs:
   # The platform the app ships on. macOS runners cost more, so this waits for Linux to pass.
   macos:
     name: macOS (test)
-    needs: linux
+    needs: [changes, linux]
     runs-on: macos-26
     timeout-minutes: 15
     steps:

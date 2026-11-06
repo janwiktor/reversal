@@ -97,9 +97,9 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 
 ## CI
 
-- `.github/workflows/ci.yml` runs on every pull request and push to `main`, except docs-only
-  changes. Linux checks format, lint and tests, with and without LibRaw. macOS then runs the
-  tests, only once Linux passes, against the LibRaw the Mac app ships with
+- `.github/workflows/ci.yml` runs on every pull request and push to `main`. Docs-only changes
+  skip its jobs, and its Linux and macOS checks are required to merge. Linux checks format, lint
+  and tests, with and without LibRaw. macOS then runs the tests, only once Linux passes, against the LibRaw the Mac app ships with
   (`packaging/macos/libraw.sh`).
 - `.github/workflows/mac-app.yml` builds and checks the disk image on every push to `main`
   except docs-only changes, on pull requests that change packaging or dependencies, and on
