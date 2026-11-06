@@ -283,14 +283,14 @@ impl Folder {
     /// Returns the path, the size in bytes, and anything the user should know.
     pub fn export_frame(&self, file: &str) -> Result<(PathBuf, u64, Option<String>), String> {
         let input = self.resolve(file).map_err(|(_, message)| message)?;
+        let out = self.output_path(file);
+        pipeline::replaceable(&out)?;
         let scan = reversal_core::decode::decode(&input).map_err(|e| e.to_string())?;
         let small = invert::analysis_image(&scan);
         let sidecar_path = self.sidecar(file);
         let used = std::fs::read(&sidecar_path).ok();
         let (settings, warning) = settings_from(used.as_deref(), &small);
         std::fs::create_dir_all(&self.out_dir).map_err(|e| e.to_string())?;
-        let out = self.output_path(file);
-        pipeline::replaceable(&out)?;
         let bytes = pipeline::export(&input, &scan, &settings, Compression::LosslessJpeg, &out)
             .map_err(|e| e.to_string())?;
         // What's in the DNG, not what's in the sidecar: that may have changed while this ran.
