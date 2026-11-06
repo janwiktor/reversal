@@ -9,6 +9,10 @@ use std::sync::Mutex;
 
 use crate::image::Rgb32;
 
+/// `LIBRAW_IMAGE_BITMAP`: pixels, not a JPEG thumbnail.
+const IMAGE_BITMAP: c_int = 2;
+
+/// `libraw_processed_image_t`.
 #[repr(C)]
 struct ProcessedImage {
     kind: c_int,
@@ -114,10 +118,17 @@ pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
             return Err(DecodeError("no image returned".into()));
         }
         let (w, h) = ((*img).width as usize, (*img).height as usize);
-        let (colors, bits) = ((*img).colors as usize, (*img).bits);
-        let result = if colors != 3 || bits != 16 {
+        let (kind, colors, bits) = ((*img).kind, (*img).colors as usize, (*img).bits);
+        let data_size = (*img).data_size as usize;
+        // Trust nothing about the buffer before reading it: its size has to be what the header
+        // says, and this library build may have been compiled with other options.
+        let result = if kind != IMAGE_BITMAP || colors != 3 || bits != 16 {
             Err(DecodeError(format!(
-                "unsupported output: {colors} colors, {bits} bits"
+                "unsupported output: kind {kind}, {colors} colors, {bits} bits"
+            )))
+        } else if w == 0 || h == 0 || data_size != w * h * 3 * 2 {
+            Err(DecodeError(format!(
+                "image data is {data_size} bytes for {w}x{h} pixels"
             )))
         } else {
             let samples = std::slice::from_raw_parts((*img).data.as_ptr() as *const u16, w * h * 3);

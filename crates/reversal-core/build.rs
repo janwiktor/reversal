@@ -1,4 +1,12 @@
 fn main() {
+    // The probe's output isn't passed on to cargo, so say ourselves when to run it again.
+    for name in [
+        "PKG_CONFIG_PATH",
+        "PKG_CONFIG_LIBDIR",
+        "PKG_CONFIG_SYSROOT_DIR",
+    ] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
     if std::env::var_os("CARGO_FEATURE_LIBRAW").is_none() {
         return;
     }
