@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use reversal_core::dng::Compression;
-use reversal_core::image::{NRect, Rgb32};
+use reversal_core::image::Rgb32;
 use reversal_core::invert::{self, Adjust, Hints, Settings, MODEL_VERSION};
 use serde::Serialize;
 
@@ -100,13 +100,12 @@ fn settings_from(sidecar: Option<&[u8]>, small: &Rgb32) -> (Settings, Option<Str
     }
 }
 
-/// Clipped film is worth a message when saving. Bare light isn't, as saving many frames would
-/// report nearly all of them: it costs the picture nothing, and Setup shows it for each frame.
+/// Clipped film is worth a message when saving. A holder or bare light isn't, as saving many
+/// frames would report nearly all of them: they cost the picture nothing, and Setup shows them.
 fn film_clipping_warning(small: &Rgb32, settings: &Settings) -> Option<String> {
-    let region = settings.adjust.crop.unwrap_or(NRect::FULL);
-    let clipping = invert::source_clipping(small, &settings.estimate, region);
+    let clipping = invert::measure_clipping(small, settings);
     if clipping.harms_film() {
-        clipping.warning(settings.adjust.white_clipped)
+        clipping.warning(settings.adjust.accept_clipping)
     } else {
         None
     }

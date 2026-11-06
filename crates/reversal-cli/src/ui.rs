@@ -10,7 +10,7 @@
 //! POST /api/estimate {file, hints}         re-run the analysis with manual areas
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold.
-//!                                          Header X-Source-Clipping: what the sensor clipped
+//!                                          Header X-Clipping: what can't be recovered
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
@@ -410,12 +410,12 @@ impl State {
         ));
         let (profile, _) = reversal_core::profiles(&job.settings.adjust);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
-        let source = source_clipping_info(&loaded.small, &job.settings);
+        let clipping = clipping_info(&loaded.small, &job.settings);
         Ok(Response::from_data(jpeg)
             .with_header(header("Content-Type", "image/jpeg"))
             .with_header(header("Cache-Control", "no-store"))
             .with_header(header("X-Clipped", &format!("{clipped:.6}")))
-            .with_header(header("X-Source-Clipping", &source.to_string())))
+            .with_header(header("X-Clipping", &clipping.to_string())))
     }
 
     fn save_settings(&self, job: &SaveSettings) -> Handled {
@@ -524,14 +524,13 @@ impl State {
     }
 }
 
-/// What the page shows about clipped light, as JSON that fits in a header: plain ASCII text.
-fn source_clipping_info(small: &Rgb32, settings: &Settings) -> serde_json::Value {
-    let region = settings.adjust.crop.unwrap_or(NRect::FULL);
-    let clipping = invert::source_clipping(small, &settings.estimate, region);
+/// What the page shows about what can't be recovered, as JSON that fits in a header: plain ASCII.
+fn clipping_info(small: &Rgb32, settings: &Settings) -> serde_json::Value {
+    let clipping = invert::measure_clipping(small, settings);
     json!({
         "present": clipping.is_reportable(),
         "harmsFilm": clipping.harms_film(),
-        "warning": clipping.warning(settings.adjust.white_clipped),
+        "warning": clipping.warning(settings.adjust.accept_clipping),
     })
 }
 
@@ -703,14 +702,14 @@ mod tests {
             invert::estimate_on(&small, &Hints::default()),
             Adjust::default(),
         );
-        let info = source_clipping_info(&small, &settings);
+        let info = clipping_info(&small, &settings);
         assert_eq!(info["present"], true);
         assert_eq!(info["harmsFilm"], false);
         assert!(info["warning"].is_string());
         assert!(info.to_string().is_ascii());
-        let _ = header("X-Source-Clipping", &info.to_string());
-        settings.adjust.white_clipped = true;
-        let info = source_clipping_info(&small, &settings);
+        let _ = header("X-Clipping", &info.to_string());
+        settings.adjust.accept_clipping = true;
+        let info = clipping_info(&small, &settings);
         assert_eq!(
             (info["present"].as_bool(), info["warning"].is_null()),
             (Some(true), true)

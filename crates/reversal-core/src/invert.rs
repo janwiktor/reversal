@@ -8,7 +8,7 @@
 //! A neutral scene patch lands on the gray curve, so its three E are equal and it stays
 //! neutral at every density. `anchor` sets exposure from the frame's highlights and
 //! average density; `offsets` hold the exposure and color balance sliders. A small
-//! saturation step follows, and what the DNG couldn't store turns white.
+//! saturation step follows.
 //!
 //! Geometry: scan → straighten → crop → invert → mirror → quarter turns.
 //! Regions (crop, analysis area, base sample) are normalized scan coordinates.
@@ -23,7 +23,7 @@ use crate::render::{Look, Tone};
 pub const GAMMA_REF: f32 = 0.7;
 /// Version of the conversion model. Bump when the inversion, `BASE_SATURATION`, the
 /// DNG's stored scale or the tone curve change, since old settings then render differently.
-pub const MODEL_VERSION: u32 = 3;
+pub const MODEL_VERSION: u32 = 2;
 /// Built-in saturation (linear, around Rec.2020 luminance). Matched the chroma of
 /// reference scans (22 frames, 6 rolls).
 pub const BASE_SATURATION: f32 = 1.25;
@@ -43,12 +43,18 @@ const SENSOR_LIMIT: f32 = 0.98;
 /// Bare light is about as blue as it is red on every scan tested, while film's orange mask holds
 /// blue back. So a clipped pixel with blue under this share of red is film.
 const FILM_BLUE_TO_RED: f32 = 0.9;
-/// Share of the scan that makes clipping worth reporting, so a few hot pixels don't. Bare light
-/// covered at least 0.15% of the scans that had any.
+/// Share of the scan at the sensor's limit that makes it worth reporting, so a few hot pixels
+/// don't. Bare light covered at least 0.15% of the scans that had any.
 const MIN_CLIPPED_SHARE: f32 = 1e-4;
 /// Share of the scan that has to look like clipped film. Scans with bare light only stayed at
 /// 0.001%, and film overexposed in software was almost always far over this.
 const MIN_FILM_SHARE: f32 = 1e-3;
+/// Share of the scan past the DNG's stored limit that makes it worth reporting. Film markings
+/// and small highlights stay under it, and the status bar reports the picture's own loss.
+const MIN_PAST_RANGE_SHARE: f32 = 5e-3;
+/// One pixel in this many is converted to measure what's past the stored limit, since this
+/// runs on every preview. A holder or a large highlight is far too big to fall between them.
+const PAST_RANGE_SAMPLING: usize = 4;
 /// Share of each side of the scan, centered, measured when nobody draws an area: clear of
 /// holders and rebates on a framed scan. Tested at 70–95% against reference scans; 95%
 /// takes in holders.
@@ -196,9 +202,9 @@ pub struct Adjust {
     pub flip_h: bool,
     /// Clockwise quarter turns.
     pub rotate: u8,
-    /// Render light the sensor clipped as pure white, not as the near black that its low
-    /// density gives. The user accepts it: on clipped film it paints over what the scan lost.
-    pub white_clipped: bool,
+    /// Accept what can't be recovered: light past the DNG's stored limit renders as white, such
+    /// as a holder, and light the sensor clipped renders as black, such as a sprocket hole.
+    pub accept_clipping: bool,
 }
 
 impl Default for Adjust {
@@ -218,7 +224,7 @@ impl Default for Adjust {
             crop: None,
             flip_h: false,
             rotate: 0,
-            white_clipped: false,
+            accept_clipping: false,
         }
     }
 }
@@ -661,8 +667,8 @@ fn is_clipped(rgb: [f32; 3]) -> bool {
 
 /// Turn what the DNG can't store into white over the stop above its limit. Almost no light
 /// reaches the sensor behind a holder, so density runs far past the film's range, where the
-/// gray curves and crosstalk spread the channels apart by hundreds of times. Storing that
-/// channel by channel would leave pure red or yellow. What fits in the DNG doesn't change.
+/// gray curves and crosstalk spread the channels apart by hundreds of times. Stored channel by
+/// channel, that shows as pure red or yellow. What fits in the DNG doesn't change.
 #[inline]
 fn past_range_to_white(p: [f32; 3]) -> [f32; 3] {
     let top = p[0].max(p[1]).max(p[2]);
@@ -673,33 +679,43 @@ fn past_range_to_white(p: [f32; 3]) -> [f32; 3] {
     p.map(|v| v + toward_white * (STORED_MAX - v))
 }
 
-/// Light in a scan that reached the sensor's limit, measured before inversion.
+/// What a conversion can't bring back, measured within the crop: what's cropped away doesn't
+/// reach the DNG.
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq)]
-pub struct SourceClipping {
-    /// Share of the measured region clipped in each of red, green and blue.
+pub struct Clipping {
+    /// Share of the region the sensor clipped in each of red, green and blue.
     pub channels: [f32; 3],
-    /// Share of the measured region that is clipped film. Clear film is the brightest film, so
-    /// a clipped picture comes with a clipped base: for this purpose they are one condition.
+    /// Share of the region that is clipped film. Clear film is the brightest film, so a clipped
+    /// picture comes with a clipped base: for this purpose they are one condition.
     pub film: f32,
-    /// Share of the measured region that is clipped light outside the film, such as a gap or
-    /// a sprocket hole. It costs the picture nothing.
+    /// Share of the region that is clipped light outside the film, such as a sprocket hole.
     pub bare_light: f32,
     /// The film base in use is itself clipped.
     pub base: bool,
+    /// Share of the region past the DNG's stored limit under these settings, such as a holder.
+    pub past_range: f32,
 }
 
-impl SourceClipping {
+impl Clipping {
     /// Whether the clipping damages the conversion, whatever the user decides about it.
     pub fn harms_film(&self) -> bool {
         self.base || self.film >= MIN_FILM_SHARE
     }
 
-    /// Whether there is enough clipped light to mention.
-    pub fn is_reportable(&self) -> bool {
-        self.harms_film() || self.film + self.bare_light >= MIN_CLIPPED_SHARE
+    fn has_clipped_light(&self) -> bool {
+        self.film + self.bare_light >= MIN_CLIPPED_SHARE
     }
 
-    /// The clipped channels, by name.
+    fn is_past_range(&self) -> bool {
+        self.past_range >= MIN_PAST_RANGE_SHARE
+    }
+
+    /// Whether there is enough that can't be recovered to mention.
+    pub fn is_reportable(&self) -> bool {
+        self.harms_film() || self.has_clipped_light() || self.is_past_range()
+    }
+
+    /// The channels the sensor clipped, by name.
     fn channel_names(&self) -> String {
         let names = ["red", "green", "blue"];
         let clipped: Vec<&str> = (0..3)
@@ -709,7 +725,8 @@ impl SourceClipping {
         clipped.join(", ")
     }
 
-    /// What to tell the user, if anything, given what they have accepted.
+    /// What to tell the user, if anything, given whether they have accepted it. Clipped film
+    /// always warns, as accepting it can't restore the colors.
     pub fn warning(&self, accepted: bool) -> Option<String> {
         if self.harms_film() {
             let channels = self.channel_names();
@@ -723,21 +740,40 @@ impl SourceClipping {
                  Scan it again with less exposure."
             ));
         }
-        if accepted || !self.is_reportable() {
+        if accepted {
             return None;
         }
-        Some(format!(
-            "{:.1}% of the scan is clipped light outside the film ({}). The picture isn't \
-             affected. It renders black unless you accept it as white.",
-            (self.film + self.bare_light) * 100.0,
-            self.channel_names()
-        ))
+        let past = self.is_past_range().then(|| {
+            format!(
+                "{:.1}% of the scan is past what the DNG can store, such as a holder.",
+                self.past_range * 100.0
+            )
+        });
+        let light = self.has_clipped_light().then(|| {
+            format!(
+                "{:.1}% is clipped light outside the film ({}), such as sprocket holes.",
+                (self.film + self.bare_light) * 100.0,
+                self.channel_names()
+            )
+        });
+        let accept = match (&past, &light) {
+            (Some(_), Some(_)) => "Accept them to render them as white and black.",
+            (Some(_), None) => "Accept it to render it as white.",
+            (None, Some(_)) => "Accept it to render it as black.",
+            (None, None) => return None,
+        };
+        let parts: Vec<&str> = [past.as_deref(), light.as_deref(), Some(accept)]
+            .into_iter()
+            .flatten()
+            .collect();
+        Some(parts.join(" "))
     }
 }
 
-/// Measure clipped light on linear camera RGB before inversion, within `region`: what's cropped
-/// away doesn't reach the DNG. Use the analysis image: its averaging drops hot pixels.
-pub fn source_clipping(small: &Rgb32, e: &Estimate, region: NRect) -> SourceClipping {
+/// Measure what these settings can't recover, on the analysis image: its averaging drops hot
+/// pixels. Clipped light is measured on linear camera RGB, before inversion.
+pub fn measure_clipping(small: &Rgb32, s: &Settings) -> Clipping {
+    let region = s.adjust.crop.unwrap_or(NRect::FULL);
     let part = small.crop(region.to_pixels(small.width, small.height));
     let mut channels = [0usize; 3];
     let (mut film, mut bare_light) = (0usize, 0usize);
@@ -752,11 +788,19 @@ pub fn source_clipping(small: &Rgb32, e: &Estimate, region: NRect) -> SourceClip
         }
     }
     let share = |n: usize| n as f32 / (part.width * part.height).max(1) as f32;
-    SourceClipping {
+    let gain = s.adjust.saturation_gain();
+    let (mut sampled, mut past) = (0usize, 0usize);
+    for p in part.pixels().step_by(PAST_RANGE_SAMPLING) {
+        sampled += 1;
+        let q = saturate(positive(p, &s.estimate, &s.adjust), gain);
+        past += usize::from(q[0].max(q[1]).max(q[2]) >= STORED_MAX);
+    }
+    Clipping {
         channels: channels.map(share),
         film: share(film),
         bare_light: share(bare_light),
-        base: is_clipped(e.base_rgb),
+        base: is_clipped(s.estimate.base_rgb),
+        past_range: past as f32 / sampled.max(1) as f32,
     }
 }
 
@@ -770,8 +814,10 @@ pub fn convert_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) ->
     let gain = a.saturation_gain();
     for_each_part(&mut img.data, 3, |_, part| {
         for px in part.as_chunks_mut::<3>().0 {
-            *px = if a.white_clipped && is_clipped(*px) {
-                [STORED_MAX; 3]
+            *px = if !a.accept_clipping {
+                saturate(positive(*px, &s.estimate, a), gain)
+            } else if is_clipped(*px) {
+                [0.0; 3]
             } else {
                 past_range_to_white(saturate(positive(*px, &s.estimate, a), gain))
             };
@@ -1234,7 +1280,7 @@ mod tests {
         assert_eq!((rotated.width, rotated.height), (300, 400));
     }
 
-    /// Base-colored film around a block of light, all of it on a uniform density.
+    /// Film of uniform density beside a block of the given raw values.
     fn scan_with_block(block: [f32; 3], share_of_side: f32) -> Rgb32 {
         let (w, h) = (200, 100);
         let mut scan = Rgb32::new(w, h);
@@ -1248,25 +1294,62 @@ mod tests {
         scan
     }
 
+    const HOLDER: [f32; 3] = [0.0019, 0.0029, 0.0024];
+    const BARE_LIGHT: [f32; 3] = [0.7, 0.99, 1.0];
+
+    fn settings() -> Settings {
+        Settings::new(est(), Adjust::default())
+    }
+
     #[test]
-    fn clipping_is_measured_per_channel_and_bare_light_spares_the_film() {
-        let scan = scan_with_block([0.7, 0.99, 1.0], 0.1);
-        let c = source_clipping(&scan, &est(), NRect::FULL);
+    fn clipped_light_is_measured_per_channel_and_spares_the_film() {
+        let c = measure_clipping(&scan_with_block(BARE_LIGHT, 0.1), &settings());
         assert_eq!(c.channels, [0.0, 0.1, 0.1]);
         assert_eq!((c.bare_light, c.film, c.base), (0.1, 0.0, false));
         assert!(c.is_reportable() && !c.harms_film());
         let warning = c.warning(false).unwrap();
-        assert!(
-            warning.contains("10.0%") && warning.contains("green, blue"),
-            "{warning}"
-        );
+        assert!(warning.contains("10.0%"), "{warning}");
+        assert!(warning.contains("green, blue") && warning.contains("as black"));
         assert_eq!(c.warning(true), None);
     }
 
     #[test]
+    fn a_holder_warns_though_the_sensor_clipped_nothing() {
+        let c = measure_clipping(&scan_with_block(HOLDER, 0.1), &settings());
+        assert_eq!(c.channels, [0.0; 3]);
+        assert!((c.past_range - 0.1).abs() < 0.01, "{c:?}");
+        let warning = c.warning(false).unwrap();
+        assert!(warning.contains("holder") && warning.contains("as white"));
+        assert_eq!(c.warning(true), None);
+    }
+
+    #[test]
+    fn a_scan_with_both_is_told_about_both_and_one_accept_covers_them() {
+        let mut scan = scan_with_block(HOLDER, 0.1);
+        let right_end = scan.width - scan.width / 10;
+        for y in 0..scan.height {
+            for x in right_end..scan.width {
+                let i = (y * scan.width + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&BARE_LIGHT);
+            }
+        }
+        let c = measure_clipping(&scan, &settings());
+        assert!(c.warning(false).unwrap().contains("white and black"));
+        assert_eq!(c.warning(true), None);
+    }
+
+    #[test]
+    fn what_lowering_exposure_brings_back_is_no_longer_reported() {
+        let mut s = settings();
+        let scan = scan_with_block(pixel([1.2; 3]), 0.1);
+        let bright = measure_clipping(&scan, &s).past_range;
+        s.adjust.exposure = -100.0;
+        assert!(measure_clipping(&scan, &s).past_range < bright, "{bright}");
+    }
+
+    #[test]
     fn film_with_a_clipped_channel_is_told_from_bare_light_by_its_orange_mask() {
-        let scan = scan_with_block([1.0, 0.8, 0.3], 0.1);
-        let c = source_clipping(&scan, &est(), NRect::FULL);
+        let c = measure_clipping(&scan_with_block([1.0, 0.8, 0.3], 0.1), &settings());
         assert_eq!((c.film, c.bare_light), (0.1, 0.0));
         assert!(c.harms_film());
         // Accepting doesn't make the problem go away.
@@ -1275,56 +1358,56 @@ mod tests {
 
     #[test]
     fn a_clipped_film_base_harms_the_conversion_on_its_own() {
-        let e = Estimate {
-            base_rgb: [0.5, 0.99, 0.3],
-            ..est()
-        };
-        let c = source_clipping(&Rgb32::new(8, 8), &e, NRect::FULL);
+        let s = Settings::new(
+            Estimate {
+                base_rgb: [0.5, 0.99, 0.3],
+                ..est()
+            },
+            Adjust::default(),
+        );
+        let c = measure_clipping(&scan_with_block(pixel([0.4; 3]), 0.0), &s);
         assert!(c.base && c.harms_film() && c.warning(false).is_some());
     }
 
     #[test]
-    fn bright_film_and_a_few_hot_pixels_are_not_clipping() {
+    fn a_scan_with_no_real_clipping_stays_quiet() {
         // Below the limit, however bright: this is how a scan exposed close to it looks.
-        let bright = scan_with_block([0.97, 0.9, 0.5], 1.0);
-        assert_eq!(
-            source_clipping(&bright, &est(), NRect::FULL),
-            SourceClipping::default()
+        let bright = measure_clipping(&scan_with_block([0.97, 0.9, 0.5], 1.0), &settings());
+        assert_eq!(bright, Clipping::default());
+        // Dense picture that the DNG can still store.
+        let dense = measure_clipping(
+            &scan_with_block(pixel(neutral(1.0, &CURVES)), 1.0),
+            &settings(),
         );
-        let mut hot = scan_with_block([0.1; 3], 1.0);
-        hot.data[0] = 1.0;
-        assert!(!source_clipping(&hot, &est(), NRect::FULL).is_reportable());
+        assert_eq!(dense.past_range, 0.0);
+        assert!(!dense.is_reportable());
+        // A few hot pixels, and a few pixels past the limit.
+        let mut few = scan_with_block(pixel([0.4; 3]), 0.0);
+        few.data[0] = 1.0;
+        few.data[60..63].copy_from_slice(&HOLDER);
+        let c = measure_clipping(&few, &settings());
+        assert!(!c.is_reportable() && c.warning(false).is_none(), "{c:?}");
     }
 
     #[test]
     fn clipping_cropped_away_is_not_reported() {
-        let scan = scan_with_block([0.7, 0.99, 1.0], 0.1);
-        let right = NRect {
-            x0: 0.5,
-            y0: 0.0,
-            x1: 1.0,
-            y1: 1.0,
-        };
-        assert!(!source_clipping(&scan, &est(), right).is_reportable());
+        for block in [BARE_LIGHT, HOLDER] {
+            let mut s = settings();
+            s.adjust.crop = Some(NRect {
+                x0: 0.5,
+                y0: 0.0,
+                x1: 1.0,
+                y1: 1.0,
+            });
+            let c = measure_clipping(&scan_with_block(block, 0.1), &s);
+            assert!(!c.is_reportable(), "{c:?}");
+        }
     }
 
     #[test]
-    fn what_is_past_the_stored_range_turns_white_and_nothing_else_moves() {
-        // Density of a pixel behind a holder, as a scan reads it: it can't stay a pure color.
-        let e = est();
-        let settings = Settings::new(e.clone(), Adjust::default());
-        let holder = Rgb32 {
-            width: 1,
-            height: 1,
-            data: vec![0.0019, 0.0029, 0.0024],
-        };
-        let raw = saturate(positive(holder.get(0, 0), &e, &settings.adjust), 1.25);
-        assert!(raw[0] > 10.0 * raw[2], "{raw:?}");
-        assert_eq!(convert(&holder, &settings).data, vec![STORED_MAX; 3]);
-
+    fn past_range_to_white_leaves_what_fits_and_is_continuous() {
         let inside = [4.9, 0.5, 0.1];
         assert_eq!(past_range_to_white(inside), inside);
-        // Continuous across the limit, and whiter all the way up.
         let just_past = past_range_to_white([STORED_MAX * 1.001, 0.5, 0.1]);
         assert!((just_past[1] - 0.5).abs() < 0.01, "{just_past:?}");
         let halfway = past_range_to_white([STORED_MAX * 1.414, 0.5, 0.1]);
@@ -1333,36 +1416,42 @@ mod tests {
     }
 
     #[test]
-    fn accepted_clipped_light_is_pure_white_and_otherwise_stays_as_measured() {
+    fn accepting_renders_a_holder_white_and_bare_light_black_and_nothing_else_moves() {
         let scan = Rgb32 {
-            width: 2,
+            width: 3,
             height: 1,
-            data: vec![0.7, 0.99, 1.0, 0.1, 0.1, 0.1],
+            data: [HOLDER, BARE_LIGHT, pixel([0.4; 3])].concat(),
         };
-        let mut settings = Settings::new(est(), Adjust::default());
-        let dark = convert(&scan, &settings);
-        assert!(dark.get(0, 0).iter().all(|&v| v < 0.05), "{dark:?}");
-        settings.adjust.white_clipped = true;
-        let white = convert(&scan, &settings);
-        assert_eq!(white.get(0, 0), [STORED_MAX; 3]);
-        // Film that isn't clipped doesn't change.
-        assert_eq!(white.get(1, 0), dark.get(1, 0));
-        // Exposure can't bring it back: the choice holds under every slider.
-        settings.adjust.exposure = -100.0;
-        assert_eq!(convert(&scan, &settings).get(0, 0), [STORED_MAX; 3]);
+        let mut s = settings();
+        let e = s.estimate.clone();
+        let as_converted = convert(&scan, &s);
+        // Until then, every pixel is what the conversion produces.
+        for x in 0..3 {
+            let want = saturate(
+                positive(scan.get(x, 0), &e, &s.adjust),
+                s.adjust.saturation_gain(),
+            );
+            assert_eq!(as_converted.get(x, 0), want);
+        }
+        assert!(as_converted.get(0, 0)[0] > 10.0 * as_converted.get(0, 0)[2]);
+        s.adjust.accept_clipping = true;
+        let accepted = convert(&scan, &s);
+        assert_eq!(accepted.get(0, 0), [STORED_MAX; 3]);
+        assert_eq!(accepted.get(1, 0), [0.0; 3]);
+        assert_eq!(accepted.get(2, 0), as_converted.get(2, 0));
     }
 
     #[test]
-    fn settings_from_before_the_choice_keep_clipped_light_as_measured() {
-        let mut json = serde_json::to_value(Settings::new(est(), Adjust::default())).unwrap();
+    fn settings_from_before_the_choice_stay_unaccepted() {
+        let mut json = serde_json::to_value(settings()).unwrap();
         json["adjust"]
             .as_object_mut()
             .unwrap()
-            .remove("white_clipped");
+            .remove("accept_clipping");
         let old: Settings = serde_json::from_value(json).unwrap();
-        assert!(!old.adjust.white_clipped);
+        assert!(!old.adjust.accept_clipping);
         let mut accepted = old.clone();
-        accepted.adjust.white_clipped = true;
+        accepted.adjust.accept_clipping = true;
         let text = serde_json::to_string(&accepted).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&text).unwrap(), accepted);
     }

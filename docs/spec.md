@@ -104,15 +104,13 @@ Here T is the signal, T\_base the film base, g\_c the frame's gray curve (identi
 
 Measurement runs on the scan downsampled by 4. Pixels of light through holes and gaps are left out.
 
-The same image is checked for light the sensor clipped, per channel. A channel at 0.98 or more of full scale counts as clipped. A clipped pixel is taken for film if its blue is under 90% of its red, since the orange mask holds blue back and bare light has no mask. Otherwise it is bare light outside the film. Clear film is the brightest film, so a clipped picture comes with a clipped base: both count as clipped film, along with a film base reading that is itself clipped.
+The same image is checked for what can't be recovered. Light past the stored limit is measured after conversion, under the current settings, and counts from 0.5% of the scan. Light the sensor clipped is measured per channel, before inversion, and counts from 0.01%. A channel at 0.98 or more of full scale counts as clipped. A clipped pixel is taken for film if its blue is under 90% of its red, since the orange mask holds blue back and bare light has no mask. Otherwise it is bare light outside the film. Clear film is the brightest film, so a clipped picture comes with a clipped base: both count as clipped film, along with a film base reading that is itself clipped.
 
 ### What lives where
 
 Exposure and color balance go into the pixels. Tone shaping goes into the profile curve, so it stays adjustable in a raw editor and never costs stored data.
 
-Two things decide what the brightest and darkest light outside the film become. Light blocked by a holder has a density far past what film can hold, so anything past the stored limit turns to white over one stop, instead of being stored channel by channel as pure red or yellow. This has no setting, since those colors mean nothing. Clipped light has almost no density, so it renders near black, and the user can accept it as pure white instead. That's a choice because on clipped film it paints white over what were deep shadows. It is off by default, and saved with the frame's settings and in the DNG.
-
-A settings file records a model version. When the model changes, older settings keep the user's choices and are measured again, with a warning.
+Two kinds of area outside the film can't be recovered after conversion. Light blocked by a holder has a density far past what film can hold, so it lands past the stored limit, where it is stored channel by channel and shows as pure red or yellow. Bare light has almost no density, so it lands near black with a slight tint. Both warn, and one choice accepts both: past the stored limit turns white over one stop, and whatever the sensor clipped turns exactly black. Until then every pixel stays as the conversion produces it. The choice is off by default, and saved with the frame's settings and in the DNG.
 
 ## Controls and workflow
 
@@ -120,14 +118,14 @@ The screen separates what can break a conversion from what develops it: frames o
 
 ### Setup
 
-Setup decides how the scan is read. It stays pinned above the development controls and never scrolls away, so a suspect base is visible while you judge color. A frame with no clear film shows a warning there, and so does a frame with clipped light. Clipped film always warns, as accepting it can't bring back what's lost. Bare light warns until it is accepted, and what's cropped away doesn't count.
+Setup decides how the scan is read. It stays pinned above the development controls and never scrolls away, so a suspect base is visible while you judge color. A frame with no clear film shows a warning there, and so does a frame with areas that can't be recovered. The warning reflects the current settings, and what's cropped away doesn't count. It fires on most whole scans, since nearly all show a holder or sprocket holes. Accepting ends it, except for clipped film, which always warns because accepting can't bring back what's lost.
 
 | Control | Choices |
 | --- | --- |
 | Film base | Detect or Pick by hand. Match film base… shares one across frames |
 | Measured | Center (size 50–100%, default 85%), or Draw area by hand. Sets where color and exposure are measured, never the crop |
 | Show areas | Draws the crop, measured area and film base on the whole scan |
-| Clipped light | As measured or White. Shown only when the frame has clipped light, or the choice was already made |
+| Clipping | As converted or Accept. Shown only when the frame has areas that can't be recovered, or the choice was already made |
 
 A dot in the frame list marks a film base or area set by hand.
 
@@ -173,7 +171,7 @@ The preview uses a quarter-size scan and the chosen profile's curve in ProPhoto,
 
 ### CLI
 
-`reversal convert` exposes the same adjustments as flags, warns about clipped light and takes `--accept-clipping` to keep it white, and takes `--roll` for several inputs, leaving out frames with no clear film unless none has any. `reversal ui` opens the web UI on a folder. The README lists every flag.
+`reversal convert` exposes the same adjustments as flags, warns about areas that can't be recovered and takes `--accept-clipping` to accept them, and takes `--roll` for several inputs, leaving out frames with no clear film unless none has any. `reversal ui` opens the web UI on a folder. The README lists every flag.
 
 ## Architecture
 
@@ -225,7 +223,7 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 - **Cameras:** tested only with Nikon D5100 scans. Others LibRaw reads should open, but the crosstalk correction was fitted to this camera and one light source.
 - **Full strips:** the centered area doesn't suit them, so draw the area and crop there.
 - **Clipped light:** film with no orange mask reads as bare light, and a very warm light source can read as clipped film. A scan with clipped film has only been tested by overexposing real scans in software.
-- **Holders:** a holder inside the measured area still pulls exposure too dark, and lowering Exposure on such a frame can bring the holder's color back. Draw the area, or lower its size.
+- **Holders:** a holder inside the measured area still pulls exposure too dark, and lowering Exposure on such a frame can bring the holder's color back, even when accepted. Draw the area, or lower its size.
 - **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Pick the base, or match it across the roll.
 - **Metadata:** camera EXIF isn't copied to the DNG.
 - **Mac app:** Apple Silicon only, and it can't read DNGs with lossy JPEG compression. It is ad hoc signed, so users approve it with Open Anyway.

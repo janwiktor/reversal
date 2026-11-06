@@ -443,10 +443,12 @@ mod tests {
     }
 
     #[test]
-    fn the_top_of_the_stored_range_previews_as_white_under_every_look() {
+    fn the_ends_of_the_stored_range_preview_as_white_and_black_under_every_look() {
         for look in Look::ALL {
-            let out = to_srgb8(&gray(dng::STORED_MAX), &profile(look, Tone::default()));
-            assert!(out.iter().all(|&c| c >= 253), "{look:?} {out:?}");
+            let p = profile(look, Tone::default());
+            let white = to_srgb8(&gray(dng::STORED_MAX), &p);
+            assert!(white.iter().all(|&c| c >= 253), "{look:?} {white:?}");
+            assert_eq!(to_srgb8(&gray(0.0), &p), [0; 3], "{look:?}");
         }
     }
 

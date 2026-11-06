@@ -248,7 +248,7 @@ function showSetupNote() {
   $("setup-note").hidden = !note;
   const clipping = current.clipping;
   // The choice stays reachable once made, even with the clipped part cropped away.
-  $("clipped-row").hidden = !clipping?.present && !adj().white_clipped;
+  $("clipped-row").hidden = !clipping?.present && !adj().accept_clipping;
   $("clipping-note").textContent = clipping?.warning ?? "";
   $("clipping-note").hidden = !clipping?.warning;
 }
@@ -260,8 +260,8 @@ function syncControls() {
   const percent = hints().area_percent ?? current.defaultAreaPercent;
   showValue("area-percent", percent);
   $("flip").setAttribute("aria-pressed", String(a.flip_h));
-  $("clipped-measured").setAttribute("aria-pressed", String(!a.white_clipped));
-  $("clipped-white").setAttribute("aria-pressed", String(!!a.white_clipped));
+  $("clipped-keep").setAttribute("aria-pressed", String(!a.accept_clipping));
+  $("clipped-accept").setAttribute("aria-pressed", String(!!a.accept_clipping));
   const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.area) ? "frame" : "draw";
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
   $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
@@ -289,8 +289,8 @@ for (const id of [...SLIDERS, "straighten"]) {
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
 }
 
-for (const [id, white] of [["clipped-measured", false], ["clipped-white", true]]) {
-  $(id).addEventListener("click", () => { if (current) { adj().white_clipped = white; changed(0); } });
+for (const [id, accept] of [["clipped-keep", false], ["clipped-accept", true]]) {
+  $(id).addEventListener("click", () => { if (current) { adj().accept_clipping = accept; changed(0); } });
 }
 
 for (const look of LOOKS) {
@@ -773,10 +773,10 @@ async function refresh() {
   try {
     const res = await api("/api/preview", { file, settings: current.settings, full: !!tool });
     const clipped = Number(res.headers.get("X-Clipped") || 0);
-    const sourceClipping = JSON.parse(res.headers.get("X-Source-Clipping") || "null");
+    const clipping = JSON.parse(res.headers.get("X-Clipping") || "null");
     const blob = await res.blob();
     if (file !== current?.file) return;
-    current.clipping = sourceClipping;
+    current.clipping = clipping;
     showSetupNote();
     const img = $("photo");
     const old = img.src;

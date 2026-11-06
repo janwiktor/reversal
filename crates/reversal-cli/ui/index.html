@@ -85,10 +85,10 @@
     </div>
     <p id="roll-state" hidden>This frame uses its roll's film base.</p>
     <div class="row" id="clipped-row" hidden>
-      <div class="row-label" id="l-clipped">Clipped light</div>
-      <div class="seg" role="group" aria-labelledby="l-clipped" title="Light that reached the sensor's limit, saved in this frame's settings">
-        <button type="button" id="clipped-measured" aria-pressed="true" title="Leave it as the conversion reads it: nearly no density, so near black">As measured</button>
-        <button type="button" id="clipped-white" aria-pressed="false" title="Accept the clipping and keep this light pure white">White</button>
+      <div class="row-label" id="l-clipped">Clipping</div>
+      <div class="seg" role="group" aria-labelledby="l-clipped" title="Areas that can't be recovered, such as a holder or bare light. Saved in this frame's settings.">
+        <button type="button" id="clipped-keep" aria-pressed="true" title="Leave these areas as the conversion produces them">As converted</button>
+        <button type="button" id="clipped-accept" aria-pressed="false" title="Accept them: a holder renders as white, and bare light as black">Accept</button>
       </div>
     </div>
     <p id="clipping-note" hidden></p>
