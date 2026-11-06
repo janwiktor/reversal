@@ -1,6 +1,8 @@
 //! Local web UI: a small HTTP server on 127.0.0.1 serving one page and a JSON API.
-//! Requests from other sites are refused, see [`request_allowed`].
+//! Requests from other sites are refused, see [`request_allowed`], and the page runs under a
+//! content security policy that allows only its own files, see [`CONTENT_SECURITY_POLICY`].
 //!
+//! GET  /, /app.js, /style.css             the page
 //! GET  /api/version                        version and the commit it was built from
 //! GET  /api/license                        the license text
 //! GET  /api/files                          raw files in the folder
@@ -22,6 +24,7 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -39,7 +42,16 @@ use crate::folder::RollReading;
 use crate::folder::{saved_settings, Folder};
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
+const APP_JS: &str = include_str!("../ui/app.js");
+const STYLE_CSS: &str = include_str!("../ui/style.css");
 const LICENSE_TEXT: &str = include_str!("../../../LICENSE");
+
+/// What the page may load and connect to: its own script and stylesheet, previews as blobs,
+/// icons as data URLs, and the API. Nothing inline, so a file name or message that reached the
+/// page as markup couldn't run as code, and no site may put the page in a frame.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
+    img-src 'self' blob: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; \
+    form-action 'none'";
 
 type Resp = Response<Cursor<Vec<u8>>>;
 type Handled = Result<Resp, (u16, String)>;
@@ -132,10 +144,18 @@ pub fn serve(
         roll_readings: Arc::default(),
     };
     for mut req in server.incoming_requests() {
-        let resp = state
-            .handle(&mut req)
-            .unwrap_or_else(|(code, msg)| json_resp(code, &json!({ "error": msg })));
-        let _ = req.respond(resp);
+        // A failing request mustn't take the server down: the Mac app would close with it.
+        let handled = catch_unwind(AssertUnwindSafe(|| state.handle(&mut req)));
+        let resp = match handled {
+            Ok(Ok(resp)) => resp,
+            Ok(Err((code, msg))) => json_resp(code, &json!({ "error": msg })),
+            Err(_) => {
+                eprintln!("{} {} failed unexpectedly", req.method(), req.url());
+                json_resp(500, &json!({ "error": "the request failed unexpectedly" }))
+            }
+        };
+        // Browsers must take each response for what it says it is.
+        let _ = req.respond(resp.with_header(header("X-Content-Type-Options", "nosniff")));
     }
     Ok(())
 }
@@ -187,23 +207,19 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn request_header<'a>(req: &'a Request, name: &'static str) -> Option<&'a str> {
+fn request_header(req: &Request, name: &str) -> Option<String> {
     req.headers()
         .iter()
-        .find(|h| h.field.equiv(name))
-        .map(|h| h.value.as_str())
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case(name))
+        .map(|h| h.value.to_string())
 }
 
 /// Binding to loopback doesn't stop a web page in the user's browser from reaching this
 /// server. The Host check defeats DNS rebinding, the Origin check other sites, and
-/// requiring JSON forces a CORS preflight, which this server never grants.
-fn request_allowed(
-    port: u16,
-    is_post: bool,
-    host: Option<&str>,
-    origin: Option<&str>,
-    content_type: Option<&str>,
-) -> bool {
+/// requiring JSON forces a CORS preflight, which this server never grants. The Sec-Fetch
+/// headers, where a browser sends them, also refuse what another site loads without a
+/// preflight, such as an image; the user going to a page here is still let through.
+fn request_allowed(port: u16, is_post: bool, header: impl Fn(&str) -> Option<String>) -> bool {
     let local = |authority: &str| {
         authority == format!("127.0.0.1:{port}") || authority == format!("localhost:{port}")
     };
@@ -211,9 +227,22 @@ fn request_allowed(
         let media_type = c.split(';').next().unwrap_or("").trim();
         media_type.eq_ignore_ascii_case("application/json")
     };
-    host.is_some_and(local)
-        && origin.is_none_or(|o| o.strip_prefix("http://").is_some_and(local))
-        && (!is_post || content_type.is_some_and(is_json))
+    let own_fetch = header("Sec-Fetch-Site").is_none_or(|s| s == "same-origin" || s == "none");
+    let navigation = header("Sec-Fetch-Mode").as_deref() == Some("navigate")
+        && header("Sec-Fetch-Dest").as_deref() == Some("document");
+    header("Host").is_some_and(|h| local(&h))
+        && header("Origin").is_none_or(|o| o.strip_prefix("http://").is_some_and(local))
+        && (!is_post || header("Content-Type").is_some_and(|c| is_json(&c)))
+        && (own_fetch || navigation)
+}
+
+fn page(body: &str, content_type: &str) -> Resp {
+    Response::from_data(body.as_bytes().to_vec())
+        .with_header(header("Content-Type", content_type))
+        .with_header(header("Content-Security-Policy", CONTENT_SECURITY_POLICY))
+        .with_header(header("Referrer-Policy", "no-referrer"))
+        // The files change with the binary, not with time, so never keep an old one.
+        .with_header(header("Cache-Control", "no-store"))
 }
 
 fn read_body<T: for<'de> Deserialize<'de>>(req: &mut Request) -> Result<T, (u16, String)> {
@@ -222,21 +251,18 @@ fn read_body<T: for<'de> Deserialize<'de>>(req: &mut Request) -> Result<T, (u16,
 
 impl State {
     fn handle(&mut self, req: &mut Request) -> Handled {
-        let allowed = request_allowed(
-            self.port,
-            *req.method() == Method::Post,
-            request_header(req, "Host"),
-            request_header(req, "Origin"),
-            request_header(req, "Content-Type"),
-        );
+        let allowed = request_allowed(self.port, *req.method() == Method::Post, |name| {
+            request_header(req, name)
+        });
         if !allowed {
             return Err((403, "request refused".to_string()));
         }
         let url = req.url().to_string();
         let path = url.split('?').next().unwrap_or("");
         match (req.method(), path) {
-            (Method::Get, "/") => Ok(Response::from_data(INDEX_HTML.as_bytes().to_vec())
-                .with_header(header("Content-Type", "text/html; charset=utf-8"))),
+            (Method::Get, "/") => Ok(page(INDEX_HTML, "text/html; charset=utf-8")),
+            (Method::Get, "/app.js") => Ok(page(APP_JS, "text/javascript; charset=utf-8")),
+            (Method::Get, "/style.css") => Ok(page(STYLE_CSS, "text/css; charset=utf-8")),
             (Method::Get, "/api/version") => Ok(json_resp(200, &version_info())),
             (Method::Get, "/api/license") => {
                 Ok(Response::from_data(LICENSE_TEXT.as_bytes().to_vec())
@@ -338,6 +364,7 @@ impl State {
     }
 
     fn load(&mut self, file: &str) -> Handled {
+        self.folder.resolve(file)?;
         let sidecar = std::fs::read(self.folder.sidecar(file));
         let loaded = self.ensure_loaded(file)?;
         let auto = loaded.auto.clone();
@@ -515,8 +542,20 @@ fn export_workers() -> usize {
 mod tests {
     use super::*;
 
+    fn with_headers(is_post: bool, headers: &[(&str, &str)]) -> bool {
+        request_allowed(8787, is_post, |name| {
+            headers
+                .iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.to_string())
+        })
+    }
+
     fn allowed(host: &str, origin: Option<&str>, content_type: Option<&str>) -> bool {
-        request_allowed(8787, true, Some(host), origin, content_type)
+        let mut headers = vec![("Host", host)];
+        headers.extend(origin.map(|o| ("Origin", o)));
+        headers.extend(content_type.map(|c| ("Content-Type", c)));
+        with_headers(true, &headers)
     }
 
     #[test]
@@ -545,14 +584,64 @@ mod tests {
         assert!(!allowed("127.0.0.1:8787", None, None));
         assert!(!allowed("127.0.0.1:9999", None, json));
         // GET needs no content type, but still the right host.
-        assert!(request_allowed(
-            8787,
+        assert!(with_headers(false, &[("Host", "localhost:8787")]));
+        assert!(!with_headers(false, &[]));
+    }
+
+    #[test]
+    fn another_site_cant_load_the_api_but_the_user_can_still_go_to_a_page() {
+        let host = ("Host", "127.0.0.1:8787");
+        // The page's own calls, and the user typing the address or using a bookmark.
+        assert!(with_headers(
             false,
-            Some("localhost:8787"),
-            None,
-            None
+            &[host, ("Sec-Fetch-Site", "same-origin")]
         ));
-        assert!(!request_allowed(8787, false, None, None, None));
+        assert!(with_headers(false, &[host, ("Sec-Fetch-Site", "none")]));
+        // An image or script tag on another site, which needs no preflight.
+        let image = [
+            host,
+            ("Sec-Fetch-Site", "cross-site"),
+            ("Sec-Fetch-Mode", "no-cors"),
+            ("Sec-Fetch-Dest", "image"),
+        ];
+        assert!(!with_headers(false, &image));
+        // Another local server, say on another port.
+        assert!(!with_headers(
+            false,
+            &[host, ("Sec-Fetch-Site", "same-site")]
+        ));
+        // A frame on another site: refused here and by the policy on the page.
+        let frame = [
+            host,
+            ("Sec-Fetch-Site", "cross-site"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Dest", "iframe"),
+        ];
+        assert!(!with_headers(false, &frame));
+        // A link from another site opens the page: the user sees it, not that site.
+        let link = [
+            host,
+            ("Sec-Fetch-Site", "cross-site"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Dest", "document"),
+        ];
+        assert!(with_headers(false, &link));
+    }
+
+    #[test]
+    fn the_page_keeps_its_code_in_files_so_the_policy_holds() {
+        // No inline script or style: the policy would block it, silently in a user's browser.
+        assert!(INDEX_HTML.contains(r#"<script src="/app.js"></script>"#));
+        assert!(INDEX_HTML.contains(r#"<link rel="stylesheet" href="/style.css">"#));
+        assert!(!INDEX_HTML.contains("<style"));
+        assert!(!INDEX_HTML.contains("<script>"));
+        for text in [INDEX_HTML, APP_JS] {
+            assert!(!text.contains("style=\""), "inline style attribute");
+            assert!(!text.contains(" on") || !text.contains("=\"javascript"));
+        }
+        for part in CONTENT_SECURITY_POLICY.split(';') {
+            assert!(!part.contains("unsafe"), "{part}");
+        }
     }
 
     #[test]
