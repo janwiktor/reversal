@@ -31,7 +31,7 @@ __pycache__/
 .claude/
 
 # Large image test material — keep sample scans out of git (use Git LFS if needed)
-samples/raw/
+Samples/
 *.dng
 *.cr2
 *.cr3
@@ -44,7 +44,3 @@ samples/raw/
 
 # Experiments stay local
 spike/
-
-# Local sample scans and Rust build output
-Samples/
-target/

@@ -18,15 +18,6 @@ pub struct Rect {
 }
 
 impl Rect {
-    pub fn scale(self, factor: usize) -> Rect {
-        Rect {
-            top: self.top * factor,
-            bottom: self.bottom * factor,
-            left: self.left * factor,
-            right: self.right * factor,
-        }
-    }
-
     pub fn clamp(self, width: usize, height: usize) -> Rect {
         Rect {
             top: self.top.min(height),
