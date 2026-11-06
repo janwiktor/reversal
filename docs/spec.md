@@ -1,6 +1,6 @@
 # Reversal: Product Spec
 
-Reversal turns a camera scan of a film negative into a positive raw file that edits like a normal photo. This doc is the source of truth for what the product is and why. Evidence and rejected options are in the [Supporting Research](research.md).
+Reversal turns a camera scan of a film negative into a positive raw file that edits like a normal photo. This doc is the source of truth for what the product is and why. Evidence and rejected options for the conversion and file format are in the [Supporting Research](research.md).
 
 ## Product
 
@@ -164,7 +164,7 @@ The preview uses a quarter-size scan and the chosen profile's curve in ProPhoto,
 - **Settings:** each frame remembers its settings from the first change.
 - **State:** the list shows `saved` or `edited`. A frame counts as edited when its settings differ from its DNG's, or from the automatic ones if it has no DNG, so going back clears the label.
 - **Saving:** tick frames to save them together in the background, each with its own settings. Untouched frames get the automatic conversion, and Stop saving lets the frames in progress finish and starts no more.
-- **Roll:** Match film base… shares one film base across ticked frames or the whole folder, in three steps. It says what will happen, reads each frame without changing anything, then shows every reading so the user chooses which count. The base is the median of the ticked readings. Frames with no clear film start unticked, and readings over 6% from the roll's in any channel are flagged. It can be stopped, and no frame changes unless every frame could be prepared. It is opt-in because it hurts some rolls. Gray curves stay per frame, a base picked by hand on a frame stays, and Detect goes back to the frame's own.
+- **Roll:** Match film base… shares one film base across ticked frames or the whole folder, in three steps. It says what will happen, reads each frame without changing anything, then shows every reading so the user chooses which count. The base is the median of the ticked readings. Frames with no clear film start unticked, and readings over 6% from the roll's in any channel are flagged. It can be stopped, and no frame changes unless every frame could be prepared. It is opt-in because a shared base can add a color cast on some rolls. Gray curves stay per frame, a base picked by hand on a frame stays, and Detect goes back to the frame's own.
 
 ### CLI
 

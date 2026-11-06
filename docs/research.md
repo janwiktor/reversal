@@ -1,10 +1,25 @@
 # Reversal: Supporting Research
 
-This doc holds the evidence behind the [Product Spec](spec.md): the options we weighed, what we measured, and where the facts came from. What we chose lives in the spec. All measurements are from Nov 2026.
+This doc holds the evidence behind the conversion and file format in the [Product Spec](spec.md): what we found about inverting negatives, the technical options we weighed, and what tests showed. What we chose lives in the spec. All measurements are from Nov 2026.
 
-## Options considered
+## How to read the tests
 
-### How a negative usually gets converted
+Each test says what was tried, what changed and what it decided. Most compare a conversion with a finished scan of the same frame, made with another tool. That target shows one look rather than the truth, so a score is a guide, not a verdict. The experiment code and reference scans aren't published.
+
+All scores are differences from the finished scan in CIELAB, and lower is better:
+
+| Score | What it measures |
+| --- | --- |
+| Color error | Average difference in color (a\*b\*, or chroma ΔE), ignoring brightness |
+| Brightness error | RMS difference in L\*, on its 0–100 scale |
+| Neutral cast | The tint left on grays: the average a\*b\* difference over near-neutral pixels |
+| Hue drift | How many degrees a color's hue sits from the finished scan |
+
+The main test set is 22 frames from 6 rolls, all scanned with a Nikon D5100: 14 original frames, and two harder rolls of 4 frames each, called forest and metro below. The two rolls came in after the model was first fitted. All scores predate the current film base detection (see Film base).
+
+## Color and negative inversion
+
+### How negatives are usually converted
 
 The usual approaches either keep the file a negative or write a large rendered file. Reversal was built to fill the gap between them.
 
@@ -16,7 +31,75 @@ The usual approaches either keep the file a negative or write a large rendered f
 
 The first approach causes the most trouble in everyday editing. Sliders act on the negative, later curves shift the color balance, previews break where the profile doesn't travel, and leaving the editor means a TIFF or JPEG.
 
-### Input decoder
+### Inversion model
+
+Naive 1 − x inversion is a known pitfall, and density-based inversion is the industry basis, as in [Cineon printing density](https://en.wikipedia.org/wiki/Cineon). We compared curves or LUTs, per-channel power and a full density model, and chose density. An early plan to mimic enlarger heads and lab scanners with controls was dropped after the first test, because it added nothing over familiar digital controls.
+
+Input white balance needs no setting, because dividing by the film base cancels any per-channel gain.
+
+### Film base
+
+Tested on 25 frames, comparing base values rather than finished images. The new method hasn't been scored against the reference scans.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Largest even patch, against the median of the brightest 3% of pixels | The old method drew a strip through holes and markings, and landed on picture content when no edge showed. The green base moved +0.1% to −6.2% (median about −1.6%); red to green −0.3% to +1.2%, blue to green −1.3% to +0.9% | Adopted after review by eye |
+| Reporting frames with no clear film | 5 of 25 reported: 4 barely show a film edge, 1 is a real miss. 1 further frame counted as found from a thin sliver that may not be clear film | Warn instead of marking an unwanted area |
+| How close a patch must be to the brightest even areas | A 10% range lowered the base by up to 7.6% on frames that already read well | Use 7% |
+
+### Sharing a base across a roll
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Shared base, against each frame's own, on rolls of 8, 4 and 2 scored frames | Color error from 6.41 to 6.38, 6.43 to 6.23, and 14.48 to 12.62. On the last, neutral cast rose from 2.59 to 7.5 | Opt-in, never automatic |
+| Sharing gray curves as well | Color error rose to 7.89 and 6.92 on the first two rolls, and 12.71 on the last | Share the base only |
+| Spread of readings on nine similar frames | Green base stayed between 0.381 and 0.392 | Flag readings over 6% from the roll's. That the frames share a roll is assumed from their file numbers, and the limit hasn't been tried on a real roll |
+
+### Gray curves
+
+Published minilab patents describe the same family of methods: bin pixels by green density, keep the near-neutral ones, fit red and blue curves per film type, keep a shared toe apart from per-channel balance, and correct in density with a matrix. None of this shows what any shipping scanner does.
+
+The curve, correction, exposure constant and toe were frozen on the original 14 frames. The search method and exposure mix were chosen after seeing the two harder rolls, so their scores on those rolls are optimistic.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Per-frame gray curves, against per-channel black and white points | Color error from 10.3 to 7.7 on the original frames, 11.2–18.1 to 8.0 on forest and 13.9–16.0 to 8.0 on metro. Brightness error from 19.8 to 8.8, 17.7–57.7 to 6.7 and 22.7–39.0 to 10.7. Ranges run from a hand-set area to the area as shipped. A prototype with looser alignment and a slightly different mask reached color error 7.7–8.8 | Adopt |
+| Curve shape | Color error 8.26 with one bend, 8.81 with two, 8.90 free form | One bend |
+| Where the curve is anchored | Color error about 8 through the film base. Anchored on highlights, 16–18, because blue skies aren't neutral. With a free offset from the base, worse on every group, at 15.2 on metro | Through the base |
+| Search band for neutral pixels | Narrowing it with equal bins took color error from 14.9 to 9.4 on forest, and from 20.9 to 9.8 on its worst frame | Keep |
+| Light pull toward an averaged curve | Color error from 8.26 to 8.10. A fixed 50% blend made it worse, at 9.18 | Keep the light pull |
+| One curve per roll, against one per frame | Color error from about 8 to 8.8–12.5 | One per frame |
+| RGB or CMY sliders, using the best possible per-frame offsets | Warm hues still drifted 21° | No such controls |
+
+### Crosstalk, exposure and toe
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Density crosstalk correction | Hue drift from 18–21° to 7–12° on blues, and from 5–10° to 2–7° on warm tones. Greens drift about 7–10° further | Keep; greens are still to tune |
+| Exposure from highlights and scene average | Brightness error across the three groups: 9.6–15.9 with the mix, 11.3–17.8 on highlights alone, 9.0–23.1 on the average alone. About 8 is the best any per-frame value reaches | Keep the mix, for its better worst case |
+| Center-weighted scene average | Within about 1 of the plain average | Drop |
+| Shared toe with γ 0.7 | Brightness error improved on all groups; settings chosen on the original frames | Keep |
+
+### Measured area
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Whole scan | A black holder edge landed on the white point | Reject |
+| Frame detection and holder detection | Holder detection reached color error 7.79 and brightness error 8.79, no better than a plain centered cut | Remove both |
+| Centered area from 95% to 70% | Color error from 7.83 to 7.47. Brightness error 11.09 at 95%, where the area takes in holders, falling to 8.48 at 80% and 8.59 at 70%. At 85%: 7.63 and 8.69, with the lowest neutral cast, 3.77 | 85%, adjustable, with drawing by hand as the fallback |
+
+### Saturation and demosaic
+
+Measured against 8 hand-finished scans of one film stock.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Linear saturation after inversion, against the same correction in density | Color error from 8.66 in density to 7.77 in linear. A calibrated 3×3 matrix is untested | Linear, after inversion |
+| Balancing to the film base before demosaic | Fine color noise down 6.9%, fine luminance detail down 3.2%. Crops looked practically identical | Don't adopt |
+
+## Technical solutions
+
+### Raw decoding
 
 | Option | Pros | Cons | Outcome |
 | --- | --- | --- | --- |
@@ -27,6 +110,8 @@ The first approach causes the most trouble in everyday editing. Sliders act on t
 | rawler from [DNGLab](https://github.com/dnglab/dnglab) | Pure Rust, LGPL-2.1 | Self-described alpha, unstable API, may panic on bad input | Rejected |
 
 We also decided against our own raw-to-DNG step, since it adds nothing to the inversion.
+
+Building LibRaw without OpenMP, lcms and libjpeg kept DNGs byte-identical on three test files. The cost is that DNGs with lossy JPEG compression can't be read.
 
 ### Output encoding
 
@@ -42,20 +127,20 @@ We also decided against our own raw-to-DNG step, since it adds nothing to the in
 
 ProRAW is [a linear DNG, demosaiced before Lightroom sees it](https://lifeafterphotoshop.com/lightroom-now-supports-apple-iphone-13-proraw-dngs-directly/), which is the precedent for this file type.
 
-### Inversion model
+### How the DNG behaves in editors
 
-Naive 1 − x inversion is a known pitfall, and density-based inversion is the industry basis, as in [Cineon printing density](https://en.wikipedia.org/wiki/Cineon). We compared curves or LUTs, per-channel power and a full density model, and chose density. How it is fitted changed once: per-channel black and white points gave way to per-frame gray curves, based on the experiment below. An early plan to mimic enlarger heads and lab scanners with controls was dropped after the first test, because it added nothing over familiar digital controls.
+Hand-made positive DNGs from D5100 samples settled the format. Capture One and darktable weren't checked.
 
-### Default measured area
-
-All options were scored against reference scans; numbers are under Experiments.
-
-| Option | Outcome |
-| --- | --- |
-| Frame detection | Removed |
-| Whole scan | Failed on a black holder edge, which landed on the white point |
-| Holder detection | Replaced |
-| Centered cut, size adjustable, drawing as the fallback | Chosen at 85% |
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| 16-bit integer with about 2.3 stops of headroom | Works in Lightroom Classic, Lightroom mobile and Apple Photos, and Highlights and Exposure recover the headroom | Keep |
+| Float16 with Deflate | Works in Adobe apps, fails in Photos and Finder | Reject |
+| Several embedded profiles | Lightroom Classic and mobile list all three; in Classic, only the Profile browser shows them. Photos shows no choice but applies the main profile's curve | Embed all three, with the chosen one as main |
+| What the headroom keeps | Display clipping is recoverable up to the stored limit, and real loss was 0–0.7% of the picture. On one frame cropped to the image, Whites −100 took display clipping from 3.0% to 0% | Tone shaping stays in the profile curve |
+| A profile with no tone curve | Looked blown out | Every profile has a curve, which led to Flat and Vivid |
+| Initial white balance in Lightroom Classic | None shown until As Shot was reselected | Write `crs:WhiteBalance="As Shot"` in the XMP |
+| A shoulder in the profile's own curve, with a −2 EV offset, in Camera Raw | Looks the same as the standard DNG, so Camera Raw follows the curve and adds no compression of its own | Flat can roll off in its curve |
+| Flat as the main profile, in Apple Photos | With a −2 EV offset on the main profile it opened too bright: average 188 out of 255, against 147 if the offset were honored and 227 if ignored. Lowering BaselineExposure itself, with +2 EV on the other profiles, fixed it and looks the same in Camera Raw and Finder previews | BaselineExposure follows the main profile. Photos keeps its own rendering, with a slight shift left |
 
 ### Language
 
@@ -64,147 +149,17 @@ All options were scored against reference scans; numbers are under Experiments.
 | Rust | Memory-safe parsing of untrusted files; easy distribution | LibRaw is C++, so it needs FFI | Chosen |
 | C++ | LibRaw and the DNG SDK link directly | Parser memory-safety burden | Rejected |
 
-The pipeline is per-pixel and runs on all cores in plain Rust. GPU work remains an untried option.
+### Speed and file size
 
-### App shell
+The pipeline is per-pixel and runs in plain Rust. GPU work remains an untried option.
 
-A Swift window around the existing web UI won, because a native UI gains nothing perceptible and adds a second UI to keep in step. The connection between page and engine adds only 0.3 to 0.7 ms per preview.
-
-| Option | Added size | Crates | Outcome |
-| --- | --- | --- | --- |
-| Swift WKWebView window | Disk image about 1 MB at the time, 3.2 MB with the icon | None | Chosen |
-| wry + tao | 1.2 MB | 79 | Rejected |
-| Tauri | 7.0 MB | 411 | Rejected |
-| egui | 4.4 to 8.8 MB | 128+ | Rejected; color management unconfirmed |
-
-Leaving OpenMP, lcms and libjpeg out of LibRaw kept DNGs byte-identical on three test files. The cost is that DNGs with lossy JPEG compression can't be read.
-
-### Where the setup controls sit
-
-Film base and measured area can break a conversion, so they moved away from the development sliders, to a block pinned under the frame list. Setup/Develop tabs were rejected because they hide a suspect base while you judge color. An on-image toolbar was rejected because it covers the picture. A film base color chip was tried and dropped, since camera RGB looks green and would mislead. Mirror was first placed in Setup, then moved to Frame after review, because it only orients the image.
-
-In the desktop UI pass on November 5, Setup moved from under the frame list to the right column, pinned above Develop, which gave the frame list its full height. Setup/Develop tabs were tried again and rejected for the same reason as before. A base color chip was tried again in the roll review, to compare readings with each other, and removed for the same reason: camera RGB looks green.
-
-## Experiments and results
-
-The experiment code and reference scans aren't published, so these numbers can't be reproduced from the repo. Targets are finished conversions from another tool, so they show one look rather than the truth. Lower scores are better.
-
-### DNG spike
-
-Hand-made positive LinearRaw DNGs, from D5100 samples, settled the output format.
-
-- 16-bit integer with 2.3 EV of storage headroom and BaselineExposure +2 works in Lightroom Classic, Lightroom mobile and Apple Photos. Highlights and Exposure recover the headroom.
-- Float16 with Deflate works in Adobe apps but fails in Photos and Finder.
-- Lightroom Classic and mobile list all three embedded profiles; in Classic, only the Profile browser shows them. Photos shows no choice but applies the main profile's tone curve.
-
-Capture One and darktable weren't checked. Lightroom Classic showed no initial white balance until As Shot was reselected, so the writer now sets `crs:WhiteBalance="As Shot"` in the XMP.
-
-### Gray curves
-
-Per-frame gray curves cut color error by a quarter on the original frames and by about half on new, harder ones. Measured on 22 D5100 frames from 6 rolls. Cells are chroma error ΔE, then RMS L.
-
-| Frames | Engine before, as shipped | Engine before, hand-set area | Built model |
-| --- | --- | --- | --- |
-| Original 14 | 10.3 / 19.8 | 10.3 / 19.8 | 7.7 / 8.8 |
-| Forest roll (4) | 18.1 / 57.7 | 11.2 / 17.7 | 8.0 / 6.7 |
-| Metro roll (4) | 16.0 / 39.0 | 13.9 / 22.7 | 8.0 / 10.7 |
-
-The built-model column used tighter alignment and a slightly different mask; the matching prototype scored 8.0 / 9.2, 8.8 / 7.8 and 7.7 / 11.4. The search method and exposure mix were chosen after seeing the new frames, so their scores are optimistic. The curve, correction, exposure constant and toe were frozen on the original frames.
-
-| Test | Result | Decision |
+| Tested | Effect | Decision |
 | --- | --- | --- |
-| RGB/CMY sliders | Best per-frame RGB offsets still left warm hues 21° off and 400D at 26 | Leave out |
-| Per-channel S-curves | One bend 8.26, two bends 8.81, free form 8.90 (color error, original 14) | Leave out |
-| Density crosstalk correction | Without it blues drift 18–21° and warm tones 5–10°; with it 7–12° and 2–7°. Greens drift about 7–10° further | Keep, tune greens later |
-| Light pull toward an averaged curve | 8.10 vs 8.26 alone; a fixed 50% blend hurts, at 9.18 | Keep the light pull |
-| Narrowing search band with equal bins | Forest roll 14.9 → 9.4; `_DSC3335` 20.9 → 9.8 | Keep |
-| Highlight anchor for the curve | About 16–18, because blue skies aren't neutral | Reject |
-| Offset from the film base | Worse on every group, metro roll 15.2 | Keep the base anchor |
-| Roll pooling of curves | Forest roll 12.5, but original frames 8.8 and metro roll 10.4 | Curves stay per frame |
-| Exposure from highlights and scene average | Brightness 9.9 / 9.6 / 15.9; highlights alone 11.3 / 14.7 / 17.8; average alone 9.0 / 9.0 / 23.1; best per frame about 8 | Keep the mix |
-| Center-weighted average | Within about 1 of the plain average | Drop |
-| Shared toe with γ 0.7 | Brightness improved on all groups; settings chosen on the original frames | Keep |
-
-Published minilab patents describe the same family of methods: bin pixels by green density, keep the near-neutral ones, fit red and blue curves per film type, keep a shared toe apart from per-channel balance, and correct in density with a matrix. None of this shows what any shipping scanner does.
-
-### Other color tests
-
-Measured against 8 hand-finished reference scans of one film stock.
-
-- **Saturation:** a built-in linear saturation after inversion beat the same correction in density (chroma error ΔE 7.77 vs 8.66). A calibrated 3×3 matrix is untested.
-- **Demosaic:** balancing to the film base first lowered fine color noise by 6.9% and fine luminance detail by 3.2%. Crops looked practically identical, so it wasn't adopted.
-- **Input white balance:** needs no setting, because dividing by the film base cancels any per-channel gain.
-
-### Measured area
-
-Scored on 22 frames with reference scans. 85% was chosen because its gap to 80% is small and it had the lowest neutral cast (3.77).
-
-| Area | Color error | Brightness error |
-| --- | --- | --- |
-| Holder detection | 7.79 | 8.79 |
-| 95% | 7.83 | 11.09 |
-| 90% | 7.71 | 8.87 |
-| 85% | 7.63 | 8.69 |
-| 80% | 7.53 | 8.48 |
-| 70% | 7.47 | 8.59 |
-
-At 95% the area takes in holders.
-
-### Tone controls and profiles
-
-Display clipping is recoverable up to the stored limit. Real loss was 0–0.7% of the picture across the test frames. On one test frame cropped to the image area, Whites −100 took display clipping from 3.0% to 0%. A curve-less profile looked blown out, which led to Flat and Vivid. Vivid's saturation was eased from 1.25 to 1.15 after review.
-
-### Preview against editors
-
-Camera Raw is the reference for the preview. On `_DSC5384` in Safari on a MacBook, all three looks are virtually identical to Camera Raw, with a negligible shadow difference. The comparison hasn't been repeated on another OS or machine.
-
-- **Dropped:** a fitted highlight roll-off with hue-stable tone matched Lightroom screenshots of `_DSC5379` closely (mean error 2.9 against 11.5 levels out of 255 under Neutral), but was too much custom rendering.
-- **Camera Raw:** a shoulder in the profile's own curve with a −2 EV offset looks the same as the standard DNG, so Camera Raw follows the curve and adds no compression of its own.
-- **Apple Photos:** a Flat DNG with a −2 EV offset on its main profile opened too bright (average 188 out of 255, against 227 if the offset were ignored and 147 if honored). Lowering BaselineExposure itself, with no offset on the main profile and +2 EV on the others, fixed it and looks the same in Camera Raw and Finder previews. Photos keeps its own rendering, with a slight shift left.
-- **Whites at 0:** a jump at the slider's zero came from a shoulder that dropped the raw editor's roll-off. Starting the shoulder from that roll-off removed it. The stored DNG changed by only 9 bytes, which look like rounding in the Flat profile's curve.
-
-### File size
-
-A 16 MP D5100 scan came to about 62–64 MB with lossless JPEG, two frames measured. Other sizes and JPEG XL weren't measured.
-
-### Speed
-
-Using all cores took a single preview from 65 ms to 17 ms and a single DNG from 1.1 s to 0.8 s, byte-identical to the earlier build on one NEF. Twelve frames save in 4.4 s on the development build and 6.1 s on the app's. Parallel decodes with an OpenMP build of LibRaw took 162 s for those twelve, so decoding runs one frame at a time.
-
-### Film base detection
-
-Reading the largest even patch keeps the base on clear film, and moved color ratios by about 1% at most on 25 samples. The old method took the median of the brightest 3% of pixels. It drew a whole strip through holes and markings, and landed on picture content on frames with no visible edge.
-
-| Measure, new against old (25 frames) | Result |
-| --- | --- |
-| Green base level | +0.1% to −6.2%, median about −1.6% |
-| Red to green ratio | −0.3% to +1.2% |
-| Blue to green ratio | −1.3% to +0.9% |
-| Frames reported as no clear film | 5: `_DSC4444`, `_DSC5037` to `_DSC5040` |
-
-The patch must lie within 7% of a high percentile of the even cells' levels. A 10% range was tried and rejected, because it lowered the base by up to 7.6% on frames that already read well.
-
-Of the five unsure frames, four barely show a film edge. `_DSC4444` has a visible edge, so that one is a miss. `_DSC4062` counts as found from a thin sliver at the scan's edge, which may not be clear film.
-
-The 6% limit for flagging a reading in the roll review comes from nine similar frames, `_DSC5376` and `_DSC5384` to `_DSC5391`, whose green base stayed between 0.381 and 0.392. That they share a roll is assumed from their file numbers, and the limit hasn't been tried in the review on a single real roll.
-
-We reviewed the results by eye on November 5 and adopted the new method: its hits are good, and saying detection failed in unclear cases is preferred to marking an unwanted area. It hasn't been scored against the reference scans. Only base values were compared, not finished images, so the color error figures in this doc still describe the old detection.
-
-### Sharing a film base across a roll
-
-A shared base helps some rolls and hurts others, so it is opt-in and shares only the base. Color error against finished scans:
-
-| Roll | Per frame | Shared base | Shared base and curves |
-| --- | --- | --- | --- |
-| 8 frames | 6.41 | 6.38 | 7.89 |
-| 4 frames | 6.43 | 6.23 | 6.92 |
-| 2 scored frames | 14.48 | 12.62 | 12.71 |
-
-On the last roll the neutral cast rose from 2.59 to 7.5 with a shared base. Cropping six frames of one roll to their center moved their own base by up to 0.31 density; on a 4-frame roll with a different look it stayed within 0.02.
+| Pixel work on all cores | A preview from 65 ms to 17 ms, a DNG from 1.1 s to 0.8 s, byte-identical to the earlier build on one NEF | Keep |
+| Decoding frames in parallel, with an OpenMP build of LibRaw | Twelve frames took 162 s, against 4.4 s with the development build and 6.1 s with the app's, each decoding one frame at a time | One decode at a time; the plain LibRaw we link isn't thread-safe either |
+| File size with lossless JPEG | About 62–64 MB for a 16 MP D5100 scan, on two frames. Other sizes and JPEG XL weren't measured | No change |
 
 ## Sources
-
-Forum threads are user reports, not vendor documentation.
 
 ### Patents
 

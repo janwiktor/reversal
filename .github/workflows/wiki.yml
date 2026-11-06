@@ -44,7 +44,7 @@ jobs:
           # Reversal
 
           - [Product Spec](Product-Spec): what Reversal does and why
-          - [Supporting Research](Supporting-Research): the options weighed, what was measured, and sources
+          - [Supporting Research](Supporting-Research): conversion findings, technical options, test results and sources
 
           For how to install and use it, see the [README](https://github.com/janwiktor/reversal#readme).
           EOF
