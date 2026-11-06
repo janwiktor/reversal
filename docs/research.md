@@ -15,7 +15,7 @@ All scores are differences from the finished scan in CIELAB, and lower is better
 | Neutral cast | The tint left on grays: the average a\*b\* difference over near-neutral pixels |
 | Hue drift | How many degrees a color's hue sits from the finished scan |
 
-The main test set is 22 frames from 6 rolls, all scanned with a Nikon D5100: 14 original frames, and two harder rolls of 4 frames each, called forest and metro below. The two rolls came in after the model was first fitted. All scores predate the current film base detection (see Film base).
+The main test set is 22 frames from 6 rolls, all scanned with a Nikon D5100: 14 original frames, and two harder rolls of 4 frames each, called forest and metro below. The two rolls came in after the model was first fitted. Scores predate the current film base detection (see Film base) unless a test says otherwise.
 
 ## Color and negative inversion
 
@@ -39,13 +39,14 @@ Input white balance needs no setting, because dividing by the film base cancels 
 
 ### Film base
 
-Tested on 25 frames, comparing base values rather than finished images. The new method hasn't been scored against the reference scans.
+Tested on 25 frames, comparing base values rather than finished images. The last test scores the method against the reference scans.
 
 | Tested | Effect | Decision |
 | --- | --- | --- |
 | Largest even patch, against the median of the brightest 3% of pixels | The old method drew a strip through holes and markings, and landed on picture content when no edge showed. The green base moved +0.1% to −6.2% (median about −1.6%); red to green −0.3% to +1.2%, blue to green −1.3% to +0.9% | Adopted after review by eye |
 | Reporting frames with no clear film | 5 of 25 reported: 4 barely show a film edge, 1 is a real miss. 1 further frame counted as found from a thin sliver that may not be clear film | Warn instead of marking an unwanted area |
 | How close a patch must be to the brightest even areas | A 10% range lowered the base by up to 7.6% on frames that already read well | Use 7% |
+| Current detection on the main test set, against the old one, with the 85% measured area | Color error 7.55 against 7.63, brightness error 8.67 against 8.69, neutral cast 3.82 against 3.77. The old scores came from earlier scripts, so this is close rather than exact | No score penalty; keep |
 
 ### Sharing a base across a roll
 
@@ -70,6 +71,18 @@ The curve, correction, exposure constant and toe were frozen on the original 14 
 | Light pull toward an averaged curve | Color error from 8.26 to 8.10. A fixed 50% blend made it worse, at 9.18 | Keep the light pull |
 | One curve per roll, against one per frame | Color error from about 8 to 8.8–12.5 | One per frame |
 | RGB or CMY sliders, using the best possible per-frame offsets | Warm hues still drifted 21° | No such controls |
+
+### Hardening the gray search
+
+Tested on the main test set with the current film base detection, where the shipped search scores color error 7.55 and neutral cast 3.82.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Stronger pull toward the averaged curve | Color error 7.64 at the lightest step, double today's pull, and 11.42 on the averaged curve alone. Choosing the best pull or blend for each frame with hindsight reaches only 7.07 | Keep today's pull |
+| Pull set per frame by how much gray evidence the frame has | Color error 7.73 on rolls held out of choosing the rule, though the best rule reached 7.42 on the frames it was chosen from. Pixel counts, density coverage and spread around the curve predict poorly which frames benefit | Reject |
+| Leaving foliage hues out of the search | Color error 7.57–7.81 and neutral cast 4.19–4.60 at settings that change results, with a loose setting matching 7.55. Foliage turned teal on two forest frames, where color error rose by up to 6.4, because foliage is much of what the fit has to work with | Reject |
+| Leaving sky hues out of the search | Color error 7.66–7.97 at settings that change results. On one forest frame it rose from 7.86 to 17.28 | Reject |
+| Leaving foliage out, unless that removes over 15% of a pass's candidate pixels | Color error 7.38 and neutral cast 3.76, with 11 frames better and 3 worse. The guard was chosen after seeing the failures, and nearby settings give 7.33–7.55. One frame gives almost 40% of the gain. On 22 color frames with no reference scan the average change was 0.64 ΔE, and over 2 on one frame. Crops looked much the same at contact-sheet size | Don't adopt: too small and too tuned to justify two constants and a hue rule |
 
 ### Crosstalk, exposure and toe
 
