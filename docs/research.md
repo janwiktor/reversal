@@ -158,7 +158,7 @@ Display clipping is recoverable up to the stored limit. Real loss was 0–0.7% o
 
 Camera Raw is the reference for the preview. On `_DSC5384` in Safari on a MacBook, all three looks are virtually identical to Camera Raw, with a negligible shadow difference. The comparison hasn't been repeated on another OS or machine.
 
-- **Dropped:** a fitted highlight roll-off with hue-stable tone matched a raw editor's rendering of `_DSC5379` closely (mean error 2.9 against 11.5 levels out of 255 under Neutral), but was too much custom rendering.
+- **Dropped:** a fitted highlight roll-off with hue-stable tone matched Lightroom screenshots of `_DSC5379` closely (mean error 2.9 against 11.5 levels out of 255 under Neutral), but was too much custom rendering.
 - **Camera Raw:** a shoulder in the profile's own curve with a −2 EV offset looks the same as the standard DNG, so Camera Raw follows the curve and adds no compression of its own.
 - **Apple Photos:** a Flat DNG with a −2 EV offset on its main profile opened too bright (average 188 out of 255, against 227 if the offset were ignored and 147 if honored). Lowering BaselineExposure itself, with no offset on the main profile and +2 EV on the others, fixed it and looks the same in Camera Raw and Finder previews. Photos keeps its own rendering, with a slight shift left.
 - **Whites at 0:** a jump at the slider's zero came from a shoulder that dropped the raw editor's roll-off. Starting the shoulder from that roll-off removed it. The stored DNG changed by only 9 bytes, which look like rounding in the Flat profile's curve.
