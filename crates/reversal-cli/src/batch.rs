@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 
@@ -37,6 +37,12 @@ pub struct Progress {
     queue: VecDeque<String>,
 }
 
+/// Lock, also after a panic elsewhere left the mutex poisoned: a request that failed
+/// mustn't take every later one down with it.
+pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[derive(Clone, Default)]
 pub struct Batch(Arc<Mutex<Progress>>);
 
@@ -64,7 +70,7 @@ impl Batch {
         T: FnOnce() -> Option<String> + Send + 'static,
     {
         {
-            let mut progress = self.0.lock().expect("no panics while locked");
+            let mut progress = lock(&self.0);
             if progress.running {
                 return Err("still saving the previous DNGs".to_string());
             }
@@ -100,11 +106,11 @@ impl Batch {
     /// Every worker ends here; the one that sees nothing left runs the last step, and only
     /// then does the batch count as finished.
     fn finish_last<T: FnOnce() -> Option<String>>(&self, then: &Mutex<Option<T>>) {
-        let progress = self.0.lock().expect("no panics while locked");
+        let progress = lock(&self.0);
         if !progress.active.is_empty() || !progress.queue.is_empty() {
             return;
         }
-        let Some(then) = then.lock().expect("no panics while locked").take() else {
+        let Some(then) = lock(then).take() else {
             return;
         };
         let canceled = progress.canceled;
@@ -115,7 +121,7 @@ impl Batch {
             catch_unwind(AssertUnwindSafe(then))
                 .unwrap_or_else(|_| Some("the last step failed unexpectedly".to_string()))
         };
-        let mut progress = self.0.lock().expect("no panics while locked");
+        let mut progress = lock(&self.0);
         if let Some(message) = issue {
             progress.issues.push(Issue {
                 file: String::new(),
@@ -126,14 +132,14 @@ impl Batch {
     }
 
     fn next_file(&self) -> Option<String> {
-        let mut progress = self.0.lock().expect("no panics while locked");
+        let mut progress = lock(&self.0);
         let file = progress.queue.pop_front()?;
         progress.active.push(file.clone());
         Some(file)
     }
 
     fn finish(&self, file: &str, result: Result<Done, String>) {
-        let mut progress = self.0.lock().expect("no panics while locked");
+        let mut progress = lock(&self.0);
         progress.active.retain(|f| f != file);
         let mut report = |message| {
             progress.issues.push(Issue {
@@ -158,17 +164,17 @@ impl Batch {
 
     /// Frames being worked on finish; the rest don't start.
     pub fn cancel(&self) {
-        let mut progress = self.0.lock().expect("no panics while locked");
+        let mut progress = lock(&self.0);
         progress.canceled |= !progress.queue.is_empty();
         progress.queue.clear();
     }
 
     pub fn is_running(&self) -> bool {
-        self.0.lock().expect("no panics while locked").running
+        lock(&self.0).running
     }
 
     pub fn status(&self) -> serde_json::Value {
-        let progress = self.0.lock().expect("no panics while locked");
+        let progress = lock(&self.0);
         serde_json::to_value(&*progress).expect("progress serializes")
     }
 }
