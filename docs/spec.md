@@ -225,7 +225,7 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 - **Cameras:** tested only with Nikon D5100 scans. Others LibRaw reads should open, but the crosstalk correction was fitted to this camera and one light source.
 - **Full strips:** the centered area doesn't suit them, so draw the area and crop there.
 - **Clipped light:** film with no orange mask reads as bare light, and a very warm light source can read as clipped film. A scan with clipped film has only been tested by overexposing real scans in software.
-- **Holders:** a holder inside the measured area still pulls exposure too dark. Draw the area, or lower its size.
+- **Holders:** a holder inside the measured area still pulls exposure too dark, and lowering Exposure on such a frame can bring the holder's color back. Draw the area, or lower its size.
 - **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Pick the base, or match it across the roll.
 - **Metadata:** camera EXIF isn't copied to the DNG.
 - **Mac app:** Apple Silicon only, and it can't read DNGs with lossy JPEG compression. It is ad hoc signed, so users approve it with Open Anyway.
