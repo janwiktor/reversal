@@ -61,17 +61,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install LibRaw
+      - name: Install pkgconf
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
-        run: brew install libraw pkgconf
+        run: brew install pkgconf
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+      # The same LibRaw the Mac app ships with, not Homebrew's, which has other features enabled.
+      - name: Restore LibRaw
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            dist/build/LibRaw-*
+            dist/build/libraw-install-*
+          key: libraw-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/macos/libraw.sh') }}
+      - name: Build LibRaw
+        run: |
+          build="$PWD/dist/build"
+          . packaging/macos/libraw.sh
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >>"$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=$MACOS_TARGET" >>"$GITHUB_ENV"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Test
         run: cargo test --locked --workspace
       - name: Check that the binary starts
         run: cargo run --locked -- --version
+      - name: Check that LibRaw is linked statically
+        run: |
+          if otool -L target/debug/reversal | grep raw; then
+            echo "The tests ran against a shared LibRaw, not the one the app ships with." >&2
+            exit 1
+          fi

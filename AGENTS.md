@@ -97,9 +97,11 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 
 - `.github/workflows/ci.yml` runs on every pull request and push to `main`, except docs-only
   changes. Linux checks format, lint and tests, with and without LibRaw. macOS then runs the
-  tests, only once Linux passes.
-- `.github/workflows/mac-app.yml` builds and checks the disk image when packaging or
-  dependencies change, or on request, and keeps it as a run artifact for 7 days.
+  tests, only once Linux passes, against the LibRaw the Mac app ships with
+  (`packaging/macos/libraw.sh`).
+- `.github/workflows/mac-app.yml` builds and checks the disk image on every push to `main`
+  except docs-only changes, on pull requests that change packaging or dependencies, and on
+  request. It keeps the image as a run artifact for 7 days.
 - No raw samples are in the repo, so CI doesn't decode a real file. Check conversions
   locally when changing `decode.rs`.
 

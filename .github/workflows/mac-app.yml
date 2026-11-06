@@ -1,10 +1,11 @@
 name: Mac app
 
-# Builds the disk image only when something that goes into packaging changes, or on request.
-# The CI workflow already tests the engine on macOS for every other change.
+# Pull requests build the disk image only when something that goes into packaging changes, to
+# keep their checks fast. Every push to main builds it, so a code change that only breaks the
+# release build shows up as soon as it lands.
 on:
   pull_request:
-    paths: &packaging
+    paths:
       - ".github/workflows/mac-app.yml"
       - "packaging/macos/**"
       - "Cargo.lock"
@@ -13,7 +14,9 @@ on:
       - "crates/reversal-core/build.rs"
   push:
     branches: [main]
-    paths: *packaging
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
@@ -51,7 +54,7 @@ jobs:
           path: |
             dist/build/LibRaw-*
             dist/build/libraw-install-*
-          key: libraw-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/macos/build.sh') }}
+          key: libraw-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/macos/libraw.sh') }}
       - name: Build
         run: packaging/macos/build.sh
       - name: Check the disk image
