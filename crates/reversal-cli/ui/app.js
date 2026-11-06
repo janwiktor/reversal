@@ -246,6 +246,11 @@ function showSetupNote() {
   const note = current.warning ?? (guessing ? "No clear film found on this frame, so its colors may be off. Pick the film base, or match it across the roll." : "");
   $("setup-note").textContent = note;
   $("setup-note").hidden = !note;
+  const clipping = current.clipping;
+  // The choice stays reachable once made, even with the clipped part cropped away.
+  $("clipped-row").hidden = !clipping?.present && !adj().white_clipped;
+  $("clipping-note").textContent = clipping?.warning ?? "";
+  $("clipping-note").hidden = !clipping?.warning;
 }
 
 function syncControls() {
@@ -255,6 +260,8 @@ function syncControls() {
   const percent = hints().area_percent ?? current.defaultAreaPercent;
   showValue("area-percent", percent);
   $("flip").setAttribute("aria-pressed", String(a.flip_h));
+  $("clipped-measured").setAttribute("aria-pressed", String(!a.white_clipped));
+  $("clipped-white").setAttribute("aria-pressed", String(!!a.white_clipped));
   const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.area) ? "frame" : "draw";
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
   $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
@@ -280,6 +287,10 @@ for (const id of [...SLIDERS, "straighten"]) {
   $(id).title = "Double-click to reset";
   $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); changed(); } });
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
+}
+
+for (const [id, white] of [["clipped-measured", false], ["clipped-white", true]]) {
+  $(id).addEventListener("click", () => { if (current) { adj().white_clipped = white; changed(0); } });
 }
 
 for (const look of LOOKS) {
@@ -762,8 +773,11 @@ async function refresh() {
   try {
     const res = await api("/api/preview", { file, settings: current.settings, full: !!tool });
     const clipped = Number(res.headers.get("X-Clipped") || 0);
+    const sourceClipping = JSON.parse(res.headers.get("X-Source-Clipping") || "null");
     const blob = await res.blob();
     if (file !== current?.file) return;
+    current.clipping = sourceClipping;
+    showSetupNote();
     const img = $("photo");
     const old = img.src;
     // Not img.decode(): it can stay pending for as long as the page is hidden.

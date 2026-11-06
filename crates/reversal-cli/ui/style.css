@@ -191,7 +191,7 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
 #setup .slider { margin-top: 4px; }
 #setup .row .btn { width: 100%; padding: 0 6px; }
 #roll-state { color: var(--ink-quiet); margin-top: 6px; }
-#setup-note { color: var(--warn); margin-top: 6px; }
+#setup-note, #clipping-note { color: var(--warn); margin-top: 6px; }
 
 /* The roll flow */
 #roll-flow, #about { width: min(480px, calc(100vw - 32px)); padding: 16px; border: 0; border-radius: 8px; background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--seam), 0 12px 40px rgb(0 0 0 / .5); }

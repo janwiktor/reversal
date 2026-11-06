@@ -9,7 +9,8 @@
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
 //! POST /api/estimate {file, hints}         re-run the analysis with manual areas
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
-//!                                          Header X-Clipped: share of pixels the DNG can't hold
+//!                                          Header X-Clipped: share of pixels the DNG can't hold.
+//!                                          Header X-Source-Clipping: what the sensor clipped
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
@@ -409,10 +410,12 @@ impl State {
         ));
         let (profile, _) = reversal_core::profiles(&job.settings.adjust);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
+        let source = source_clipping_info(&loaded.small, &job.settings);
         Ok(Response::from_data(jpeg)
             .with_header(header("Content-Type", "image/jpeg"))
             .with_header(header("Cache-Control", "no-store"))
-            .with_header(header("X-Clipped", &format!("{clipped:.6}"))))
+            .with_header(header("X-Clipped", &format!("{clipped:.6}")))
+            .with_header(header("X-Source-Clipping", &source.to_string())))
     }
 
     fn save_settings(&self, job: &SaveSettings) -> Handled {
@@ -519,6 +522,17 @@ impl State {
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
     }
+}
+
+/// What the page shows about clipped light, as JSON that fits in a header: plain ASCII text.
+fn source_clipping_info(small: &Rgb32, settings: &Settings) -> serde_json::Value {
+    let region = settings.adjust.crop.unwrap_or(NRect::FULL);
+    let clipping = invert::source_clipping(small, &settings.estimate, region);
+    json!({
+        "present": clipping.is_reportable(),
+        "harmsFilm": clipping.harms_film(),
+        "warning": clipping.warning(settings.adjust.white_clipped),
+    })
 }
 
 /// The roll's film base from the frames chosen to count.
@@ -677,6 +691,30 @@ mod tests {
             assert!(text.contains("2008-2025 LibRaw LLC"));
             assert!(text.contains("under license by Adobe"));
         }
+    }
+
+    #[test]
+    fn clipping_info_fits_in_a_header_and_follows_the_choice() {
+        let mut small = Rgb32::new(16, 8);
+        for p in small.data.chunks_mut(3).take(16) {
+            p.copy_from_slice(&[0.7, 0.99, 1.0]);
+        }
+        let mut settings = Settings::new(
+            invert::estimate_on(&small, &Hints::default()),
+            Adjust::default(),
+        );
+        let info = source_clipping_info(&small, &settings);
+        assert_eq!(info["present"], true);
+        assert_eq!(info["harmsFilm"], false);
+        assert!(info["warning"].is_string());
+        assert!(info.to_string().is_ascii());
+        let _ = header("X-Source-Clipping", &info.to_string());
+        settings.adjust.white_clipped = true;
+        let info = source_clipping_info(&small, &settings);
+        assert_eq!(
+            (info["present"].as_bool(), info["warning"].is_null()),
+            (Some(true), true)
+        );
     }
 
     #[test]

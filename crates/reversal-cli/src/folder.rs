@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use reversal_core::dng::Compression;
-use reversal_core::image::Rgb32;
+use reversal_core::image::{NRect, Rgb32};
 use reversal_core::invert::{self, Adjust, Hints, Settings, MODEL_VERSION};
 use serde::Serialize;
 
@@ -97,6 +97,18 @@ fn settings_from(sidecar: Option<&[u8]>, small: &Rgb32) -> (Settings, Option<Str
     match sidecar {
         Some(bytes) => saved_settings(bytes, &auto, small),
         None => (auto, None),
+    }
+}
+
+/// Clipped film is worth a message when saving. Bare light isn't, as saving many frames would
+/// report nearly all of them: it costs the picture nothing, and Setup shows it for each frame.
+fn film_clipping_warning(small: &Rgb32, settings: &Settings) -> Option<String> {
+    let region = settings.adjust.crop.unwrap_or(NRect::FULL);
+    let clipping = invert::source_clipping(small, &settings.estimate, region);
+    if clipping.harms_film() {
+        clipping.warning(settings.adjust.white_clipped)
+    } else {
+        None
     }
 }
 
@@ -290,6 +302,7 @@ impl Folder {
         let sidecar_path = self.sidecar(file);
         let used = std::fs::read(&sidecar_path).ok();
         let (settings, warning) = settings_from(used.as_deref(), &small);
+        let warning = warning.or_else(|| film_clipping_warning(&small, &settings));
         std::fs::create_dir_all(&self.out_dir).map_err(|e| e.to_string())?;
         let bytes = pipeline::export(&input, &scan, &settings, Compression::LosslessJpeg, &out)
             .map_err(|e| e.to_string())?;

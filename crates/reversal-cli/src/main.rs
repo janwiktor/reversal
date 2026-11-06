@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use reversal_core::image::NRect;
 use reversal_core::invert::{self, Adjust, Hints, Settings};
 use reversal_core::render::Look;
 
@@ -114,6 +115,9 @@ struct ConvertArgs {
     /// Treat the inputs as one roll: measure one film base across them and use it on each.
     #[arg(long)]
     roll: bool,
+    /// Accept clipped light: render it pure white, not the near black its low density gives.
+    #[arg(long)]
+    accept_clipping: bool,
     /// Mirror left-right (emulsion-up scans).
     #[arg(long)]
     flip: bool,
@@ -160,6 +164,7 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         crop: None,
         flip_h: args.flip,
         rotate: args.rotate % 4,
+        white_clipped: args.accept_clipping,
     };
     let compression = match args.compression {
         CompressionArg::Ljpeg => reversal_core::dng::Compression::LosslessJpeg,
@@ -200,6 +205,17 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         settings.hints = hints;
         if args.crop_area {
             settings.adjust.crop = Some(settings.estimate.area);
+        }
+        let region = settings.adjust.crop.unwrap_or(NRect::FULL);
+        let clipping =
+            invert::source_clipping(&invert::analysis_image(&scan), &settings.estimate, region);
+        if let Some(warning) = clipping.warning(args.accept_clipping) {
+            let hint = if clipping.harms_film() {
+                ""
+            } else {
+                " To do that, use --accept-clipping."
+            };
+            eprintln!("warning: {}: {warning}{hint}", input.display());
         }
         let bytes = pipeline::export(input, &scan, &settings, compression, out)?;
         println!(

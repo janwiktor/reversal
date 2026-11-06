@@ -102,6 +102,7 @@ Frames of one roll can share a film base. Choose Match film base under Setup, re
 | `--area-percent` | Size of the centered area that color and exposure are measured on, default 85 |
 | `--crop-area` | Crop to that area; the default keeps the whole scan |
 | `--roll` | Measure one film base across the inputs and use it on each |
+| `--accept-clipping` | Render light the sensor clipped as pure white, not the near black its low density gives. Without it, `convert` warns about clipped light |
 | `--compression` | `ljpeg` (default) or `none` |
 | `-o` | Output file or folder; the default is `<name>-positive.dng` next to the input |
 

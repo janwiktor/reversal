@@ -570,6 +570,16 @@ mod tests {
     }
 
     #[test]
+    fn the_top_of_the_stored_range_is_stored_as_full_white() {
+        let img = Rgb32 {
+            width: 1,
+            height: 1,
+            data: vec![STORED_MAX; 3],
+        };
+        assert_eq!(quantize(&img), [65535; 3]);
+    }
+
+    #[test]
     fn clipped_share_counts_pixels_above_stored_max() {
         let mut img = Rgb32::new(2, 2);
         img.data[0] = STORED_MAX;

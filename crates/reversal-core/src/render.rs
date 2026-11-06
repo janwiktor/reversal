@@ -443,6 +443,14 @@ mod tests {
     }
 
     #[test]
+    fn the_top_of_the_stored_range_previews_as_white_under_every_look() {
+        for look in Look::ALL {
+            let out = to_srgb8(&gray(dng::STORED_MAX), &profile(look, Tone::default()));
+            assert!(out.iter().all(|&c| c >= 253), "{look:?} {out:?}");
+        }
+    }
+
+    #[test]
     fn jpeg_has_no_chroma_subsampling_at_any_quality() {
         for quality in [50, 88, 90] {
             let j = jpeg(&[128; 16 * 16 * 3], 16, 16, quality);

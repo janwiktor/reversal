@@ -84,6 +84,14 @@
       <button type="button" class="btn" id="base-roll">Match film base…</button>
     </div>
     <p id="roll-state" hidden>This frame uses its roll's film base.</p>
+    <div class="row" id="clipped-row" hidden>
+      <div class="row-label" id="l-clipped">Clipped light</div>
+      <div class="seg" role="group" aria-labelledby="l-clipped" title="Light that reached the sensor's limit, saved in this frame's settings">
+        <button type="button" id="clipped-measured" aria-pressed="true" title="Leave it as the conversion reads it: nearly no density, so near black">As measured</button>
+        <button type="button" id="clipped-white" aria-pressed="false" title="Accept the clipping and keep this light pure white">White</button>
+      </div>
+    </div>
+    <p id="clipping-note" hidden></p>
     <p id="setup-note" hidden></p>
   </section>
 

@@ -88,6 +88,22 @@ The curve, correction, exposure constant and toe were frozen on the original 14 
 | Frame detection and holder detection | Holder detection reached color error 7.79 and brightness error 8.79, no better than a plain centered cut | Remove both |
 | Centered area from 95% to 70% | Color error from 7.83 to 7.47. Brightness error 11.09 at 95%, where the area takes in holders, falling to 8.48 at 80% and 8.59 at 70%. At 85%: 7.63 and 8.69, with the lowest neutral cast, 3.77 | 85%, adjustable, with drawing by hand as the fallback |
 
+### Clipped and blocked light
+
+Saturated yellow and red areas in positives were first taken for clipped light. All 37 raw samples say otherwise. Every pixel past the stored limit was unclipped at the sensor, with medians of about 0.001–0.012 on a 0–1 scale on frames where it covers much: light blocked by the holder. Pixels the sensor did clip rendered near black, as low density should.
+
+The color comes from the density model running past the film's range. A blocked pixel reads about 2 above base. The gray curves' straight continuations then separate red from blue by about 1.2, crosstalk widens that, and dividing by gamma turns it into a ratio of hundreds. Saturation sends the smaller channels to 0, and the stored limit cuts the largest. The result is pure red in Rec.2020, which shows as red or yellow depending on how far past the limit it lands.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Warning only when the sensor clipped | 20 of 37 frames had 1.3–36% of pixels past the stored limit, and 14 of those had no clipped light, so a warning would never have reached them | Fix the color for every frame, separately from the warning |
+| White over the stop above the stored limit | On those 20 frames, saturated pixels fell to 0.22% or less on 16. The rest, up to 3.2%, are mostly film markings, shown bright on frames a holder has already darkened. Inside the limit nothing changes. Past it, up to 0.8% of the measured area on framed scans; up to 25% where a holder falls inside the area | Adopt |
+| Sensor clip level | Each camera's limit sits at 0.98 or more, including a green limit of 0.984 in converted DNGs. Bright film that didn't clip stopped short of it: under 0.95, except for 0.002% of one frame's pixels. The analysis's 0.9 would count that frame as clipped | Report at 0.98 and leave the analysis at 0.9 |
+| Share that counts as clipping | Scans with clipped light had at least 0.15%, and the rest none | Report from 0.01% |
+| Telling film from bare light: inside or outside the measured area | Strip scans have 6–7% of bare light inside it, from sprocket holes | Reject |
+| Telling film from bare light: blue under 90% of red, 0.1% or more of the scan | The 37 real scans, none with clipped film, stayed at 0.001% or less. Overexposed in software to 1.1, 1.5 and 2.5 times the base, 108 of 111 cases passed, at 0.3% or more. The 3 that didn't are one frame whose base is as blue as it is red. No real scan with clipped film was available | Adopt, and warn on clipped film whether or not it is accepted |
+| Default for white clipped light | It turns near-black holes white, and on clipped film it would put white into deep shadows | Off until accepted |
+
 ### Saturation and demosaic
 
 Measured against 8 hand-finished scans of one film stock.
