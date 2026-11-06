@@ -98,7 +98,7 @@ Here T is the signal, T\_base the film base, g\_c the frame's gray curve (identi
 | Value | How it's measured | Override |
 | --- | --- | --- |
 | Film base | The largest even patch of the brightest film, trying the film's edges first, then a strip across the scan such as the gap between frames. Holes, markings and picture detail break a patch's evenness, and the holder is darker. Saying detection failed is preferred to marking an unwanted area: when no patch looks like clear film, the app warns, keeps a best guess for the conversion, and asks for a pick or a roll base | Picked by hand, or shared across a roll |
-| Measured area | The centered 85% of each side, leaving out the film holder: cells far denser than film (green density above 1.2) connected to the scan's edge, plus a small margin for the holder's soft edge. Dense cells that reach the middle of the scan are picture, so they don't count as holder. This only affects measuring, not how the holder renders | Size from 50 to 100%, or drawn by hand. A drawn area is measured exactly as drawn, holder included |
+| Measured area | The centered 85% of each side, leaving out the film holder: cells far denser than film (green density above 1.2) connected to the scan's edge, plus a small margin for the holder's soft edge. Dense cells that reach the middle of the scan are picture, and nothing is left out on that frame, so a custom area is the fix when dense picture joins the holder. This only affects measuring, not how the holder renders | Size from 50 to 100%, or drawn by hand. A drawn area is measured exactly as drawn, holder included |
 | Gray curves | Fitted to the frame's own near-neutral pixels, with no reference. The band narrows from ±0.15 to ±0.04 density, bins count equally, and the fit is pulled lightly toward an average across rolls | None; there are no RGB or CMY controls |
 | Exposure anchor | The mean of the 99th percentile and the average of equivalent green density | The Exposure slider |
 
@@ -140,7 +140,7 @@ Each group shows one choice: the one in use, or Custom while its drag tool is op
 | Tint | Green against red and blue | Pixels |
 | Saturation | −100 is black and white | Pixels |
 | Rotate 90°, Mirror | Quarter turns, left-right flip; both act on the image as shown | Pixels |
-| Straighten | ±10°. A new angle closes Show areas and any open drag tool. Film base and colors are measured again on letting go of the slider, or after a short pause for arrow keys and typed values, never while it's held | Pixels and measuring |
+| Straighten | ±10°. A new angle closes Show areas and any open drag tool. Film base and colors are measured again on letting go of the slider, or after a short pause for arrow keys and typed values, never while it's held. Saving or changing frame waits for that measurement. Custom areas keep their place on the scan, so a large turn can move them off their target | Pixels and measuring |
 | Crop | Entire scan, Measured area, or Custom. Sets what the DNG keeps, never the colors | Pixels |
 
 Reset, in the Develop header, returns the tone and color controls to 0 and the profile to Neutral. It leaves geometry, crop and Setup alone.

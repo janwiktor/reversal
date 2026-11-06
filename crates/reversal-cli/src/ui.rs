@@ -8,7 +8,7 @@
 //! GET  /api/files                          raw files in the folder
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
 //! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual areas
-//! POST /api/holder   {file, base_rgb}       where the analysis ignores the film holder
+//! POST /api/holder   {file, base_rgb, straighten}   where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
@@ -422,17 +422,8 @@ impl State {
         let loaded = self.ensure_loaded(&job.file)?;
         let full = job.full.then_some(NRect::FULL);
         let img = invert::convert_with(&loaded.small, &job.settings, full);
-        // Measured on the picture: a holder left in the scan is meant to go, not to be kept.
-        let picture = job
-            .settings
-            .adjust
-            .crop
-            .unwrap_or(job.settings.estimate.area);
-        let clipped = dng::clipped_share(&invert::convert_with(
-            &loaded.small,
-            &job.settings,
-            Some(picture),
-        ));
+        let clipped =
+            dng::clipped_share(&invert::picture_for_clipping(&loaded.small, &job.settings));
         let (profile, _) = reversal_core::profiles(&job.settings.adjust);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
         Ok(Response::from_data(jpeg)

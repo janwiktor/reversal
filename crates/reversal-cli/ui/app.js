@@ -176,6 +176,7 @@ function rememberSoon() {
 
 async function open(name) {
   try {
+    await measureSettled();
     await rememberSettings(true);
   } catch (e) {
     status(`Could not keep your settings, so this frame stays open: ${e.message}`);
@@ -300,13 +301,20 @@ function straightenMoved() {
   clearTimeout(straightenTimer);
   if (!straightenHeld) straightenTimer = setTimeout(measureStraightened, STRAIGHTEN_PAUSE_MS);
 }
-function measureStraightened() {
-  if (!straightenUnmeasured || !current || batch?.task === "roll") return;
-  straightenUnmeasured = false;
-  measure("Colors measured again for the new angle.");
+async function measureStraightened() {
+  if (!straightenUnmeasured || !current) return;
+  // A custom area keeps its place on the scan while the picture turns under it.
+  const custom = hints().base || hints().analysis;
+  straightenUnmeasured = !(await measure(custom ? "Colors measured again. Custom areas stayed in place, so check them in Show areas." : "Colors measured again for the new angle."));
 }
-$("straighten").addEventListener("pointerdown", () => { straightenHeld = true; });
-for (const end of ["pointerup", "pointercancel"]) {
+// Saved settings must hold what was measured for their angle, so saving and leaving wait for it.
+async function measureSettled() {
+  clearTimeout(straightenTimer);
+  await measureStraightened();
+  await lastMeasure;
+}
+$("straighten").addEventListener("pointerdown", (e) => { if (e.button === 0) straightenHeld = true; });
+for (const end of ["pointerup", "pointercancel", "blur"]) {
   window.addEventListener(end, () => {
     if (!straightenHeld) return;
     straightenHeld = false;
@@ -439,6 +447,7 @@ $("export").addEventListener("click", async () => {
   if (!files.length) return;
   $("reveal").hidden = true;
   try {
+    await measureSettled();
     await rememberSettings();
     batch = await (await api("/api/export", { files })).json();
     updateSaveButton();
@@ -707,29 +716,36 @@ async function setHint(key, rect) {
   if (batch?.task === "roll") { status("Measuring the roll; try again when it's done."); return; }
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
-  current.warning = null;
   measure(key === "base" ? (rect ? "Film base set from your selection." : "Film base now read from this frame.")
-                         : (rect ? "Measured area set from your selection." : "Measuring the center of the scan."));
+                         : (rect ? "Measured area set from your selection." : "Measuring the center of the scan."), true);
 }
 
 // Measures the frame as it's set now. A later call replaces an earlier one still on its way.
-let latestMeasure = 0;
-async function measure(done) {
+let latestMeasure = 0, lastMeasure = null;
+function measure(done, clearsWarning = false) {
+  lastMeasure = measureNow(done, clearsWarning);
+  return lastMeasure;
+}
+// True once the frame holds the result, or a newer call has taken over.
+async function measureNow(done, clearsWarning) {
   const file = current.file, id = ++latestMeasure;
   const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
   status("Measuring…");
   try {
     const { estimate, baseFound } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
-    if (current?.file !== file || id !== latestMeasure) return;
+    if (current?.file !== file || id !== latestMeasure) return true;
     current.settings.estimate = estimate;
     current.baseFound = baseFound;
+    if (clearsWarning) current.warning = null;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
     status(done);
   } catch (e) {
-    if (current?.file !== file || id !== latestMeasure) return;
+    if (current?.file !== file || id !== latestMeasure) return true;
     status(`Could not measure: ${e.message}`);
+    return false;
   }
   changed(0);
+  return true;
 }
 
 // ---------- Tools and overlay ----------
@@ -798,8 +814,12 @@ async function loadHolder() {
   const file = current.file, key = holderKey();
   if (current.holder?.key === key) return;
   const { base_rgb } = current.settings.estimate;
-  const { areas } = await (await api("/api/holder", { file, base_rgb, straighten: adj().straighten })).json();
-  if (current?.file === file) current.holder = { key, areas };
+  try {
+    const { areas } = await (await api("/api/holder", { file, base_rgb, straighten: adj().straighten })).json();
+    if (current?.file === file) current.holder = { key, areas };
+  } catch (e) {
+    if (current?.file === file) status(`Could not find the film holder: ${e.message}`);
+  }
 }
 function drawOverlay(drag) {
   if (!current || !tool) return;

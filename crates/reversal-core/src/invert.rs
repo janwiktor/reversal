@@ -783,6 +783,29 @@ pub fn saturate(p: [f32; 3], gain: f32) -> [f32; 3] {
     p.map(|v| (y + gain * (v - y)).max(0.0))
 }
 
+/// The positive to judge clipping on: the crop or measured area, with any detected holder turned
+/// to clear film. The holder no longer sets the exposure, so it would count as clipped picture.
+pub fn picture_for_clipping(scan: &Rgb32, s: &Settings) -> Rgb32 {
+    let mut straight = scan.straighten(s.adjust.straighten);
+    if s.hints.analysis.is_none() {
+        if let Some(holder) = holder_pixels(&straight, s.estimate.base_rgb) {
+            let (pixels, _) = straight.data.as_chunks_mut::<3>();
+            for (pixel, &is_holder) in pixels.iter_mut().zip(&holder) {
+                if is_holder {
+                    *pixel = s.estimate.base_rgb;
+                }
+            }
+        }
+    }
+    let mut level = s.clone();
+    level.adjust.straighten = 0.0;
+    convert_with(
+        &straight,
+        &level,
+        Some(s.adjust.crop.unwrap_or(s.estimate.area)),
+    )
+}
+
 /// The positive as it will be written: straighten, crop, invert, saturate, mirror, rotate.
 /// `crop_override` replaces the output crop (e.g. `Some(NRect::FULL)` for a full view).
 pub fn convert_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
@@ -949,6 +972,22 @@ mod tests {
         assert_eq!(estimate_on(&scan, &hints).base_rgb, base);
         hints.base = Some(NRect::FULL);
         assert_ne!(estimate_on(&scan, &hints).base_rgb, base);
+    }
+
+    #[test]
+    fn a_detected_holder_isnt_judged_as_clipped_picture() {
+        let scan = scan_in_holder(true);
+        let hints = with_base();
+        let mut s = Settings::new(estimate_on(&scan, &hints), Adjust::default());
+        s.hints = hints;
+        let brightest = |img: &Rgb32| img.data.iter().cloned().fold(0.0f32, f32::max);
+        let holder_kept = convert_with(&scan, &s, Some(s.estimate.area));
+        let judged = picture_for_clipping(&scan, &s);
+        assert!(brightest(&judged) < brightest(&holder_kept));
+
+        // A drawn area is measured as drawn, and judged as drawn.
+        s.hints.analysis = Some(s.estimate.area);
+        assert_eq!(picture_for_clipping(&scan, &s).data, holder_kept.data);
     }
 
     #[test]
