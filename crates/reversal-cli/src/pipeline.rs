@@ -6,6 +6,7 @@ use reversal_core::dng::Compression;
 use reversal_core::image::Rgb32;
 use reversal_core::invert::Settings;
 
+/// Written into every DNG, so it holds the version only: a build's commit would change the bytes.
 pub const SOFTWARE: &str = concat!("Reversal ", env!("CARGO_PKG_VERSION"));
 
 pub fn output_name(input: &Path) -> String {
@@ -72,6 +73,14 @@ pub fn export(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dngs_name_the_version_but_not_the_commit() {
+        assert_eq!(
+            super::SOFTWARE,
+            format!("Reversal {}", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
     use super::*;
 
     #[test]

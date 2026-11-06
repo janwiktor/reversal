@@ -1,8 +1,8 @@
-Reversal alpha for Apple Silicon Macs, macOS 13 or later.
+Reversal pre-alpha for Apple Silicon Macs, macOS 13 or later.
 
 Install
 1. Drag Reversal to Applications.
-2. Open it. macOS says it can't verify the developer, because this alpha isn't
+2. Open it. macOS says it can't verify the developer, because this pre-alpha isn't
    notarized by Apple. Choose Done, not Move to Trash.
 3. Open System Settings > Privacy & Security, scroll to Security and choose
    Open Anyway next to Reversal. Confirm with your password.
@@ -17,3 +17,10 @@ It doesn't connect to the internet: its window talks only to a program on your M
 Known limits
 Tested with Nikon D5100 scans of color negative film. Other cameras should open, but
 color was fitted to this camera. DNGs with lossy JPEG compression can't be read.
+
+License
+Copyright (C) 2026 Jan Ambroziewicz. Reversal is free software under the GNU GPL,
+version 3 or later, with no warranty. The license and the licenses of what's inside
+are in the app, under Contents/Resources/Licenses.
+Source code: https://github.com/janwiktor/reversal
+This product includes DNG technology under license by Adobe.

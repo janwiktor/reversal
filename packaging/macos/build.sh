@@ -8,6 +8,14 @@ here="$root/packaging/macos"
 build="$root/dist/build"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 
+# Rises with every commit on main, and anyone building a commit gets the same number. Needs the
+# whole history; a source archive has none and builds as 0.
+if [ "$(git -C "$root" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+  echo "A shallow clone can't count commits for the build number: fetch the whole history." >&2
+  exit 1
+fi
+build_number="$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 0)"
+
 # Sets prefix, source_dir, LIBRAW_VERSION and MACOS_TARGET.
 . "$here/libraw.sh"
 
@@ -27,7 +35,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licenses"
 swiftc -O -target "arm64-apple-macos$MACOS_TARGET" "$here/main.swift" -o "$app/Contents/MacOS/Reversal"
 cp "$build/target/release/reversal" "$app/Contents/MacOS/reversal-engine"
-sed "s/@VERSION@/$version/" "$here/Info.plist" >"$app/Contents/Info.plist"
+sed -e "s/@VERSION@/$version/" -e "s/@BUILD@/$build_number/" "$here/Info.plist" >"$app/Contents/Info.plist"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" xcrun actool "$here/Reversal.icon" \
   --compile "$app/Contents/Resources" --app-icon Reversal --platform macosx \
   --minimum-deployment-target "$MACOS_TARGET" --output-partial-info-plist "$build/icon.plist" >"$build/icon.log"
@@ -40,11 +48,15 @@ fi
 
 # Licenses of what's inside.
 licenses="$app/Contents/Resources/Licenses"
-cp "$source_dir/LICENSE.CDDL" "$source_dir/COPYRIGHT" "$licenses/"
+cp "$root/LICENSE" "$licenses/Reversal GPL-3.0.txt"
+# LibRaw offers two licenses. It has to be the LGPL: the CDDL isn't compatible with the GPL.
+cp "$source_dir/LICENSE.LGPL" "$source_dir/COPYRIGHT" "$licenses/"
 {
-  echo "LibRaw $LIBRAW_VERSION is used under the CDDL 1.0, see LICENSE.CDDL."
-  echo "Its source code is at https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
+  echo "LibRaw $LIBRAW_VERSION is used under the GNU LGPL 2.1, see LICENSE.LGPL."
+  echo "Its source code is attached to each release of Reversal, and is at"
+  echo "https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
 } >"$licenses/LibRaw.txt"
+echo "This product includes DNG technology under license by Adobe." >"$licenses/DNG.txt"
 (cd "$root" && cargo tree -e normal --target aarch64-apple-darwin --prefix none --format '{p}' --locked |
   python3 "$here/notices.py") >"$licenses/Rust crates.txt"
 
@@ -63,4 +75,5 @@ ln -s /Applications "$stage/Applications"
 dmg="$root/dist/Reversal-$version-arm64.dmg"
 rm -f "$dmg"
 hdiutil create -quiet -volname "Reversal" -srcfolder "$stage" -format ULMO -fs APFS "$dmg"
+echo "Version $version, build $build_number"
 echo "$dmg ($(du -h "$dmg" | cut -f1 | xargs))"

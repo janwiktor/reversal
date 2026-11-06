@@ -195,10 +195,10 @@
   #setup-note { color: var(--warn); margin-top: 6px; }
 
   /* The roll flow */
-  #roll-flow { width: min(480px, calc(100vw - 32px)); padding: 16px; border: 0; border-radius: 8px; background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--seam), 0 12px 40px rgb(0 0 0 / .5); }
-  #roll-flow::backdrop { background: rgb(0 0 0 / .35); }
-  #roll-flow h2 { font-size: 13px; margin: 0 0 8px; }
-  #roll-flow p { line-height: 17px; margin: 0 0 8px; color: var(--ink-quiet); }
+  #roll-flow, #about { width: min(480px, calc(100vw - 32px)); padding: 16px; border: 0; border-radius: 8px; background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--seam), 0 12px 40px rgb(0 0 0 / .5); }
+  #roll-flow::backdrop, #about::backdrop { background: rgb(0 0 0 / .35); }
+  #roll-flow h2, #about h2 { font-size: 13px; margin: 0 0 8px; }
+  #roll-flow p, #about p { line-height: 17px; margin: 0 0 8px; color: var(--ink-quiet); }
   #roll-flow p.warn { color: var(--warn); }
   .progress { height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; margin-bottom: 8px; }
   .progress div { height: 100%; width: 0; background: #cfcfcf; }
@@ -209,6 +209,9 @@
   .roll-row .note { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
   .roll-row .note.warn { color: var(--warn); }
   #roll-result { margin-bottom: 12px; color: var(--ink-quiet); }
+  #about { -webkit-user-select: text; user-select: text; }
+  #about summary { margin-bottom: 8px; cursor: pointer; }
+  #about-license { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: 11px; white-space: pre-wrap; color: var(--ink-quiet); }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
   /* Status bar */
@@ -364,8 +367,19 @@
   <div id="progress" hidden><div></div></div>
   <p id="stored" hidden></p>
   <div id="position"><span id="position-name"></span><span id="position-index"></span></div>
+  <button type="button" class="link" id="about-open" title="About Reversal"></button>
   <div id="status-more" hidden></div>
 </footer>
+
+<dialog id="about" aria-labelledby="about-title">
+  <h2 id="about-title">Reversal</h2>
+  <p>Copyright © 2026 Jan Ambroziewicz</p>
+  <p>Reversal is free software: you can redistribute it and modify it under the terms of the GNU General Public License, version 3 or any later version. It comes with no warranty, to the extent permitted by law.</p>
+  <p>Source code: https://github.com/janwiktor/reversal</p>
+  <p>This product includes DNG technology under license by Adobe. RAW decoding uses LibRaw, under the GNU LGPL 2.1.</p>
+  <details id="about-details"><summary>License text</summary><pre id="about-license"></pre></details>
+  <div class="dialog-actions"><button type="button" class="btn" id="about-close">Close</button></div>
+</dialog>
 
 <dialog id="roll-flow" aria-labelledby="roll-title">
   <h2 id="roll-title">Match film base across a roll</h2>
@@ -736,7 +750,7 @@ $("base-auto").addEventListener("click", () => setHint("base", null));
 $("base-roll").addEventListener("click", openRollFlow);
 $("tool-done").addEventListener("click", () => setTool(null));
 document.addEventListener("keydown", (e) => {
-  if ($("roll-flow").open) return;
+  if ($("roll-flow").open || $("about").open) return;
   if (e.key === "Escape") {
     if (tool) setTool(null);
     showDetails(false);
@@ -1215,6 +1229,18 @@ function histogram(img, storedClipped) {
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
   $("stored").title = $("stored").textContent;
 }
+
+api("/api/version").then((r) => r.json()).then(({ version, commit }) => {
+  const label = commit ? `${version} · ${commit}` : version;
+  $("about-open").textContent = label;
+  $("about-title").textContent = `Reversal ${label}`;
+}).catch(() => {});
+$("about-open").addEventListener("click", () => $("about").showModal());
+$("about-close").addEventListener("click", () => $("about").close());
+$("about-details").addEventListener("toggle", () => {
+  if ($("about-license").textContent) return;
+  api("/api/license").then((r) => r.text()).then((text) => { $("about-license").textContent = text; }).catch(() => {});
+});
 
 $("choose-folder").disabled = !shell;
 updateSaveButton();

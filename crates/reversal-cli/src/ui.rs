@@ -1,6 +1,8 @@
 //! Local web UI: a small HTTP server on 127.0.0.1 serving one page and a JSON API.
 //! Requests from other sites are refused, see [`request_allowed`].
 //!
+//! GET  /api/version                        version and the commit it was built from
+//! GET  /api/license                        the license text
 //! GET  /api/files                          raw files in the folder
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
 //! POST /api/estimate {file, hints}         re-run the analysis with manual areas
@@ -37,6 +39,7 @@ use crate::folder::RollReading;
 use crate::folder::{saved_settings, Folder};
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
+const LICENSE_TEXT: &str = include_str!("../../../LICENSE");
 
 type Resp = Response<Cursor<Vec<u8>>>;
 type Handled = Result<Resp, (u16, String)>;
@@ -141,6 +144,10 @@ fn header(name: &str, value: &str) -> Header {
     Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header")
 }
 
+fn version_info() -> serde_json::Value {
+    serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "commit": env!("REVERSAL_COMMIT") })
+}
+
 fn json_resp(code: u16, v: &serde_json::Value) -> Resp {
     Response::from_data(v.to_string().into_bytes())
         .with_status_code(code)
@@ -230,6 +237,11 @@ impl State {
         match (req.method(), path) {
             (Method::Get, "/") => Ok(Response::from_data(INDEX_HTML.as_bytes().to_vec())
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))),
+            (Method::Get, "/api/version") => Ok(json_resp(200, &version_info())),
+            (Method::Get, "/api/license") => {
+                Ok(Response::from_data(LICENSE_TEXT.as_bytes().to_vec())
+                    .with_header(header("Content-Type", "text/plain; charset=utf-8")))
+            }
             (Method::Get, "/api/files") => self.files(),
             (Method::Get, "/api/load") => {
                 let file = query_param(&url, "file").ok_or((400, "missing file".to_string()))?;
@@ -541,6 +553,21 @@ mod tests {
             None
         ));
         assert!(!request_allowed(8787, false, None, None, None));
+    }
+
+    #[test]
+    fn version_comes_from_the_workspace_and_the_license_is_embedded() {
+        let info = version_info();
+        assert_eq!(info["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(info["version"].as_str().unwrap().split('.').count(), 3);
+        assert!(LICENSE_TEXT.contains("GNU GENERAL PUBLIC LICENSE"));
+    }
+
+    #[test]
+    fn the_mac_app_takes_its_version_from_the_build() {
+        let plist = include_str!("../../../packaging/macos/Info.plist");
+        assert!(plist.contains("<key>CFBundleShortVersionString</key><string>@VERSION@</string>"));
+        assert!(plist.contains("<key>CFBundleVersion</key><string>@BUILD@</string>"));
     }
 
     #[test]
