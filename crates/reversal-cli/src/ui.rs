@@ -37,7 +37,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::batch::{Batch, Done};
+use crate::batch::{lock, Batch, Done};
 use crate::folder::RollReading;
 use crate::folder::{saved_settings, Folder};
 
@@ -218,8 +218,13 @@ fn request_header(req: &Request, name: &str) -> Option<String> {
 /// server. The Host check defeats DNS rebinding, the Origin check other sites, and
 /// requiring JSON forces a CORS preflight, which this server never grants. The Sec-Fetch
 /// headers, where a browser sends them, also refuse what another site loads without a
-/// preflight, such as an image; the user going to a page here is still let through.
-fn request_allowed(port: u16, is_post: bool, header: impl Fn(&str) -> Option<String>) -> bool {
+/// preflight, such as an image; a link from another site may still open the page itself.
+fn request_allowed(
+    port: u16,
+    is_post: bool,
+    is_page: bool,
+    header: impl Fn(&str) -> Option<String>,
+) -> bool {
     let local = |authority: &str| {
         authority == format!("127.0.0.1:{port}") || authority == format!("localhost:{port}")
     };
@@ -228,7 +233,8 @@ fn request_allowed(port: u16, is_post: bool, header: impl Fn(&str) -> Option<Str
         media_type.eq_ignore_ascii_case("application/json")
     };
     let own_fetch = header("Sec-Fetch-Site").is_none_or(|s| s == "same-origin" || s == "none");
-    let navigation = header("Sec-Fetch-Mode").as_deref() == Some("navigate")
+    let navigation = is_page
+        && header("Sec-Fetch-Mode").as_deref() == Some("navigate")
         && header("Sec-Fetch-Dest").as_deref() == Some("document");
     header("Host").is_some_and(|h| local(&h))
         && header("Origin").is_none_or(|o| o.strip_prefix("http://").is_some_and(local))
@@ -251,14 +257,15 @@ fn read_body<T: for<'de> Deserialize<'de>>(req: &mut Request) -> Result<T, (u16,
 
 impl State {
     fn handle(&mut self, req: &mut Request) -> Handled {
-        let allowed = request_allowed(self.port, *req.method() == Method::Post, |name| {
+        let url = req.url().to_string();
+        let path = url.split('?').next().unwrap_or("");
+        let is_page = matches!(path, "/" | "/app.js" | "/style.css");
+        let allowed = request_allowed(self.port, *req.method() == Method::Post, is_page, |name| {
             request_header(req, name)
         });
         if !allowed {
             return Err((403, "request refused".to_string()));
         }
-        let url = req.url().to_string();
-        let path = url.split('?').next().unwrap_or("");
         match (req.method(), path) {
             (Method::Get, "/") => Ok(page(INDEX_HTML, "text/html; charset=utf-8")),
             (Method::Get, "/app.js") => Ok(page(APP_JS, "text/javascript; charset=utf-8")),
@@ -296,7 +303,7 @@ impl State {
                 self.read_roll(job.files)
             }
             (Method::Get, "/api/roll/readings") => {
-                let readings = self.roll_readings.lock().expect("no panics while locked");
+                let readings = lock(&self.roll_readings);
                 Ok(json_resp(200, &json!(*readings)))
             }
             (Method::Post, "/api/roll/vote") => {
@@ -364,9 +371,9 @@ impl State {
     }
 
     fn load(&mut self, file: &str) -> Handled {
-        self.folder.resolve(file)?;
+        self.ensure_loaded(file)?;
         let sidecar = std::fs::read(self.folder.sidecar(file));
-        let loaded = self.ensure_loaded(file)?;
+        let loaded = &self.cache[file];
         let auto = loaded.auto.clone();
         let base_found = invert::detect_base(&loaded.small).found;
         let (current, warning) = match sidecar {
@@ -457,10 +464,7 @@ impl State {
         if self.batch.is_running() {
             return Err((409, "still saving the previous DNGs".to_string()));
         }
-        self.roll_readings
-            .lock()
-            .expect("no panics while locked")
-            .clear();
+        lock(&self.roll_readings).clear();
         let (folder, readings) = (self.folder.clone(), self.roll_readings.clone());
         let started = self.batch.start_then(
             "roll-read",
@@ -468,10 +472,7 @@ impl State {
             export_workers(),
             move |file| {
                 let reading = folder.read_roll_base(file)?;
-                readings
-                    .lock()
-                    .expect("no panics while locked")
-                    .push(reading);
+                lock(&readings).push(reading);
                 Ok(Done {
                     path: String::new(),
                     warning: None,
@@ -499,18 +500,14 @@ impl State {
                 1,
                 move |file| {
                     let frame = folder.prepare_roll_frame(file)?;
-                    collected
-                        .lock()
-                        .expect("no panics while locked")
-                        .push(frame);
+                    lock(&collected).push(frame);
                     Ok(Done {
                         path: String::new(),
                         warning: None,
                     })
                 },
                 move || {
-                    let frames =
-                        std::mem::take(&mut *prepared.lock().expect("no panics while locked"));
+                    let frames = std::mem::take(&mut *lock(&prepared));
                     if frames.len() < total {
                         return Some(
                             "Not every frame could be read, so nothing changed.".to_string(),
@@ -542,8 +539,9 @@ fn export_workers() -> usize {
 mod tests {
     use super::*;
 
+    /// A request for an API path with these headers.
     fn with_headers(is_post: bool, headers: &[(&str, &str)]) -> bool {
-        request_allowed(8787, is_post, |name| {
+        request_allowed(8787, is_post, false, |name| {
             headers
                 .iter()
                 .find(|(n, _)| n.eq_ignore_ascii_case(name))
@@ -618,26 +616,38 @@ mod tests {
             ("Sec-Fetch-Dest", "iframe"),
         ];
         assert!(!with_headers(false, &frame));
-        // A link from another site opens the page: the user sees it, not that site.
+        // A link from another site opens the page: the user sees it, not that site. A link to
+        // an API path doesn't, so no site can make the server decode a file.
         let link = [
             host,
             ("Sec-Fetch-Site", "cross-site"),
             ("Sec-Fetch-Mode", "navigate"),
             ("Sec-Fetch-Dest", "document"),
         ];
-        assert!(with_headers(false, &link));
+        assert!(!with_headers(false, &link));
+        let find = |name: &str| {
+            link.iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.to_string())
+        };
+        assert!(request_allowed(8787, false, true, find));
     }
 
     #[test]
     fn the_page_keeps_its_code_in_files_so_the_policy_holds() {
         // No inline script or style: the policy would block it, silently in a user's browser.
+        assert_eq!(INDEX_HTML.matches("<script").count(), 1);
         assert!(INDEX_HTML.contains(r#"<script src="/app.js"></script>"#));
         assert!(INDEX_HTML.contains(r#"<link rel="stylesheet" href="/style.css">"#));
         assert!(!INDEX_HTML.contains("<style"));
-        assert!(!INDEX_HTML.contains("<script>"));
         for text in [INDEX_HTML, APP_JS] {
             assert!(!text.contains("style=\""), "inline style attribute");
-            assert!(!text.contains(" on") || !text.contains("=\"javascript"));
+            // Event handler attributes, such as onclick="...".
+            let handler = text.split(" on").skip(1).any(|rest| {
+                let name: String = rest.chars().take_while(char::is_ascii_lowercase).collect();
+                !name.is_empty() && rest[name.len()..].starts_with("=\"")
+            });
+            assert!(!handler, "inline event handler");
         }
         for part in CONTENT_SECURITY_POLICY.split(';') {
             assert!(!part.contains("unsafe"), "{part}");
