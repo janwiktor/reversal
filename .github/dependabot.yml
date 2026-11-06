@@ -1,4 +1,5 @@
-# The workflows pin actions to commit hashes, so updates have to come from here.
+# The workflows pin actions to commit hashes and Cargo.lock pins the crates, so updates have
+# to come from here: one pull request a month for each.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -7,4 +8,11 @@ updates:
       interval: monthly
     groups:
       actions:
+        patterns: ["*"]
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      crates:
         patterns: ["*"]

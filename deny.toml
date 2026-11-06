@@ -1,0 +1,26 @@
+# `cargo deny check`, run by CI: every crate's license has to be one that may ship in a GPL
+# program, no crate may carry a known vulnerability, and every crate has to come from crates.io.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = [
+  "GPL-3.0-or-later",
+  "MIT",
+  "Apache-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "IJG",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
