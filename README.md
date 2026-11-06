@@ -23,11 +23,19 @@ Reversal is pre-alpha, so expect rough edges and changes. Submit feedback via [G
 
 ### What's next
 
-- Testing on more files from more cameras and light sources, and on pixel shift files
-- [Black and white negative conversion](https://github.com/janwiktor/reversal/issues/14)
-- [Rendering correctness in other tools](https://github.com/janwiktor/reversal/issues/13)
+First of all: testing, and testing, and more testing. More file types, cameras, pixel shift images, narrow band light sources etc.
 
-More in [GitHub issues](https://github.com/janwiktor/reversal/issues).
+Feature ideas live in [GitHub issues](https://github.com/janwiktor/reversal/issues).
+
+## Principles
+### 🎯 Solve one problem well
+Make editing film scans in RAW editors feel like any other photo. Color-accurate film negative reversal. Camera RAW scan files to positive lossless DNG. This app is not going to be an all-in-one end-to-end studio for image processing.
+
+### 🧩 Modular and portable
+Color conversion core can drive a web, desktop, or mobile app, with device appropriate GUIs each. Plug it into your mobile or desktop workflow, and continue editing in your preferred RAW editing tool.
+
+### 💨 Lightweight and fast
+The right amount of software to do the job, with minimal but quality UI. Process a batch of scans quickly, then hand over.
 
 ## How it works
 
