@@ -5,7 +5,8 @@ members = ["crates/reversal-core", "crates/reversal-cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "UNLICENSED"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/janwiktor/reversal"
 
 [profile.release]
 debug = false

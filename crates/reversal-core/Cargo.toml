@@ -4,6 +4,7 @@ description = "Reversal conversion engine: decode, density inversion, positive L
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [features]
 default = ["libraw"]

@@ -11,13 +11,15 @@ on:
       - "Cargo.lock"
       - "Cargo.toml"
       - "crates/*/Cargo.toml"
-      - "crates/reversal-core/build.rs"
+      - "crates/*/build.rs"
   push:
     branches: [main]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
   workflow_dispatch:
+  # A release builds its disk image with this workflow.
+  workflow_call:
 
 permissions:
   contents: read
@@ -38,6 +40,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The app's build number counts commits.
+          fetch-depth: 0
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
@@ -64,7 +68,16 @@ jobs:
           trap 'hdiutil detach "$mount_point"' EXIT
           app="$mount_point/Reversal.app"
           codesign --verify --deep --strict "$app"
+          # Every place the version shows has to agree with Cargo.toml.
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          plist="$app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist")" = "$version"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$plist")" = "$(git rev-list --count HEAD)"
           "$app/Contents/MacOS/reversal-engine" --version
+          "$app/Contents/MacOS/reversal-engine" --version | head -1 | grep -F "reversal $version ($(git rev-parse --short=7 HEAD))"
+          test -f dist/Reversal-"$version"-arm64.dmg
+          test -f "$app/Contents/Resources/Licenses/Reversal GPL-3.0.txt"
+          test -f "$app/Contents/Resources/Licenses/LICENSE.LGPL"
           # Anything outside the system would be missing on other Macs.
           for binary in "$app/Contents/MacOS/Reversal" "$app/Contents/MacOS/reversal-engine"; do
             otool -L "$binary"

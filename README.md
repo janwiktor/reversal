@@ -39,7 +39,9 @@ Your source files are never changed. Each DNG stores its conversion settings in 
 
 ## Install
 
-There are no prebuilt downloads yet, so build from source. On macOS with Homebrew:
+The Mac app is on the [Releases](https://github.com/janwiktor/reversal/releases) page, for Apple Silicon and macOS 13 or later. It isn't notarized, so the disk image includes the steps to open it the first time.
+
+Everything else builds from source. On macOS with Homebrew:
 
 ```bash
 brew install rustup libraw pkgconf
@@ -55,15 +57,15 @@ cargo build --release
 
 If `cargo` isn't found, add `/opt/homebrew/opt/rustup/bin` to your `PATH`.
 
-### Mac app
+### Building the Mac app
 
-The Mac app needs Apple Silicon and macOS 13 or later. To build it you also need Xcode:
+You also need Xcode:
 
 ```bash
 packaging/macos/build.sh
 ```
 
-This writes a disk image to `dist/`. The app isn't notarized yet, so the disk image includes the steps to open it the first time.
+This writes a disk image to `dist/`.
 
 ## Use
 
@@ -117,8 +119,10 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 
 `crates/reversal-core` is the conversion engine, with no UI. `crates/reversal-cli` holds the command line and the web UI. See [AGENTS.md](AGENTS.md) for project conventions.
 
-## Notices
+## License
+
+Copyright © 2026 Jan Ambroziewicz. Reversal is free software under the [GNU General Public License](LICENSE), version 3 or later, with no warranty. If you share a changed version, share its source under the same license. The photo in the screenshot isn't covered by this license.
 
 This product includes DNG technology under license by Adobe.
 
-RAW decoding uses [LibRaw](https://www.libraw.org/), linked as a system library.
+RAW decoding uses [LibRaw](https://www.libraw.org/), under the GNU LGPL 2.1. It's a system library when you build from source, and built into the Mac app. Each release includes the source of LibRaw and of the Rust crates in the app. LibRaw is copyright © 2008-2025 LibRaw LLC.

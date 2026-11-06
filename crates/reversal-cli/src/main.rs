@@ -15,7 +15,17 @@ use reversal_core::render::Look;
 #[derive(Parser)]
 #[command(
     name = "reversal",
-    version,
+    version = env!("REVERSAL_VERSION_LABEL"),
+    long_version = concat!(
+        env!("REVERSAL_VERSION_LABEL"),
+        "\nCopyright (C) 2026 Jan Ambroziewicz\n",
+        "License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\n",
+        "This is free software: you are free to change and redistribute it.\n",
+        "There is NO WARRANTY, to the extent permitted by law.\n",
+        "Uses LibRaw, Copyright (C) 2008-2025 LibRaw LLC, under the GNU LGPL 2.1\n",
+        "<https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>.\n",
+        "Includes DNG technology under license by Adobe."
+    ),
     about = "Convert film negative scans into positive raw DNGs"
 )]
 struct Cli {
