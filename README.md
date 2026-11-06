@@ -6,7 +6,9 @@
 
 <p align="center">Film negative scans in, positive DNGs out. Pre-alpha.</p>
 
-Reversal takes a RAW scan of a negative and writes a positive, losslessly compressed DNG. Open it in a RAW editor of your choice, on desktop or mobile: sliders work the right way round, with no plugin or color profile to install. Your edits stay on the DNG, with no need to export massive TIFFs or lossy JPEGs.
+Reversal takes a RAW scan of a negative and writes a positive, losslessly compressed DNG. It bakes the inversion into the pixels but keeps them 16-bit, linear Rec.2020, so every RAW tool treats the file as an ordinary positive image. Conversion happens in density and writes a scene-linear positive, with the film base subtracted exactly.
+
+Open it in a RAW editor of your choice, on desktop or mobile, with no plugin or color profile to install. Your edits stay on the DNG, with no need to export massive TIFFs or lossy JPEGs for basic edits.
 
 ![Reversal showing a converted color negative, with a list of frames on the left and tone and color controls on the right](docs/images/screenshot.webp)
 
