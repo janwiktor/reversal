@@ -194,7 +194,7 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 ### Rules
 
 - **Deterministic:** the same input and parameters give a bit-identical output.
-- **Non-destructive:** files are written through a temporary file, and sources are never replaced.
+- **Non-destructive:** files are written through a temporary file, sources are never replaced, and an existing file is only replaced if it is a positive Reversal wrote.
 - **Local only:** the server binds to loopback and refuses other hosts, other origins, non-JSON posts and what another site loads without a preflight. The page runs under a content security policy that allows only its own files. The Mac app chooses a free port and its engine exits with the app.
 - **Parallel:** pixel work uses all cores. Decoding runs one frame at a time, because LibRaw isn't used in its thread-safe form.
 - **Precision:** processing runs in 32-bit float and quantizes only on export.

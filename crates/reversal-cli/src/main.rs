@@ -68,7 +68,8 @@ struct ConvertArgs {
     /// Raw files (NEF, CR2, ARW, DNG, …).
     #[arg(required = true)]
     inputs: Vec<PathBuf>,
-    /// Output file (single input) or folder. Default: next to each input.
+    /// Output file (single input) or folder. Default: next to each input. An existing file
+    /// is only replaced if Reversal wrote it.
     #[arg(short, long)]
     output: Option<PathBuf>,
     /// Exposure, −100…+100 (±3 stops).

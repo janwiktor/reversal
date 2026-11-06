@@ -98,8 +98,8 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 ## CI
 
 - `.github/workflows/ci.yml` runs on every pull request and push to `main`. Docs-only changes
-  skip its jobs, and its Linux and macOS checks are required to merge. Linux checks format, lint
-  and tests, with and without LibRaw. macOS then runs the tests, only once Linux passes, against the LibRaw the Mac app ships with
+  skip its jobs, and its Linux and macOS checks are required to merge. Linux checks format, lint,
+  licenses and advisories, and tests, with and without LibRaw. macOS then runs the tests, only once Linux passes, against the LibRaw the Mac app ships with
   (`packaging/macos/libraw.sh`).
 - `.github/workflows/mac-app.yml` builds and checks the disk image on every push to `main`
   except docs-only changes, on pull requests that change packaging or dependencies, and on
@@ -108,6 +108,7 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
   can't check how a DNG opens in a raw editor. Check conversions locally when changing
   `decode.rs`, and check that a DNG still opens correctly when changing what's written.
 
+- Dependabot opens a monthly pull request for the GitHub Actions and one for the crates.
 - `.github/workflows/release.yml` runs on a tag like `v0.1.0`: it checks the tag, builds the
   disk image with `mac-app.yml` and creates a draft pre-release. It can't check that the app
   opens on another Mac, so install from the draft before publishing.
@@ -137,8 +138,9 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 
 ## License
 
-- Reversal is under `GPL-3.0-or-later`, and new dependencies must be compatible with it. Check
-  `cargo tree` when adding a crate.
+- Reversal is under `GPL-3.0-or-later`, and new dependencies must be compatible with it. CI runs
+  `cargo deny check` against the licenses allowed in `deny.toml` and the advisory database;
+  add a license there only after checking that it is compatible with the GPL.
 - The Mac app links LibRaw statically, under LibRaw's LGPL 2.1 option. Never its CDDL option,
   which isn't compatible with the GPL. Each release carries the source of LibRaw and the crates.
 - Keep the notices in the web UI's About dialog, `Info.plist`, `--version`, `Read me first.txt` and

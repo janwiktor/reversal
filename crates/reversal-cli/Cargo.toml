@@ -3,6 +3,7 @@ name = "reversal-cli"
 description = "Reversal command line and local web UI"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
