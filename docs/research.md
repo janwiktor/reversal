@@ -15,7 +15,7 @@ All scores are differences from the finished scan in CIELAB, and lower is better
 | Neutral cast | The tint left on grays: the average a\*b\* difference over near-neutral pixels |
 | Hue drift | How many degrees a color's hue sits from the finished scan |
 
-The main test set is 22 frames from 6 rolls, all scanned with a Nikon D5100: 14 original frames, and two harder rolls of 4 frames each, called forest and metro below. The two rolls came in after the model was first fitted. All scores predate the current film base detection (see Film base).
+The main test set is 22 frames from 6 rolls, all scanned with a Nikon D5100: 14 original frames, and two harder rolls of 4 frames each, called forest and metro below. The two rolls came in after the model was first fitted. Scores predate the current film base detection (see Film base) unless a test says otherwise.
 
 ## Color and negative inversion
 
@@ -39,13 +39,14 @@ Input white balance needs no setting, because dividing by the film base cancels 
 
 ### Film base
 
-Tested on 25 frames, comparing base values rather than finished images. The new method hasn't been scored against the reference scans.
+Tested on 25 frames, comparing base values rather than finished images. The last test scores the method against the reference scans.
 
 | Tested | Effect | Decision |
 | --- | --- | --- |
 | Largest even patch, against the median of the brightest 3% of pixels | The old method drew a strip through holes and markings, and landed on picture content when no edge showed. The green base moved +0.1% to −6.2% (median about −1.6%); red to green −0.3% to +1.2%, blue to green −1.3% to +0.9% | Adopted after review by eye |
 | Reporting frames with no clear film | 5 of 25 reported: 4 barely show a film edge, 1 is a real miss. 1 further frame counted as found from a thin sliver that may not be clear film | Warn instead of marking an unwanted area |
 | How close a patch must be to the brightest even areas | A 10% range lowered the base by up to 7.6% on frames that already read well | Use 7% |
+| Current detection on the main test set, against the old one, with the 85% measured area | Color error 7.55 against 7.63, brightness error 8.67 against 8.69, neutral cast 3.82 against 3.77. The old scores came from earlier scripts, so this is close rather than exact | No score penalty; keep |
 
 ### Sharing a base across a roll
 
@@ -71,6 +72,18 @@ The curve, correction, exposure constant and toe were frozen on the original 14 
 | One curve per roll, against one per frame | Color error from about 8 to 8.8–12.5 | One per frame |
 | RGB or CMY sliders, using the best possible per-frame offsets | Warm hues still drifted 21° | No such controls |
 
+### Hardening the gray search
+
+Tested on the main test set with the current film base detection, where the shipped search scores color error 7.55 and neutral cast 3.82.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Stronger pull toward the averaged curve | Color error 7.64 at the lightest step, double today's pull, and 11.42 on the averaged curve alone. Choosing the best pull or blend for each frame with hindsight reaches only 7.07 | Keep today's pull |
+| Pull set per frame by how much gray evidence the frame has | Color error 7.73 on rolls held out of choosing the rule, though the best rule reached 7.42 on the frames it was chosen from. Pixel counts, density coverage and spread around the curve predict poorly which frames benefit | Reject |
+| Leaving foliage hues out of the search | Color error 7.57–7.81 and neutral cast 4.19–4.60 at settings that change results, with a loose setting matching 7.55. Foliage turned teal on two forest frames, where color error rose by up to 6.4, because foliage is much of what the fit has to work with | Reject |
+| Leaving sky hues out of the search | Color error 7.66–7.97 at settings that change results. On one forest frame it rose from 7.86 to 17.28 | Reject |
+| Leaving foliage out, unless that removes over 15% of a pass's candidate pixels | Color error 7.38 and neutral cast 3.76, with 11 frames better and 3 worse. The guard was chosen after seeing the failures, and nearby settings give 7.33–7.55. One frame gives almost 40% of the gain. On 10 color frames with no reference scan the average change was 0.53 ΔE, and at most 1.27. Crops looked much the same at contact-sheet size | Don't adopt: too small and too tuned to justify two constants and a hue rule |
+
 ### Crosstalk, exposure and toe
 
 | Tested | Effect | Decision |
@@ -79,6 +92,24 @@ The curve, correction, exposure constant and toe were frozen on the original 14 
 | Exposure from highlights and scene average | Brightness error across the three groups: 9.6–15.9 with the mix, 11.3–17.8 on highlights alone, 9.0–23.1 on the average alone. About 8 is the best any per-frame value reaches | Keep the mix, for its better worst case |
 | Center-weighted scene average | Within about 1 of the plain average | Drop |
 | Shared toe with γ 0.7 | Brightness error improved on all groups; settings chosen on the original frames | Keep |
+
+### Predicting crosstalk from spectra
+
+A forward model of the scan can predict the crosstalk correction instead of fitting it: integrate light, [sensor](https://www.gujinwei.org/research/camspec/db.html) and dye spectra to get how each dye reaches each channel, then invert that. Inputs were the measured D5100 curves, dye curves read from a published plot based on the [VISION3 50D datasheet](https://www.kodak.com/content/products-brochures/Film/VISION3_50D_5203_TI-2657_Technical-Data_EN.pdf), and a film mask fitted to the measured base colors. The scans used a CineStill CS-Lite (stated CRI 95+). Its spectrum isn't published, so the lights below are estimates.
+
+Tested on the main test set with the current film base detection, where the fitted correction scores color error 7.55 and neutral cast 3.82. Saturation was set so each variant has the same overall chroma, because the model is about 2.9× as strong as the fitted correction and would otherwise score mostly as oversaturation. Hue errors use their own hue bins, on colored pixels only: warm, green and blue are 16.6°, 14.8° and 19.1° for the fitted correction, so they don't compare with the hue drift above.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Predicted correction, for the estimated lights | Color error 7.88 with a broad 5000K light (2 frames better, 19 worse), and 8.12–8.19 with white LED estimates. With no correction it is 7.76. Hue error 19.3°, 13.5° and 21.5° for the broad light, so only greens improve | Keep the fitted correction |
+| Predicted correction for narrowband RGB, a light these scans didn't use | Color error 7.45 and neutral cast 3.66, better than the estimates of the real light, mainly through a weaker red row | The model's light dependence isn't supported by these scores |
+| Direction and strength, against the fitted correction | Same direction at about a third of the strength (cosine 0.86). The model at half strength scores 7.65, against a median of 9.32 and a best of 7.46 for 24 random corrections of that strength | The fitted correction has a physical basis, but the model doesn't set its strength |
+| Fitted correction with the model's green row | Color error 8.00 halfway and 8.42 in full, 20 frames worse | Reject |
+| Fitted correction with the model's blue row, and saturation about 1.0 | Color error 7.35 and neutral cast 3.67, with 17 frames better and 1 worse. Hue error 17.3°, 11.6° and 17.9°. The change is −0.20, with a 95% range of −0.45 to +0.06 when resampling by roll, and the row was chosen on these same frames. Across other lights and dye shifts: 7.35–7.49. By eye on a contact sheet it reads marginally less saturated, with no significant difference | Don't adopt: too small to tell from zero, and not visible enough. It would need frames not used to choose it |
+| Sensitivity of the prediction | The blue-from-green term is −0.88 for the base case. It moves to −0.46 with magenta dye shifted 15 nm, and −1.53 with dye side absorptions added. Lights give −0.59 to −1.24 | Not reliable enough to generate a matrix without real dye data and the light's spectrum |
+| Prediction across the 28 cameras in the database, with one light | Blue-from-green from −0.41 to −2.40 (standard deviation 0.41), and red-from-green from −0.12 to −1.11 | A correction fitted to one camera may not suit others. No per-camera matrices on this evidence, and a second camera is untested: the database has no curves for our Fujifilm scans |
+
+The sensor database is under CC BY-NC-SA, so check its terms before shipping any matrix derived from it.
 
 ### Measured area
 
@@ -172,6 +203,8 @@ The pipeline is per-pixel and runs in plain Rust. GPU work remains an untried op
 ### Color science
 
 - [Wikipedia: Cineon](https://en.wikipedia.org/wiki/Cineon)
+- [Camera spectral sensitivity database](https://www.gujinwei.org/research/camspec/db.html)
+- [Kodak VISION3 50D technical data](https://www.kodak.com/content/products-brochures/Film/VISION3_50D_5203_TI-2657_Technical-Data_EN.pdf)
 
 ### DNG and raw decoding
 
