@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag like v0.1.0 makes a draft pre-release with the Mac app. Publishing the draft
+# Pushing a tag like v0.1.0 makes a draft release with the Mac app. Publishing the draft
 # stays a person's decision, on the release page.
 on:
   push:
@@ -72,5 +72,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" assets/* --draft --prerelease --verify-tag \
+          gh release create "$TAG" assets/* --draft --verify-tag \
             --title "Reversal ${TAG#v}" --generate-notes

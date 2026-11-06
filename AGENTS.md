@@ -110,7 +110,7 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 
 - Dependabot opens a monthly pull request for the GitHub Actions and one for the crates.
 - `.github/workflows/release.yml` runs on a tag like `v0.1.0`: it checks the tag, builds the
-  disk image with `mac-app.yml` and creates a draft pre-release. It can't check that the app
+  disk image with `mac-app.yml` and creates a draft release. It can't check that the app
   opens on another Mac, so install from the draft before publishing.
 
 ## Versioning and releases
@@ -131,8 +131,8 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
   were measured with. Raise it when the model changes, whatever the release number.
 - **To release:** merge the version bump to `main`, then tag that commit and push the tag
   (`git tag v0.1.0 && git push origin v0.1.0`). Install the disk image from the draft on a Mac that
-  hasn't run this version, then publish. Publishing is the maintainer's decision. Stay on
-  pre-releases until 1.0.
+  hasn't run this version, then publish. Publishing is the maintainer's decision. Releases are
+  full releases, not pre-releases, so the newest one shows on the repository page.
 - The Mac app stays ad hoc signed through pre-alpha and alpha, with no Apple certificate; users
   approve it with Open Anyway, as `Read me first.txt` explains.
 
