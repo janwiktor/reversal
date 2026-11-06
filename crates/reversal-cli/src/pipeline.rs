@@ -73,15 +73,12 @@ pub fn export(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn dngs_name_the_version_but_not_the_commit() {
-        assert_eq!(
-            super::SOFTWARE,
-            format!("Reversal {}", env!("CARGO_PKG_VERSION"))
-        );
+        assert_eq!(SOFTWARE, format!("Reversal {}", env!("CARGO_PKG_VERSION")));
     }
-
-    use super::*;
 
     #[test]
     fn default_outputs_sit_next_to_inputs() {
