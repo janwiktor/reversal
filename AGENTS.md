@@ -147,8 +147,11 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 
 - The repo keeps product code, `README.md` for users of the tool, this file for how to work
   on it, and docs or skills that are useful to anyone.
+- `docs/spec.md` says what the product does and why. `docs/research.md` holds the evidence: options
+  weighed, results and sources. Keep each fact in one of them, and update them when a change makes
+  them untrue. The wiki is generated from them by `.github/workflows/wiki.yml`, so never edit it.
 - Experiments, test scripts and their output, agent config and memory, draft docs, ad hoc
-  reports, research notes and plans stay out of this repo.
+  reports and plans stay out of this repo. Results that settle a choice go in `docs/research.md`.
 - Write tracked files, commits and PRs as if the repo were public. Don't link to private
   docs or internal decision numbers.
 
