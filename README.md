@@ -117,7 +117,7 @@ cargo test
 cargo fmt && cargo clippy --all-targets -- -D warnings
 ```
 
-`crates/reversal-core` is the conversion engine, with no UI. `crates/reversal-cli` holds the command line and the web UI. See [AGENTS.md](AGENTS.md) for project conventions.
+`crates/reversal-core` is the conversion engine, with no UI. `crates/reversal-cli` holds the command line and the web UI. See [AGENTS.md](AGENTS.md) for project conventions, the [product spec](docs/spec.md) for how it works in detail, and the [research](docs/research.md) for the evidence behind it.
 
 ## License
 
