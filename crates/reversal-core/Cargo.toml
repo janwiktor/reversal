@@ -3,6 +3,7 @@ name = "reversal-core"
 description = "Reversal conversion engine: decode, density inversion, positive LinearRaw DNG writer"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
