@@ -243,6 +243,13 @@ fn quantize(img: &Rgb32) -> Vec<u16> {
 fn write_pixels(buf: &mut Buf, img: &Rgb32, compression: Compression) -> Vec<Tag> {
     let samples = quantize(img);
     let (w, h) = (img.width, img.height);
+    // LibRaw misplaces the rows of a lossless JPEG tile wider than its image, and TIFF tile
+    // widths come in multiples of 16, so images narrower than a tile are stored uncompressed.
+    let compression = if w < TILE {
+        Compression::None
+    } else {
+        compression
+    };
     match compression {
         Compression::None => {
             let rows_per_strip = ((1 << 20) / (w * 6)).max(1);
@@ -528,6 +535,26 @@ mod tests {
         let mut img = Rgb32::new(2, 2);
         img.data[0] = STORED_MAX;
         assert_eq!(clipped_share(&img), 0.25);
+    }
+
+    #[test]
+    fn only_images_narrower_than_a_tile_skip_lossless_jpeg() {
+        let tiff_compression = |width: usize| {
+            let img = Rgb32 {
+                width,
+                height: 2,
+                data: vec![0.5; width * 2 * 3],
+            };
+            let mut buf = Buf { data: Vec::new() };
+            let tags = write_pixels(&mut buf, &img, Compression::LosslessJpeg);
+            match tags.iter().find(|t| t.0 == 259).map(|t| &t.1) {
+                Some(Val::Short(v)) => v[0],
+                _ => panic!("no compression tag"),
+            }
+        };
+        assert_eq!(tiff_compression(TILE - 1), 1);
+        assert_eq!(tiff_compression(TILE), 7);
+        assert_eq!(tiff_compression(TILE + 1), 7);
     }
 
     #[test]
