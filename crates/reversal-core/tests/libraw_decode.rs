@@ -10,8 +10,7 @@ use reversal_core::image::{NRect, Rgb32};
 use reversal_core::invert::{self, Adjust, Hints, Settings};
 use reversal_core::write_positive;
 
-/// Wider than the positive's 256-pixel tiles: LibRaw misplaces rows of a lossless JPEG tile
-/// that is wider than its image.
+/// Wider than the positive's 256-pixel tiles, so a flat patch crosses the seam at x = 256.
 const WIDTH: usize = 320;
 const HEIGHT: usize = 128;
 const COLUMNS: usize = 4;
@@ -34,6 +33,8 @@ const PATCH_MARGIN: usize = 6;
 /// Largest difference from the expected value, on the [0, 1] scale. Well under what any
 /// white balance, gamma or rescaling step in decoding would change.
 const TOLERANCE: f32 = 0.002;
+/// Largest difference when reading back a positive, which isn't demosaiced: a few 16-bit steps.
+const READ_BACK_TOLERANCE: f32 = 4.0 / 65535.0;
 /// Largest difference of red or blue from green on a gray patch of the positive, as a share.
 const MAX_CAST: f32 = 0.05;
 
@@ -71,14 +72,20 @@ fn patch_mean(img: &Rgb32, patch: usize) -> [f32; 3] {
     sum.map(|s| s / count)
 }
 
-/// RGGB mosaic of the patches, as the sensor's 16-bit little-endian samples.
-fn mosaic_bytes() -> Vec<u8> {
+/// The gray scale: linear transmittance at each pixel.
+fn gray_scale(x: usize, y: usize) -> [f32; 3] {
+    patch_rgb(patch_at(x, y))
+}
+
+/// RGGB mosaic of a scene, as the sensor's 16-bit little-endian samples. Scene value 1 is the
+/// white level; a sensor can read somewhat above it.
+fn mosaic_bytes(scene: impl Fn(usize, usize) -> [f32; 3]) -> Vec<u8> {
     let range = (WHITE_LEVEL - BLACK_LEVEL) as f32;
     let mut bytes = Vec::with_capacity(WIDTH * HEIGHT * 2);
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
             let channel = [[0, 1], [1, 2]][y % 2][x % 2];
-            let level = patch_rgb(patch_at(x, y))[channel] * range + BLACK_LEVEL as f32;
+            let level = scene(x, y)[channel] * range + BLACK_LEVEL as f32;
             bytes.extend_from_slice(&(level.round() as u16).to_le_bytes());
         }
     }
@@ -115,9 +122,9 @@ fn thousandths(id: u16, kind: u16, values: &[i32]) -> (u16, u16, u32, Vec<u8>) {
 
 /// A minimal Bayer DNG. It carries a color matrix and an as-shot white balance like a camera's,
 /// so a decode that applied either would come out with different values.
-fn raw_dng() -> Vec<u8> {
+fn raw_dng(scene: impl Fn(usize, usize) -> [f32; 3]) -> Vec<u8> {
     const HEADER_LEN: usize = 8;
-    let pixels = mosaic_bytes();
+    let pixels = mosaic_bytes(scene);
     let mut tags = vec![
         long(254, 0), // NewSubfileType: main image
         shorts(256, &[WIDTH as u16]),
@@ -213,7 +220,7 @@ fn assert_close(actual: [f32; 3], expected: [f32; 3], tolerance: f32, what: &str
 }
 
 fn decode_scene(dir: &TempDir) -> Rgb32 {
-    decode(&dir.write("scene.dng", &raw_dng())).unwrap()
+    decode(&dir.write("scene.dng", &raw_dng(gray_scale))).unwrap()
 }
 
 #[test]
@@ -284,18 +291,61 @@ fn decoded_negative_converts_to_a_positive_dng_that_reads_back() {
         }
     }
 
-    // Both ways of storing the positive decode to the same relative values through LibRaw.
+    // Both ways of storing the positive decode to the same values through LibRaw, pixel for
+    // pixel, so damage at a tile seam shows.
     for (name, compression) in [
         ("positive.dng", Compression::None),
         ("positive-ljpeg.dng", Compression::LosslessJpeg),
     ] {
-        let out = dir.0.join(name);
-        write_positive(&out, "scene.dng", &scan, &settings, compression, "test").unwrap();
-        let back = decode(&out).unwrap();
-        assert_eq!((back.width, back.height), (WIDTH, HEIGHT), "{name}");
-        for patch in 0..PATCH_DENSITY.len() {
-            let expected = patch_mean(&positive, patch).map(|v| v / dng::STORED_MAX);
-            assert_close(patch_mean(&back, patch), expected, TOLERANCE, name);
+        assert_reads_back(&dir, name, &scan, &settings, compression, &positive);
+    }
+
+    // Narrower than a tile, as a small crop can be.
+    let mut cropped = settings.clone();
+    cropped.adjust.crop = Some(NRect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 0.6,
+        y1: 1.0,
+    });
+    let narrow = invert::convert(&scan, &cropped);
+    assert!(narrow.width < 256);
+    assert_reads_back(
+        &dir,
+        "narrow-ljpeg.dng",
+        &scan,
+        &cropped,
+        Compression::LosslessJpeg,
+        &narrow,
+    );
+}
+
+/// Writes the positive and checks that LibRaw returns its stored values at every pixel.
+fn assert_reads_back(
+    dir: &TempDir,
+    name: &str,
+    scan: &Rgb32,
+    settings: &Settings,
+    compression: Compression,
+    positive: &Rgb32,
+) {
+    let out = dir.0.join(name);
+    write_positive(&out, "scene.dng", scan, settings, compression, "test").unwrap();
+    let back = decode(&out).unwrap();
+    assert_eq!(
+        (back.width, back.height),
+        (positive.width, positive.height),
+        "{name}"
+    );
+    for y in 0..back.height {
+        for x in 0..back.width {
+            let expected = positive.get(x, y).map(|v| (v / dng::STORED_MAX).min(1.0));
+            assert_close(
+                back.get(x, y),
+                expected,
+                READ_BACK_TOLERANCE,
+                &format!("{name} at ({x}, {y})"),
+            );
         }
     }
 }
