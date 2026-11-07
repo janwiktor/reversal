@@ -42,9 +42,10 @@ The output is a 16-bit, scene-linear LinearRaw DNG in linear Rec.2020, with loss
 | Pixel values | Scene-linear positive | Exposure, white balance and curves behave as on a digital photo |
 | Color space | Linear Rec.2020, described by the file's color matrices | Takes the camera out of the equation |
 | Camera model | "Reversal Positive", with embedded profiles | No external profile needed |
-| Highlight headroom | Frame white stored about 2.3 stops under full scale, with BaselineExposure lifting it back | Raw tools can recover highlights above frame white |
+| Highlight headroom | Frame white stored about 2.3 stops under full scale, with every profile curve lifting it back and rolling off the rest | Raw tools can recover highlights above frame white |
 | White balance | AsShotNeutral 1, 1, 1; `crs:WhiteBalance="As Shot"` | The white balance slider starts neutral |
 | Profiles | Reversal Neutral, Flat and Vivid; the chosen one is the main profile | Editors can switch, and Apple Photos applies only the main profile |
+| Black point | DefaultBlackRender set to None | Renderers subtract no black level of their own, so the curve decides |
 | Compression | Lossless JPEG, tiled at 256 px; uncompressed as an option | Read everywhere |
 | Geometry | Applied to the pixels; orientation tag stays normal | Nothing depends on a reader honoring crops or rotation |
 | Crop | Entire scan unless the user crops | Keeps rebate and holder by default |
@@ -53,7 +54,7 @@ The output is a 16-bit, scene-linear LinearRaw DNG in linear Rec.2020, with loss
 
 ### Exposure and profiles
 
-BaselineExposure follows the main profile instead of using a profile exposure offset on it, because Apple's renderer opens files too bright when the main profile carries one. Other profiles carry the difference as an offset. Tone sliders change only the profile curves, so the stored image keeps everything.
+BaselineExposure is 0 for every look, and no profile has an exposure offset. Each curve maps the whole stored range to the display and carries the highlight roll-off itself, because renderers treat data above display white differently. Curves have 1024 evenly spaced samples and run from (0, 0) to (1, 1), because Apple's engine misreads or replaces anything else. Tone sliders change only the profile curves, so the stored image keeps everything.
 
 ### File locations
 
@@ -67,7 +68,7 @@ The CLI refuses to overwrite a source file or to write two inputs to one output.
 
 ### Compatibility
 
-The DNG opens correctly in Lightroom Classic, Lightroom mobile, Camera Raw and Apple Photos. Camera Raw is the reference for how a file should look. Apple Photos has its own rendering, with a slight shift.
+The DNG opens correctly in Lightroom Classic, Lightroom mobile, Camera Raw and Apple Photos. Camera Raw is the reference for how a file should look, and Apple Photos now opens close to it, with a slight shift left.
 
 ## Conversion science
 
@@ -153,7 +154,7 @@ Reset, in the Develop header, returns the tone and color controls to 0 and the p
 
 | Profile | Rendering |
 | --- | --- |
-| Reversal Neutral | The standard S-curve, with highlights clipping as on a print |
+| Reversal Neutral | The standard S-curve, with a short roll-off above frame white |
 | Reversal Flat | Low contrast, with the whole stored range rolled off below white |
 | Reversal Vivid | More contrast, plus 1.15 saturation in a look table |
 
