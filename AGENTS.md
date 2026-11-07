@@ -15,11 +15,10 @@ DNG via LibRaw; output is a **positive, scene-linear LinearRaw DNG** (16-bit, li
 Rec.2020, own camera model "Reversal Positive", embedded profiles); inversion uses an
 explicit **density model** (film base, per-frame gray curves, density crosstalk, exposure).
 
-Describe conversion methods on their own terms. Don't name or compare other
-converters when discussing them, in docs, code comments or commit messages.
+Describe conversion methods on their own terms. Don't name or compare other converters in docs, code comments or commit messages.
 Naming an app that consumes Reversal's DNGs is fine when describing testing: whether it opens a
 file correctly, or how a rendering compares or benchmarks against it. Never claim that a feature
-works like, or matches, another product.
+works like, is taken from, or matches, another product. Clean implementation based on research, no copying.
 
 ## Architecture
 
