@@ -128,7 +128,7 @@ function updateSaveButton() {
   $("progress").hidden = batch?.task !== "save";
   const saving = batch?.task === "save";
   button.classList.toggle("cancel", saving);
-  button.title = saving ? "Frames in progress finish. The rest don't start." : SAVE_SHORTCUT;
+  button.title = saving ? "Finish the frames being saved, then stop." : SAVE_SHORTCUT;
   if (saving) {
     button.textContent = "Stop saving";
     button.disabled = false;
@@ -493,8 +493,8 @@ function showRollFlow() {
   const count = roll.files?.length ?? 0;
   if (roll.step === "intro") {
     const scope = selected.size ? `the ${count} selected frame${count > 1 ? "s" : ""}` : `all ${count} frames in this folder`;
-    body.innerHTML = `<p>Frames from one roll can share one film base. This helps when some scans don't show the film's edge.</p>
-      <p>Reversal measures the film base on <b></b>. It uses a frame's custom film base if it has one, and detects clear film otherwise. Nothing changes yet: you then choose which frames to use.</p>
+    body.innerHTML = `<p>In roll mode, all frames will share the same film base selection. Use it to unify analysis across the roll, or when some of the scans don't have a visible film edge.</p>
+      <p>Reversal measures the film base on <b></b>. Nothing changes yet. You can choose between detected and custom selection on each frame, and choose which frames to use for the roll.</p>
       <p>Each frame keeps its own color curves and exposure.</p>`;
     body.querySelector("b").textContent = scope;
     if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Select at least two frames, or none to use the whole folder.</p>`);
@@ -511,7 +511,7 @@ function showRollFlow() {
 function showRollProgress() {
   const progress = $("roll-progress");
   if (!progress || !batch) return;
-  const verb = roll.step === "reading" ? "Measuring the film base on frame" : "Applying the film base to frame";
+  const verb = roll.step === "reading" ? "Measuring the film base on frame" : "Applying the film base selection to frame";
   progress.textContent = `${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`;
   progress.nextElementSibling.firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
 }
@@ -524,7 +524,7 @@ function showRollReview() {
   const noClear = roll.readings.every((r) => r.source === "unsure");
   body.innerHTML = `<p>${noClear
       ? `<span class="warn">No clear film detected on any frame.</span> Cancel, select a custom film base on a frame with clear film, and start again.`
-      : "Selected frames set the roll's film base. Deselect any that look wrong. One or two good frames are enough."}</p>
+      : "Selected frames determine film base settings for the entire roll. Deselect any that look incorrect."}</p>
     ${lost}<div id="roll-table"></div><div id="roll-result"></div>`;
   if (lost) body.querySelector("#roll-issues").textContent = roll.issues.map((i) => `${i.file}: ${i.message}`).join("\n");
   const table = body.querySelector("#roll-table");
@@ -698,8 +698,8 @@ async function reopenAfterRoll() {
 
 function rollSummary({ done, total, issues, canceled }) {
   const head = canceled ? "Stopped. No frame changed."
-    : issues.length ? "Could not apply the film base to every frame."
-    : `${total} frames now share one film base. Choose Detect to return a frame to its own.`;
+    : issues.length ? "Could not apply the film base selection to every frame."
+    : `${total} frames now share one film base. Choose Detect to reset a frame to an individual setting.`;
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
 
@@ -716,7 +716,7 @@ async function setHint(key, rect) {
   if (batch?.task === "roll") { status("Matching the film base. Try again when it's done."); return; }
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
-  measure(key === "base" ? (rect ? "Custom film base set." : "Using this frame's own film base.")
+  measure(key === "base" ? (rect ? "Custom film base set." : "Using current frame selection only.")
                          : (rect ? "Custom measured area set." : "Measuring the center of the scan."), true);
 }
 

@@ -67,8 +67,7 @@ pub fn saved_settings(
     small: &Rgb32,
 ) -> (Settings, Option<String>) {
     let unreadable = || {
-        let warning = "Could not read this frame's saved settings, so it uses the automatic ones. \
-                       Saving replaces them.";
+        let warning = "Could not read saved settings on this frame. Using default settings.";
         (auto.clone(), Some(warning.to_string()))
     };
     let choices: SavedChoices = match serde_json::from_slice(sidecar) {

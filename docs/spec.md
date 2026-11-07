@@ -116,7 +116,7 @@ The screen separates what can break a conversion from what develops it: frames o
 
 ### Writing
 
-UI text uses simple, declarative language, explains briefly, and uses established UI terms where they exist. A message says what happened and what to do. One term means one thing everywhere: a frame is one file in the list, a scan is its whole image, and select means a checkbox. Custom means set by the user, measure covers everything Reversal reads from a scan, and film terms the audience knows stay, such as film base and clear film.
+UI text uses simple, declarative language, explains briefly, and uses established UI terms where they exist. A message says what happened and what to do. One term means one thing everywhere: a frame is one file in the list, and a scan is its whole image. Custom means set by the user, measure covers everything Reversal reads from a scan, and film terms the audience knows stay, such as film base and clear film.
 
 ### Setup
 
