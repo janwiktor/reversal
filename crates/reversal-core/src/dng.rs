@@ -6,8 +6,8 @@
 //! SubIFD 0 = the 16-bit LinearRaw image; SubIFD 1 = an sRGB JPEG preview.
 //! Frame white is stored at `STORE_SCALE`, so highlights above it survive as recoverable
 //! headroom, and each profile's tone curve maps the whole stored range to the display.
-//! `BaselineExposure` stays 0: renderers disagree on data above display white, as Apple's
-//! engine has no roll-off of its own there, so the curves leave none.
+//! `BaselineExposure` stays 0: renderers treat data above display white differently, so the
+//! curves leave none.
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -449,6 +449,32 @@ mod tests {
                 .expect("DefaultBlackRender");
             assert!(matches!(&tag.1, Val::Long(v) if v == &[1]), "{look:?}");
         }
+    }
+
+    #[test]
+    fn a_written_file_turns_off_black_subtraction_in_its_main_and_extra_profiles() {
+        let tone = render::Tone::default();
+        let bytes = encode(
+            &Rgb32::new(4, 4),
+            &DngOptions {
+                compression: Compression::None,
+                profile: render::profile(render::Look::Neutral, tone),
+                extra_profiles: vec![render::profile(render::Look::Flat, tone)],
+                xmp: None,
+                software: "t",
+            },
+        );
+        let entry = |ifd: usize, tag: u16| {
+            (0..u16_at(&bytes, ifd) as usize)
+                .map(|i| ifd + 2 + 12 * i)
+                .find(|&e| u16_at(&bytes, e) == tag)
+        };
+        let ifd0 = u32_at(&bytes, 4) as usize;
+        let main = entry(ifd0, 51110).expect("in the main profile");
+        assert_eq!(u32_at(&bytes, main + 8), 1);
+        let blob = u32_at(&bytes, entry(ifd0, 50933).unwrap() + 8) as usize;
+        let extra = entry(blob + u32_at(&bytes, blob + 4) as usize, 51110);
+        assert_eq!(u32_at(&bytes, extra.expect("in the extra profile") + 8), 1);
     }
 
     #[test]

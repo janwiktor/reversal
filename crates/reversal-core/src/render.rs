@@ -80,7 +80,7 @@ impl Look {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Tone {
     pub contrast: f32,
-    /// − crushes the black point, + lifts it.
+    /// − crushes the black point, + lifts it, except at the very bottom of the stored range.
     pub blacks: f32,
     pub shadows: f32,
     pub highlights: f32,
@@ -92,7 +92,7 @@ fn unit(slider: f32) -> f32 {
     slider.clamp(-100.0, 100.0) / 100.0
 }
 
-/// Whites control, −1…+1, of a look and tone: below 0 the curve needs the stored range.
+/// Whites control, −1…+1, of a look and tone.
 fn white_amount(look: Look, tone: Tone) -> f32 {
     unit(look.whites() + tone.whites)
 }

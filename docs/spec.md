@@ -139,7 +139,7 @@ Each group shows one choice: the one in use, or Custom while its drag tool is op
 | Contrast | ×/÷ 2.6 curve slope at the ends | Profile curve |
 | Highlights, Shadows | ±100 | Profile curve |
 | Whites | −100 rolls off the whole stored range, +100 clips sooner | Profile curve |
-| Blacks | ±100 | Profile curve |
+| Blacks | −100 crushes the black point, +100 lifts it, except at the very bottom of the stored range, where the curve has to start at 0 | Profile curve |
 | Profile | Neutral, Flat, Vivid | Which profile the file opens with |
 | Temperature | Red and blue in opposite directions, ±0.6 EV | Pixels |
 | Tint | Green against red and blue | Pixels |
