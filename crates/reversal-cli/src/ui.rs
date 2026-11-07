@@ -138,13 +138,7 @@ pub fn serve(
     port: u16,
     exit_with_stdin: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let dir = dir.canonicalize()?;
-    let server = Server::http(("127.0.0.1", port))
-        .map_err(|e| format!("could not use port {port}: {e}. Choose another with --port."))?;
-    let port = server
-        .server_addr()
-        .to_ip()
-        .map_or(port, |address| address.port());
+    let (server, mut state) = bind(dir, port)?;
     if exit_with_stdin {
         std::thread::spawn(|| {
             let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
@@ -152,31 +146,53 @@ pub fn serve(
         });
     }
     println!(
-        "Reversal UI: http://127.0.0.1:{port}  (folder: {})",
-        dir.display()
+        "Reversal UI: http://127.0.0.1:{}  (folder: {})",
+        state.port,
+        state.folder.dir.display()
     );
-    let mut state = State {
+    state.run(&server);
+    Ok(())
+}
+
+/// The server on a thread of this process, on a free port, for a platform where an app can't
+/// start another process. It stops when this is dropped; a save in progress finishes first.
+pub struct InProcess {
+    pub port: u16,
+    server: Arc<Server>,
+}
+
+impl InProcess {
+    pub fn start(dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        let (server, mut state) = bind(dir, 0)?;
+        let (port, server) = (state.port, Arc::new(server));
+        let serving = server.clone();
+        std::thread::spawn(move || state.run(&serving));
+        Ok(InProcess { port, server })
+    }
+}
+
+impl Drop for InProcess {
+    fn drop(&mut self) {
+        self.server.unblock();
+    }
+}
+
+fn bind(dir: PathBuf, port: u16) -> Result<(Server, State), Box<dyn std::error::Error>> {
+    let dir = dir.canonicalize()?;
+    let server = Server::http(("127.0.0.1", port))
+        .map_err(|e| format!("could not use port {port}: {e}. Choose another with --port."))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map_or(port, |address| address.port());
+    let state = State {
         port,
         folder: Arc::new(Folder::new(dir)),
         cache: HashMap::new(),
         batch: Batch::default(),
         roll_readings: Arc::default(),
     };
-    for mut req in server.incoming_requests() {
-        // A failing request mustn't take the server down: the Mac app would close with it.
-        let handled = catch_unwind(AssertUnwindSafe(|| state.handle(&mut req)));
-        let resp = match handled {
-            Ok(Ok(resp)) => resp,
-            Ok(Err((code, msg))) => json_resp(code, &json!({ "error": msg })),
-            Err(_) => {
-                eprintln!("{} {} failed unexpectedly", req.method(), req.url());
-                json_resp(500, &json!({ "error": "the request failed unexpectedly" }))
-            }
-        };
-        // Browsers must take each response for what it says it is.
-        let _ = req.respond(resp.with_header(header("X-Content-Type-Options", "nosniff")));
-    }
-    Ok(())
+    Ok((server, state))
 }
 
 fn header(name: &str, value: &str) -> Header {
@@ -275,6 +291,23 @@ fn read_body<T: for<'de> Deserialize<'de>>(req: &mut Request) -> Result<T, (u16,
 }
 
 impl State {
+    fn run(&mut self, server: &Server) {
+        for mut req in server.incoming_requests() {
+            // A failing request mustn't take the server down: the Mac app would close with it.
+            let handled = catch_unwind(AssertUnwindSafe(|| self.handle(&mut req)));
+            let resp = match handled {
+                Ok(Ok(resp)) => resp,
+                Ok(Err((code, msg))) => json_resp(code, &json!({ "error": msg })),
+                Err(_) => {
+                    eprintln!("{} {} failed unexpectedly", req.method(), req.url());
+                    json_resp(500, &json!({ "error": "the request failed unexpectedly" }))
+                }
+            };
+            // Browsers must take each response for what it says it is.
+            let _ = req.respond(resp.with_header(header("X-Content-Type-Options", "nosniff")));
+        }
+    }
+
     fn handle(&mut self, req: &mut Request) -> Handled {
         let url = req.url().to_string();
         let path = url.split('?').next().unwrap_or("");
@@ -555,8 +588,12 @@ fn voted_base(bases: &[[f32; 3]]) -> Result<[f32; 3], (u16, String)> {
     Ok(invert::roll_base(bases))
 }
 
-/// Frames saved at once. Each also uses all cores while converting, and holds a few hundred MB.
+/// Frames saved at once. Each also uses all cores while converting, and holds a few hundred MB,
+/// which on iOS would get the app killed sooner than it would save time.
 fn export_workers() -> usize {
+    if cfg!(target_os = "ios") {
+        return 1;
+    }
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     (cores / 3).clamp(1, 4)
 }
@@ -699,7 +736,8 @@ mod tests {
     fn notices_name_libraw_and_adobe_wherever_a_copyright_shows() {
         let plist = include_str!("../../../packaging/macos/Info.plist");
         let read_me = include_str!("../../../packaging/macos/Read me first.txt");
-        for text in [INDEX_HTML, plist, read_me] {
+        let ios_plist = include_str!("../../../packaging/ios/Info.plist");
+        for text in [INDEX_HTML, plist, read_me, ios_plist] {
             assert!(text.contains("2008-2025 LibRaw LLC"));
             assert!(text.contains("under license by Adobe"));
         }

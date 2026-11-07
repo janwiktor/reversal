@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/reversal-core", "crates/reversal-cli"]
+members = ["crates/reversal-core", "crates/reversal-cli", "crates/reversal-ios"]
+# The iOS engine only builds through packaging/ios; `--workspace` still checks it.
+default-members = ["crates/reversal-core", "crates/reversal-cli"]
 
 [workspace.package]
 version = "0.3.1"

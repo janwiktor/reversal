@@ -1,0 +1,28 @@
+// Settings for the app. To run on a device, put your team in Local.xcconfig next to this file
+// (not in git): DEVELOPMENT_TEAM = ABCDE12345
+#include? "Local.xcconfig"
+
+PRODUCT_NAME = Reversal
+PRODUCT_BUNDLE_IDENTIFIER = io.github.janwiktor.reversal
+INFOPLIST_FILE = Info.plist
+SWIFT_OBJC_BRIDGING_HEADER = Engine.h
+SWIFT_VERSION = 5.0
+
+SDKROOT = iphoneos
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+TARGETED_DEVICE_FAMILY = 1,2
+// The engine is built for Apple silicon only.
+ARCHS = arm64
+EXCLUDED_ARCHS = x86_64
+
+ASSETCATALOG_COMPILER_APPICON_NAME = Reversal
+CODE_SIGN_STYLE = Automatic
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
+
+LIBRARY_SEARCH_PATHS = $(inherited) $(PROJECT_DIR)/../../dist/build/ios/$(PLATFORM_NAME)/lib
+OTHER_LDFLAGS = $(inherited) -lreversal_ios -lraw_r -lc++ -lz
+
+// The build phases run cargo and git, outside the project folder.
+ENABLE_USER_SCRIPT_SANDBOXING = NO
+ALWAYS_SEARCH_USER_PATHS = NO

@@ -44,3 +44,8 @@ Samples/
 
 # Experiments stay local
 spike/
+
+# Xcode
+xcuserdata/
+project.xcworkspace/
+packaging/ios/Local.xcconfig

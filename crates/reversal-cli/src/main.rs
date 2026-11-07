@@ -2,15 +2,11 @@
 
 //! `reversal` — convert film negative scans to positive LinearRaw DNGs.
 
-mod batch;
-mod folder;
-mod pipeline;
-mod ui;
-
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use reversal_cli::{pipeline, ui};
 use reversal_core::image::Rgb32;
 use reversal_core::invert::{self, Adjust, Film, Hints, Settings};
 use reversal_core::render::Look;
