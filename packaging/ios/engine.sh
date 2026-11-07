@@ -1,6 +1,9 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # Builds the engine for one Apple SDK into dist/build/ios/<sdk>/lib, for the app to link: LibRaw
-# and the reversal-ios crate. Xcode runs this before compiling; by hand: engine.sh iphonesimulator
+# and the reversal-ios crate, with their licenses in Licenses next to it. Xcode runs this before
+# compiling; by hand: engine.sh iphonesimulator
 set -euo pipefail
 
 # Xcode's script environment finds neither cargo nor pkg-config by itself.
@@ -35,3 +38,9 @@ PKG_CONFIG_ALLOW_CROSS=1 PKG_CONFIG_PATH="$prefix/lib/pkgconfig" CARGO_TARGET_DI
 
 mkdir -p "$out/lib"
 cp "$out/target/$rust_target/release/libreversal_ios.a" "$prefix/lib/libraw_r.a" "$out/lib/"
+
+# For finish-app.sh to put in the app.
+licenses="$out/Licenses"
+rust_package=reversal-ios
+# shellcheck source=../macos/licenses.sh
+. "$root/packaging/macos/licenses.sh"

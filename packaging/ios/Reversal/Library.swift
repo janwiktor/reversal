@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Where scans come from: folders used in place, and rolls imported into the app's Documents,
 // which Files shows under On My iPad.
 
