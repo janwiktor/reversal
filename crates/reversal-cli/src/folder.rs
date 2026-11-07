@@ -66,25 +66,29 @@ pub fn saved_settings(
     auto: &Settings,
     small: &Rgb32,
 ) -> (Settings, Option<String>) {
-    let unreadable = |e: serde_json::Error| {
-        let warning = format!("Saved settings couldn't be read ({e}). Saving will replace them.");
-        (auto.clone(), Some(warning))
+    let unreadable = || {
+        let warning = "Could not read saved settings on this frame. Using default settings.";
+        (auto.clone(), Some(warning.to_string()))
     };
     let choices: SavedChoices = match serde_json::from_slice(sidecar) {
         Ok(c) => c,
-        Err(e) => return unreadable(e),
+        Err(_) => return unreadable(),
     };
     if choices.model == MODEL_VERSION {
         return match serde_json::from_slice(sidecar) {
             Ok(saved) => (saved, None),
-            Err(e) => unreadable(e),
+            Err(_) => unreadable(),
         };
     }
     // An older model's measurements mean nothing now: measure again, keep the user's choices.
-    let mut settings = Settings::new(invert::estimate_on(small, &choices.hints), choices.adjust);
+    let straight = small.straighten(choices.adjust.straighten);
+    let mut settings = Settings::new(
+        invert::estimate_on(&straight, &choices.hints),
+        choices.adjust,
+    );
     settings.hints = choices.hints;
-    let warning = "These settings came from an older version. Colors were measured again, \
-                   and your adjustments may need another look.";
+    let warning = "These settings are from an older version, so colors were measured again. \
+                   Check your adjustments.";
     (settings, Some(warning.to_string()))
 }
 
@@ -138,7 +142,7 @@ impl Folder {
         if self.raw_files().iter().any(|f| f == file) {
             Ok(self.dir.join(file))
         } else {
-            Err((404, format!("unknown file: {file}")))
+            Err((404, format!("file not found: {file}")))
         }
     }
 
@@ -236,6 +240,7 @@ impl Folder {
         let small = self.roll_image(file)?;
         let sidecar = std::fs::read(self.sidecar(file)).ok();
         let (settings, _) = settings_from(sidecar.as_deref(), &small);
+        let small = small.straighten(settings.adjust.straighten);
         let reading = |base_rgb, source| RollReading {
             file: file.to_string(),
             base_rgb,
@@ -272,7 +277,8 @@ impl Folder {
             let sidecar = std::fs::read(self.sidecar(&frame.file)).ok();
             let (mut settings, _) = settings_from(sidecar.as_deref(), &frame.small);
             settings.hints.base_rgb = Some(base_rgb);
-            settings.estimate = invert::estimate_on(&frame.small, &settings.hints);
+            let straight = frame.small.straighten(settings.adjust.straighten);
+            settings.estimate = invert::estimate_on(&straight, &settings.hints);
             self.write_settings(&frame.file, &settings)
                 .map_err(|e| format!("{}: {e}", frame.file))?;
         }

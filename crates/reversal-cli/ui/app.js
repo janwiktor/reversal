@@ -3,9 +3,10 @@ const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "bla
 const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
-  crop: "Drag over what the saved DNG should keep. This doesn't change the colors.",
-  area: "Drag over the part of the scan that is picture (no rebate, no holder). Color and exposure are measured here. This doesn't change the crop.",
-  base: "Drag over clear, unexposed film between or beside the frames, away from holes and markings.",
+  crop: "Drag to crop the area for the final DNG export.",
+  area: "Drag over the exposed image only, avoiding film base, film holder or sprocket holes. This area drives negative conversion, and doesn't affect final crop.",
+  base: "Drag over clear unexposed part of the film, avoiding sprocket holes, numbers and film stock markings.",
+  show: "Showing the film base, measured area, final crop, and auto-detected film holder area excluded from analysis.",
 };
 
 let current = null;   // { file, auto, settings }
@@ -63,7 +64,7 @@ async function loadFiles() {
   const scroll = list.scrollTop;
   list.replaceChildren(...frames.map(frameRow));
   list.scrollTop = scroll;
-  if (!frames.length) $("message").textContent = "No raw files in this folder. Start Reversal on a folder with NEF, CR2, ARW, RAF or DNG scans.";
+  if (!frames.length) $("message").textContent = "No raw files in this folder. Open a folder with NEF, CR2, ARW, RAF or DNG scans.";
   markCurrent(opening ?? current?.file);
   updateSaveButton();
 }
@@ -92,7 +93,7 @@ function showFrameState(f, state) {
   const saving = batch?.task === "save" && batch.active.includes(f.name);
   state.textContent = saving ? "saving" : f.edited ? "edited" : f.saved ? "saved" : "";
   state.className = `state${f.edited && !saving ? " edited" : ""}${f.manualSetup ? " manual" : ""}`;
-  state.title = f.manualSetup ? "Film base or measured area set by hand" : f.edited ? "Changes not saved to a DNG yet" : "";
+  state.title = f.manualSetup ? "Custom film base or measured area" : f.edited ? "Changes not saved to a DNG yet" : "";
 }
 
 function showFrameStates() {
@@ -127,7 +128,7 @@ function updateSaveButton() {
   $("progress").hidden = batch?.task !== "save";
   const saving = batch?.task === "save";
   button.classList.toggle("cancel", saving);
-  button.title = saving ? "Frames being saved now finish; the rest don't start" : SAVE_SHORTCUT;
+  button.title = saving ? "Finish the frames being saved, then stop." : SAVE_SHORTCUT;
   if (saving) {
     button.textContent = "Stop saving";
     button.disabled = false;
@@ -170,23 +171,26 @@ async function rememberSettings(leaving = false) {
 
 function rememberSoon() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not keep your settings: ${e.message}`)), 300);
+  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not save settings: ${e.message}`)), 300);
 }
 
 async function open(name) {
   try {
+    await measureSettled();
     await rememberSettings(true);
   } catch (e) {
-    status(`Could not keep your settings, so this frame stays open: ${e.message}`);
+    status(`Could not save settings, so this frame stays open: ${e.message}`);
     return;
   }
   clearTimeout(timer);
   clearTimeout(areaTimer);
+  clearTimeout(straightenTimer);
+  straightenUnmeasured = false;
   opening = name;
   current = null;  // no edits while nothing is open
   markCurrent(name);
   setTool(null);
-  $("message").textContent = "Decoding the raw file…";
+  $("message").textContent = "Opening the raw file…";
   $("message").hidden = false;
   $("view").hidden = true;
   setBusy(true);
@@ -243,7 +247,7 @@ function paintSlider(range) {
 // What could spoil this frame's conversion stays in view with the controls that fix it.
 function showSetupNote() {
   const guessing = !current.baseFound && !hints().base && !hints().base_rgb;
-  const note = current.warning ?? (guessing ? "No clear film found on this frame, so its colors may be off. Pick the film base, or match it across the roll." : "");
+  const note = current.warning ?? (guessing ? "No clear film detected on this frame. Select custom area, or match base across the film roll from other frames." : "");
   $("setup-note").textContent = note;
   $("setup-note").hidden = !note;
 }
@@ -255,14 +259,19 @@ function syncControls() {
   const percent = hints().area_percent ?? current.defaultAreaPercent;
   showValue("area-percent", percent);
   $("flip").setAttribute("aria-pressed", String(a.flip_h));
-  const cropMode = !a.crop ? "full" : sameRect(a.crop, current.settings.estimate.area) ? "frame" : "draw";
-  for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m || tool === "crop" && m === "draw"));
-  $("area-auto").setAttribute("aria-pressed", String(!hints().analysis));
-  $("area-draw").setAttribute("aria-pressed", String(!!hints().analysis || tool === "area"));
-  $("base-auto").setAttribute("aria-pressed", String(!hints().base && !hints().base_rgb));
+  // One choice per group: the tool being used, otherwise what the frame uses now.
+  const cropMode = tool === "crop" || (a.crop && !sameRect(a.crop, current.settings.estimate.area)) ? "draw" : a.crop ? "frame" : "full";
+  for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m));
+  const customArea = tool === "area" || !!hints().analysis;
+  $("area-auto").setAttribute("aria-pressed", String(!customArea));
+  $("area-draw").setAttribute("aria-pressed", String(customArea));
+  $("area-percent-row").hidden = customArea;
+  showHolderLegend();
+  const customBase = tool === "base" || !!hints().base;
+  $("base-auto").setAttribute("aria-pressed", String(!customBase && !hints().base_rgb));
   $("roll-state").hidden = !!hints().base || !hints().base_rgb;
   showSetupNote();
-  $("base-draw").setAttribute("aria-pressed", String(!!hints().base || tool === "base"));
+  $("base-draw").setAttribute("aria-pressed", String(customBase));
   $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
 }
 
@@ -278,8 +287,39 @@ function changed(delay = 0) {
 
 for (const id of [...SLIDERS, "straighten"]) {
   $(id).title = "Double-click to reset";
-  $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); changed(); } });
-  $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; changed(0); } });
+  $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); if (id === "straighten") straightenMoved(); changed(); } });
+  $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; if (id === "straighten") straightenMoved(); changed(0); } });
+}
+
+// A new angle closes the areas, which no longer fit, and measures again once it settles: on letting
+// go of the slider, or after a short pause for arrow keys and typed values. Never while it's held.
+const STRAIGHTEN_PAUSE_MS = 300;
+let straightenTimer = null, straightenHeld = false, straightenUnmeasured = false;
+function straightenMoved() {
+  if (tool) setTool(null);
+  straightenUnmeasured = true;
+  clearTimeout(straightenTimer);
+  if (!straightenHeld) straightenTimer = setTimeout(measureStraightened, STRAIGHTEN_PAUSE_MS);
+}
+async function measureStraightened() {
+  if (!straightenUnmeasured || !current) return;
+  // A custom area keeps its place on the scan while the picture turns under it.
+  const custom = hints().base || hints().analysis;
+  straightenUnmeasured = !(await measure(custom ? "Colors measured again. Custom areas stayed in place, so check them in Show areas." : "Colors measured again for the new angle."));
+}
+// Saved settings must hold what was measured for their angle, so saving and leaving wait for it.
+async function measureSettled() {
+  clearTimeout(straightenTimer);
+  await measureStraightened();
+  await lastMeasure;
+}
+$("straighten").addEventListener("pointerdown", (e) => { if (e.button === 0) straightenHeld = true; });
+for (const end of ["pointerup", "pointercancel", "blur"]) {
+  window.addEventListener(end, () => {
+    if (!straightenHeld) return;
+    straightenHeld = false;
+    measureStraightened();
+  });
 }
 
 for (const look of LOOKS) {
@@ -346,14 +386,24 @@ $("flip").addEventListener("click", () => {
 });
 $("rotate").addEventListener("click", () => { if (current) { adj().rotate = (adj().rotate + 1) % 4; changed(0); } });
 
-$("crop-full").addEventListener("click", () => { if (current) { adj().crop = null; setTool(null); changed(0); } });
-$("crop-frame").addEventListener("click", () => { if (current) { adj().crop = { ...current.settings.estimate.area }; setTool(null); changed(0); } });
-$("crop-draw").addEventListener("click", () => setTool(tool === "crop" ? null : "crop"));
-$("area-draw").addEventListener("click", () => setTool(tool === "area" ? null : "area"));
-$("base-draw").addEventListener("click", () => setTool(tool === "base" ? null : "base"));
-$("show-areas").addEventListener("click", () => setTool(tool === "show" ? null : "show"));
-$("area-auto").addEventListener("click", () => setHint("analysis", null));
-$("base-auto").addEventListener("click", () => setHint("base", null));
+// Choosing anything else cancels an unfinished drawing. Show areas stays open to show the result.
+function cancelDrawing() {
+  if (tool && tool !== "show") setTool(null);
+}
+$("crop-full").addEventListener("click", () => { if (current) { cancelDrawing(); adj().crop = null; changed(0); } });
+$("crop-frame").addEventListener("click", () => { if (current) { cancelDrawing(); adj().crop = { ...current.settings.estimate.area }; changed(0); } });
+$("crop-draw").addEventListener("click", () => { if (current) setTool(tool === "crop" ? null : "crop"); });
+$("area-draw").addEventListener("click", () => { if (current) setTool(tool === "area" ? null : "area"); });
+$("base-draw").addEventListener("click", () => { if (current) setTool(tool === "base" ? null : "base"); });
+$("show-areas").addEventListener("click", () => { if (current) setTool(tool === "show" ? null : "show"); });
+$("area-auto").addEventListener("click", () => {
+  cancelDrawing();
+  if (current && hints().analysis) setHint("analysis", null);
+});
+$("base-auto").addEventListener("click", () => {
+  cancelDrawing();
+  if (current && (hints().base || hints().base_rgb)) setHint("base", null);
+});
 $("base-roll").addEventListener("click", openRollFlow);
 $("tool-done").addEventListener("click", () => setTool(null));
 document.addEventListener("keydown", (e) => {
@@ -385,7 +435,7 @@ $("reset").addEventListener("click", () => {
   for (const id of SLIDERS) adj()[id] = 0;
   adj().look = "neutral";
   changed(0);
-  status("Tone and color are back to the automatic conversion.");
+  status("Tone and color reset.");
 });
 
 $("export").addEventListener("click", async () => {
@@ -397,6 +447,7 @@ $("export").addEventListener("click", async () => {
   if (!files.length) return;
   $("reveal").hidden = true;
   try {
+    await measureSettled();
     await rememberSettings();
     batch = await (await api("/api/export", { files })).json();
     updateSaveButton();
@@ -410,7 +461,7 @@ $("export").addEventListener("click", async () => {
 // Three steps, because this reaches past the frame on screen: say what will happen, read every
 // frame without changing anything, then let the user choose which readings count.
 let roll = null;  // { step, files, readings, ticked, voted }
-const SOURCE = { picked: "Your pick", detected: "Detected", unsure: "No clear film" };
+const SOURCE = { picked: "Custom", detected: "Detected", unsure: "No clear film" };
 
 function rollFrames() {
   const names = frames.map((f) => f.name);
@@ -419,6 +470,7 @@ function rollFrames() {
 
 function openRollFlow() {
   if (batch) { status("Wait for the current work to finish."); return; }
+  cancelDrawing();
   roll = { step: "intro", files: rollFrames() };
   showRollFlow();
   $("roll-flow").showModal();
@@ -440,13 +492,14 @@ function showRollFlow() {
   const body = $("roll-body");
   const count = roll.files?.length ?? 0;
   if (roll.step === "intro") {
-    const scope = selected.size ? `the ${count} ticked frame${count > 1 ? "s" : ""}` : `all ${count} frames in this folder`;
-    body.innerHTML = `<p>Frames from one roll have the same clear film, so they can share one film base. This helps when some scans don't show the film's edge.</p>
-      <p>Reversal reads the film base on <b></b>: your pick where a frame has one, otherwise the clear film it detects. Nothing changes yet. You then see each reading and choose which ones count.</p>
-      <p>Color curves and exposure stay each frame's own.</p>`;
+    const frameWord = `${count} frame${count === 1 ? "" : "s"}`;
+    const scope = count < frames.length ? `the selected ${frameWord}` : `all ${frameWord}`;
+    body.innerHTML = `<p>In roll mode, all frames will share the same film base selection. Use it to unify the film base setting across the roll, or when some of the scans don't have a visible film edge.</p>
+      <p>Reversal measures the film base on <b></b>. You can include both detected and custom film base selection on each frame, and pick which frames to use for the roll. You can verify and apply changes in the next step.</p>
+      <p>Each frame keeps its own color analysis and Develop settings.</p>`;
     body.querySelector("b").textContent = scope;
-    if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Tick at least two frames, or none to use the whole folder.</p>`);
-    rollButtons("Cancel", `Read ${count} frame${count === 1 ? "" : "s"}`, count >= 2);
+    if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Select at least two frames, or none to use the whole folder.</p>`);
+    rollButtons("Cancel", `Measure ${count} frame${count === 1 ? "" : "s"}`, count >= 2);
   } else if (roll.step === "reading" || roll.step === "applying") {
     body.innerHTML = `<p id="roll-progress"></p><div class="progress"><div></div></div>`;
     showRollProgress();
@@ -459,7 +512,7 @@ function showRollFlow() {
 function showRollProgress() {
   const progress = $("roll-progress");
   if (!progress || !batch) return;
-  const verb = roll.step === "reading" ? "Reading the film base on frame" : "Preparing frame";
+  const verb = roll.step === "reading" ? "Measuring the film base on frame" : "Applying the film base selection to frame";
   progress.textContent = `${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`;
   progress.nextElementSibling.firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
 }
@@ -471,8 +524,8 @@ function showRollReview() {
   const lost = roll.issues.length ? `<p class="warn" id="roll-issues"></p>` : "";
   const noClear = roll.readings.every((r) => r.source === "unsure");
   body.innerHTML = `<p>${noClear
-      ? `<span class="warn">No frame shows clear film.</span> Cancel, pick the film base on a frame that does, and start again.`
-      : "Ticked frames decide the roll's film base. Untick any that look wrong; a good one or two is enough."}</p>
+      ? `<span class="warn">No clear film detected on any frame.</span> Cancel, select a custom film base on a frame with clear film, and start again.`
+      : "Selected frames determine film base settings for the entire roll. Deselect any that look incorrect."}</p>
     ${lost}<div id="roll-table"></div><div id="roll-result"></div>`;
   if (lost) body.querySelector("#roll-issues").textContent = roll.issues.map((i) => `${i.file}: ${i.message}`).join("\n");
   const table = body.querySelector("#roll-table");
@@ -493,7 +546,7 @@ function showRollReview() {
     const differs = roll.voted?.differs[r.file];
     note.className = `note${r.source === "unsure" || differs ? " warn" : ""}`;
     note.textContent = differs ? `${SOURCE[r.source]}, differs` : SOURCE[r.source];
-    if (differs) note.title = "This reading is far from the roll's. It may be misread, or from different film.";
+    if (differs) note.title = "This film base differs from the rest of the roll. It may be misdetected, or from different film.";
     row.append(box, name, note);
     table.append(row);
   });
@@ -502,11 +555,11 @@ function showRollReview() {
   const voters = roll.ticked.size;
   if (roll.voted?.base_rgb && voters) {
     const keeps = roll.readings.length - applied.length;
-    result.textContent = `Film base from ${voters} frame${voters > 1 ? "s" : ""}.${keeps ? ` ${keeps} with a pick keep${keeps > 1 ? "" : "s"} it.` : ""}`;
+    result.textContent = `Film base from ${voters} frame${voters > 1 ? "s" : ""}.${keeps ? ` ${keeps} with a custom film base keep${keeps > 1 ? "" : "s"} it.` : ""}`;
   } else {
-    result.textContent = "Tick at least one frame.";
+    result.textContent = "Select at least one frame.";
   }
-  rollButtons("Cancel", `Use on ${applied.length} frame${applied.length === 1 ? "" : "s"}`, voters > 0 && applied.length > 0);
+  rollButtons("Cancel", `Apply to ${applied.length} frame${applied.length === 1 ? "" : "s"}`, voters > 0 && applied.length > 0);
 }
 
 // The median and what strays from it come from the engine, like every other measurement.
@@ -585,7 +638,7 @@ async function followBatch() {
   } catch (e) {
     batch = null;
     updateSaveButton();
-    status(`Lost track of saving: ${e.message}`);
+    status(`Could not get save progress: ${e.message}`);
     return;
   }
   const inRoll = batch.task === "roll" || batch.task === "roll-read";
@@ -646,14 +699,14 @@ async function reopenAfterRoll() {
 
 function rollSummary({ done, total, issues, canceled }) {
   const head = canceled ? "Stopped. No frame changed."
-    : issues.length ? "The roll's film base didn't reach every frame."
-    : `${total} frames now share one film base. Detect on a frame goes back to its own.`;
+    : issues.length ? "Could not apply the film base selection to every frame."
+    : `${total} frames now share one film base. Choose Detect to reset a frame to an individual setting.`;
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
 
 function batchSummary({ done, total, issues, canceled, last_path }) {
   const where = last_path ? ` to ${last_path.slice(0, last_path.lastIndexOf("/"))}` : "";
-  const head = total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}.`;
+  const head = total === 1 && done === 0 ? "Could not save the DNG." : total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}.`;
   return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
 }
 
@@ -661,24 +714,39 @@ $("reveal").addEventListener("click", () => { if (shell && lastPath) shell.postM
 
 async function setHint(key, rect) {
   if (!current) return;
-  if (batch?.task === "roll") { status("Measuring the roll; try again when it's done."); return; }
-  const file = current.file;
-  const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
+  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done."); return; }
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
+  measure(key === "base" ? (rect ? "Custom film base set." : "Using current frame selection only.")
+                         : (rect ? "Custom measured area set." : "Measuring the center of the scan."), true);
+}
+
+// Measures the frame as it's set now. A later call replaces an earlier one still on its way.
+let latestMeasure = 0, lastMeasure = null;
+function measure(done, clearsWarning = false) {
+  lastMeasure = measureNow(done, clearsWarning);
+  return lastMeasure;
+}
+// True once the frame holds the result, or a newer call has taken over.
+async function measureNow(done, clearsWarning) {
+  const file = current.file, id = ++latestMeasure;
+  const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
   status("Measuring…");
   try {
-    const estimate = await (await api("/api/estimate", { file, hints: hints() })).json();
-    if (current?.file !== file) return;
+    const { estimate, baseFound } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
+    if (current?.file !== file || id !== latestMeasure) return true;
     current.settings.estimate = estimate;
-    current.warning = null;
+    current.baseFound = baseFound;
+    if (clearsWarning) current.warning = null;
     if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
-    status(key === "base" ? (rect ? "Film base set from your selection." : "Film base now read from this frame.")
-                          : (rect ? "Image area set from your selection." : "Measuring the center of the scan."));
+    status(done);
   } catch (e) {
-    if (current?.file === file) status(`Could not measure: ${e.message}`);
+    if (current?.file !== file || id !== latestMeasure) return true;
+    status(`Could not measure: ${e.message}`);
+    return false;
   }
-  if (current?.file === file) changed(0);
+  changed(0);
+  return true;
 }
 
 // ---------- Tools and overlay ----------
@@ -687,7 +755,7 @@ function setTool(t) {
   tool = t;
   $("overlay").toggleAttribute("hidden", !t); // SVG elements don't reflect .hidden
   $("toolbar").hidden = !t;
-  $("tool-text").textContent = t === "show" ? "Showing the crop, measured area and film base." : TOOL_TEXT[t] ?? "";
+  $("tool-text").textContent = TOOL_TEXT[t] ?? "";
   if (current) changed(0);
 }
 
@@ -719,13 +787,49 @@ function svgRect(r, cls) {
   const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
   return `<rect class="${cls}" x="${v.x0}" y="${v.y0}" width="${v.x1 - v.x0}" height="${v.y1 - v.y0}"/>`;
 }
+// What the analysis ignores as film holder, while Show areas is on. A custom area is measured as drawn.
+const holderKey = () => [...current.settings.estimate.base_rgb, adj().straighten].join();
+const holderKnown = () => current.holder?.key === holderKey();
+function holderAreas() {
+  return tool === "show" && !hints().analysis && holderKnown() ? current.holder.areas : [];
+}
+function showHolderLegend() {
+  $("holder-legend").hidden = !holderAreas().length;
+  if (tool !== "show") return;
+  // Until the holder is known, keep the full text so it doesn't change under the reader.
+  const noHolder = hints().analysis || (holderKnown() && !current.holder.areas.length);
+  $("tool-text").textContent = noHolder ? "Showing the film base, measured area, and final crop." : TOOL_TEXT.show;
+}
+function holderShape() {
+  const areas = holderAreas();
+  if (!areas.length) return "";
+  const a = adj();
+  const d = areas.map((r) => {
+    const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
+    return `M${v.x0} ${v.y0}H${v.x1}V${v.y1}H${v.x0}Z`;
+  }).join("");
+  // Hatched, because a holder can show in any color, and a tint would read as one of the others.
+  return `<pattern id="holder-hatch" width="0.016" height="0.016" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hatch" width="0.006" height="0.016"/></pattern><path class="holder" d="${d}"/>`;
+}
+async function loadHolder() {
+  const file = current.file, key = holderKey();
+  if (current.holder?.key === key) return;
+  const { base_rgb } = current.settings.estimate;
+  try {
+    const { areas } = await (await api("/api/holder", { file, base_rgb, straighten: adj().straighten })).json();
+    if (current?.file === file) current.holder = { key, areas };
+  } catch (e) {
+    if (current?.file === file) status(`Could not find the film holder: ${e.message}`);
+  }
+}
 function drawOverlay(drag) {
   if (!current || !tool) return;
   const e = current.settings.estimate;
-  let s = svgRect(e.area, "area") + svgRect(e.base_area, "base");
-  if (adj().crop) s += svgRect(adj().crop, "crop");
-  if (drag) s += `<rect class="drag" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
+  // The dashed measured area goes over the crop, so both show when they're the same rectangle.
+  let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(e.area, "area") + svgRect(e.base_area, "base");
+  if (drag) s += `<rect class="drag ${tool}" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
   $("overlay").innerHTML = s;
+  showHolderLegend();
 }
 
 let dragStart = null;
@@ -773,10 +877,14 @@ async function refresh() {
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
+    if (tool === "show") {
+      await loadHolder();
+      if (file !== current?.file) return;
+    }
     drawOverlay();
     histogram(img, clipped);
   } catch (e) {
-    if (file === current?.file) status(`Preview failed: ${e.message}`);
+    if (file === current?.file) status(`Could not update the preview: ${e.message}`);
   } finally {
     rendering = false;
     if (renderAgain) { renderAgain = false; refresh(); }

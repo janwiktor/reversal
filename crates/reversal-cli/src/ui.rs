@@ -7,7 +7,8 @@
 //! GET  /api/license                        the license text
 //! GET  /api/files                          raw files in the folder
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
-//! POST /api/estimate {file, hints}         re-run the analysis with manual areas
+//! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual areas
+//! POST /api/holder   {file, base_rgb, straighten}   where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
@@ -107,9 +108,19 @@ struct RollApply {
 }
 
 #[derive(Deserialize)]
+struct HolderJob {
+    file: String,
+    base_rgb: [f32; 3],
+    #[serde(default)]
+    straighten: f32,
+}
+
+#[derive(Deserialize)]
 struct EstimateJob {
     file: String,
     hints: Hints,
+    #[serde(default)]
+    straighten: f32,
 }
 
 /// Serve `dir` on `port`, or on a free port if it's 0. With `exit_with_stdin` the process ends
@@ -121,7 +132,7 @@ pub fn serve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dir = dir.canonicalize()?;
     let server = Server::http(("127.0.0.1", port))
-        .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
+        .map_err(|e| format!("could not use port {port}: {e}. Choose another with --port."))?;
     let port = server
         .server_addr()
         .to_ip()
@@ -283,8 +294,22 @@ impl State {
             (Method::Post, "/api/estimate") => {
                 let job: EstimateJob = read_body(req)?;
                 let loaded = self.ensure_loaded(&job.file)?;
-                let estimate = invert::estimate_on(&loaded.small, &job.hints);
-                Ok(json_resp(200, &json!(estimate)))
+                // Areas are on the straightened scan, so that's what gets measured.
+                let small = loaded.small.straighten(job.straighten);
+                Ok(json_resp(
+                    200,
+                    &json!({
+                        "estimate": invert::estimate_on(&small, &job.hints),
+                        "baseFound": invert::detect_base(&small).found,
+                    }),
+                ))
+            }
+            (Method::Post, "/api/holder") => {
+                let job: HolderJob = read_body(req)?;
+                let loaded = self.ensure_loaded(&job.file)?;
+                let small = loaded.small.straighten(job.straighten);
+                let areas = invert::holder_areas(&small, job.base_rgb);
+                Ok(json_resp(200, &json!({ "areas": areas })))
             }
             (Method::Post, "/api/preview") => {
                 let job: Job = read_body(req)?;
@@ -375,11 +400,12 @@ impl State {
         let sidecar = std::fs::read(self.folder.sidecar(file));
         let loaded = &self.cache[file];
         let auto = loaded.auto.clone();
-        let base_found = invert::detect_base(&loaded.small).found;
         let (current, warning) = match sidecar {
             Ok(bytes) => saved_settings(&bytes, &auto, &loaded.small),
             Err(_) => (auto.clone(), None),
         };
+        let straight = loaded.small.straighten(current.adjust.straighten);
+        let base_found = invert::detect_base(&straight).found;
         Ok(json_resp(
             200,
             &json!({
@@ -396,17 +422,8 @@ impl State {
         let loaded = self.ensure_loaded(&job.file)?;
         let full = job.full.then_some(NRect::FULL);
         let img = invert::convert_with(&loaded.small, &job.settings, full);
-        // Measured on the picture: a holder left in the scan is meant to go, not to be kept.
-        let picture = job
-            .settings
-            .adjust
-            .crop
-            .unwrap_or(job.settings.estimate.area);
-        let clipped = dng::clipped_share(&invert::convert_with(
-            &loaded.small,
-            &job.settings,
-            Some(picture),
-        ));
+        let clipped =
+            dng::clipped_share(&invert::picture_for_clipping(&loaded.small, &job.settings));
         let (profile, _) = reversal_core::profiles(&job.settings.adjust);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
         Ok(Response::from_data(jpeg)
@@ -462,7 +479,7 @@ impl State {
             self.folder.resolve(file)?;
         }
         if self.batch.is_running() {
-            return Err((409, "still saving the previous DNGs".to_string()));
+            return Err((409, "another task is still running".to_string()));
         }
         lock(&self.roll_readings).clear();
         let (folder, readings) = (self.folder.clone(), self.roll_readings.clone());
@@ -509,9 +526,7 @@ impl State {
                 move || {
                     let frames = std::mem::take(&mut *lock(&prepared));
                     if frames.len() < total {
-                        return Some(
-                            "Not every frame could be read, so nothing changed.".to_string(),
-                        );
+                        return Some("Could not read every frame, so nothing changed.".to_string());
                     }
                     apply_folder.apply_roll_base(&frames, base_rgb).err()
                 },
@@ -524,7 +539,7 @@ impl State {
 /// The roll's film base from the frames chosen to count.
 fn voted_base(bases: &[[f32; 3]]) -> Result<[f32; 3], (u16, String)> {
     if bases.is_empty() {
-        return Err((400, "choose at least one frame to measure from".to_string()));
+        return Err((400, "select at least one frame".to_string()));
     }
     Ok(invert::roll_base(bases))
 }

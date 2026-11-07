@@ -37,7 +37,7 @@ pub fn replaceable(out: &Path) -> Result<(), String> {
     match dng::is_reversal_positive(out) {
         Ok(true) => Ok(()),
         Ok(false) => Err(format!(
-            "{} exists and isn't a positive written by Reversal; refusing to replace it",
+            "{} already exists and wasn't written by Reversal. Move or rename it, then try again.",
             out.display()
         )),
         Err(e) => Err(format!("{}: {e}", out.display())),
@@ -59,13 +59,13 @@ pub fn output_paths(inputs: &[PathBuf], output: Option<&Path>) -> Result<Vec<Pat
         let target = resolved(&out);
         if sources.contains(&target) {
             return Err(format!(
-                "{} is a source file; refusing to overwrite it",
+                "{} is a source file. Choose another output.",
                 out.display()
             ));
         }
         if seen.contains(&target) {
             return Err(format!(
-                "more than one input would be written to {}",
+                "More than one input would be written to {}. Convert them to separate folders.",
                 out.display()
             ));
         }
@@ -125,7 +125,7 @@ mod tests {
         // Another camera's DNG under the chosen name: someone's scan.
         std::fs::write(&out, b"II*\0 another camera's raw").unwrap();
         let err = output_paths(&input, Some(&out)).unwrap_err();
-        assert!(err.contains("isn't a positive"), "{err}");
+        assert!(err.contains("wasn't written by Reversal"), "{err}");
         // A positive from an earlier run can be written again.
         let opts = dng::DngOptions {
             compression: Compression::None,

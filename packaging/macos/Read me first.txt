@@ -16,7 +16,7 @@ It doesn't connect to the internet: its window talks only to a program on your M
 
 Known limits
 Tested with Nikon D5100 scans of color negative film. Other cameras should open, but
-color was fitted to this camera. DNGs with lossy JPEG compression can't be read.
+color is tuned to this camera. DNGs with lossy JPEG compression can't be read.
 
 License
 Copyright (C) 2026 Jan Ambroziewicz. Reversal is free software under the GNU GPL,

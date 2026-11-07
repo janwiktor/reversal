@@ -119,6 +119,21 @@ The sensor database is under CC BY-NC-SA, so check its terms before shipping any
 | Frame detection and holder detection | Holder detection reached color error 7.79 and brightness error 8.79, no better than a plain centered cut | Remove both |
 | Centered area from 95% to 70% | Color error from 7.83 to 7.47. Brightness error 11.09 at 95%, where the area takes in holders, falling to 8.48 at 80% and 8.59 at 70%. At 85%: 7.63 and 8.69, with the lowest neutral cast, 3.77 | 85%, adjustable, with drawing by hand as the fallback |
 
+### Leaving the holder out of the measuring
+
+The first holder test above had only the D5100 frames, where 85% already clears the holder. A second camera, with square frames inside a 3:2 scan, keeps the holder inside any area wide enough to hold the frame. Blocked light reads near black in the scan, so it took the white point: 7 of 12 frames opened far too dark, with exposure anchors of 1.45–1.87 against 0.58–0.97 at a 55% area. Those 12 frames have no reference scans, so 55% is a comparison and not a target.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Tighter area on the second camera | Every frame settled by 55%. At 60%, 3 frames were still off | Too tight a default for frames that fill their scan |
+| Dense cells connected to the scan's edge, against every dense pixel | Exposure gap from the 55% result: from a mean of 0.45 and a worst of 1.02 to a mean of about 0.05 and a worst of 0.13. A plain density limit behaved about the same on these frames, but also takes dense picture inside the frame | Connected to the edge |
+| Density limit of 1.0, 1.2, 1.4 and 1.6 | 1.0 took real picture on 2 frames, growing the mask from 6.6% to 15.9% and from 0% to 7.8% of the scan. 1.6 left the anchor 0.22 off on 1 frame | 1.2 |
+| Margin around the holder, from 0 to 80 analysis pixels | Without one, the holder's soft edge misled the gray fit: 18.7 ΔE from the 55% result on 1 frame and 3.9 on another. At 10 to 40 pixels, about 0.6 and 1.0–1.5 | 20 on a 1,508-pixel side, as a share of the long side |
+| Masks on 44 frames, judged by eye at contact-sheet size, with no hand-labeled pixels | No holder missed and no main picture taken. 3 frames lost up to 0.2% of the scan on a neighboring frame at the edge, with no change in exposure. No mask reached the central 50% | Use by default. If dense cells reach the center, they aren't treated as holder |
+| Reference frames at each area, without and with the mask | At 85%, color error, brightness error and neutral cast didn't change (7.55, 8.67, 3.82). At 100%, 8.86, 16.80, 3.59 became 7.75, 8.76, 4.08. At 95%, 7.71, 10.92, 3.89 became 7.73, 8.81, 4.02 | Keep 85% as the default |
+
+The settings were chosen on these same frames, and the holders tested are opaque. A translucent holder or one that doesn't reach the scan's edge won't be found. A picture with dense areas touching the edge, as on a scan filled edge to edge, can lose them from the measuring. That's why the mask shows in Show areas, and a drawn area replaces it.
+
 ### Saturation and demosaic
 
 Measured against 8 hand-finished scans of one film stock.

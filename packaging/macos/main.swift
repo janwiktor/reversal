@@ -209,7 +209,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
 
     private func fail(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Reversal has to close"
+        alert.messageText = "Reversal needs to quit"
         alert.informativeText = message
         alert.runModal()
         NSApp.terminate(nil)

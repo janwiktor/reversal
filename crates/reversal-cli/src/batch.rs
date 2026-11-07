@@ -72,7 +72,7 @@ impl Batch {
         {
             let mut progress = lock(&self.0);
             if progress.running {
-                return Err("still saving the previous DNGs".to_string());
+                return Err("another task is still running".to_string());
             }
             *progress = Progress {
                 task,

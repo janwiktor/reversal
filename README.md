@@ -85,13 +85,13 @@ In the Mac app, choose a folder of scans. Without the app, open the web UI on a 
 
 Both save DNGs to a `positives` folder inside the folder you chose.
 
-Each frame remembers its settings as you change them. Tick several frames to save them together, each with its own settings; frames you haven't touched get the automatic conversion.
+Each frame remembers its settings as you change them. Select several frames to save them together, each with its own settings; frames you haven't touched get the automatic conversion.
 
-The centered measuring area doesn't suit full film strips: for those, draw the area and crop to it.
+The centered measuring area doesn't suit full film strips: for those, set a custom measured area and crop to it.
 
 ### Matching a roll
 
-Frames of one roll can share a film base. Choose Match film base under Setup, review what each frame reads, and decide which frames count; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Color curves and exposure stay each frame's own.
+Frames of one roll can share a film base. Choose Match film base… under Setup, review the film base measured on each frame, and select which frames to use; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Each frame keeps its own color analysis and Develop settings.
 
 ### Command line
 
@@ -106,9 +106,9 @@ Frames of one roll can share a film base. Choose Match film base under Setup, re
 | `--profile` | `neutral` (default), `flat` (low contrast, no clipping) or `vivid`. The DNG opens with this one and carries the others |
 | `--temperature`, `--tint`, `--saturation` | Color, −100 to +100 |
 | `--flip` | Mirror left-right, for scans made emulsion side up |
-| `--rotate`, `--straighten` | Quarter turns (0–3), and fine rotation in degrees |
-| `--area-percent` | Size of the centered area that color and exposure are measured on, default 85 |
-| `--crop-area` | Crop to that area; the default keeps the whole scan |
+| `--rotate`, `--straighten` | Quarter turns (0–3), and straighten in degrees |
+| `--area-percent` | Center size: the centered area where color and exposure are measured, default 85 |
+| `--crop-area` | Crop to the measured area; the default keeps the entire scan |
 | `--roll` | Measure one film base across the inputs and use it on each |
 | `--compression` | `ljpeg` (default) or `none` |
 | `-o` | Output file or folder; the default is `<name>-positive.dng` next to the input |
