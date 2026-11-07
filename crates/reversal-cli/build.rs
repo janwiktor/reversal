@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Stamps the binary with the commit it was built from, to tell builds of one version apart.
 //! The commit must stay out of DNGs, so one version's conversions stay bit-identical.
 

@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Local web UI: a small HTTP server on 127.0.0.1 serving one page and a JSON API.
 //! Requests from other sites are refused, see [`request_allowed`], and the page runs under a
 //! content security policy that allows only its own files, see [`CONTENT_SECURITY_POLICY`].
@@ -674,7 +676,7 @@ mod tests {
         let info = version_info();
         assert_eq!(info["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(info["version"].as_str().unwrap().split('.').count(), 3);
-        assert!(LICENSE_TEXT.contains("GNU GENERAL PUBLIC LICENSE"));
+        assert!(LICENSE_TEXT.contains("Mozilla Public License Version 2.0"));
     }
 
     #[test]

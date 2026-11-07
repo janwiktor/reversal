@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Runs real files through LibRaw, so a change in its behavior or a mistake in our bindings
 //! fails here. The raw file is written by the test: a small Bayer DNG with known pixels.
 #![cfg(feature = "libraw")]

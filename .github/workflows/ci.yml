@@ -67,7 +67,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      # Licenses that may ship in a GPL program, and no known vulnerabilities; see deny.toml.
+      # Licenses that may ship in an MPL program and through app stores, and no known
+      # vulnerabilities; see deny.toml.
       - name: Check licenses and advisories
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:

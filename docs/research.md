@@ -149,7 +149,7 @@ Measured against 8 hand-finished scans of one film stock.
 
 | Option | Pros | Cons | Outcome |
 | --- | --- | --- | --- |
-| [LibRaw](https://www.libraw.org/), [LGPL 2.1 or CDDL 1.0](https://third-party-mirror.googlesource.com/libraw/+/refs/heads/master/LICENSE) | Reads 1,000+ cameras and DNG; gives levels and matrices | New cameras need LibRaw updates | Chosen, under the LGPL: the CDDL isn't compatible with Reversal's GPL license |
+| [LibRaw](https://www.libraw.org/), [LGPL 2.1 or CDDL 1.0](https://third-party-mirror.googlesource.com/libraw/+/refs/heads/master/LICENSE) | Reads 1,000+ cameras and DNG; gives levels and matrices | New cameras need LibRaw updates | Chosen, under the CDDL in every build; see [License](#license) |
 | [Adobe DNG SDK](https://www.adobe.com/si/support/downloads/dng/dng_sdk.html), 1.7.1 build 2611 | Every DNG feature, including JPEG XL | Reads DNG only; terms [not stated on the download page](https://community.adobe.com/questions-563/adobe-dng-sdk-terms-of-use-licensing-182173) | Rejected |
 | [Adobe DNG Converter](https://www.adobe.com/si/support/downloads/dng/dng_sdk.html) | Adobe's camera coverage, with a command line | Separate install, macOS and Windows only | Fallback for users with unsupported cameras |
 | Convert in a raw editor first | No work for us | Extra manual step | Rejected |
@@ -204,6 +204,21 @@ The pipeline is per-pixel and runs in plain Rust. GPU work remains an untried op
 | Pixel work on all cores | A preview from 65 ms to 17 ms, a DNG from 1.1 s to 0.8 s, byte-identical to the earlier build on one NEF | Keep |
 | Decoding frames in parallel, with an OpenMP build of LibRaw | Twelve frames took 162 s, against 4.4 s with the development build and 6.1 s with the app's, each decoding one frame at a time | One decode at a time; the plain LibRaw we link isn't thread-safe either |
 | File size with lossless JPEG | About 62–64 MB for a 16 MP D5100 scan, on two frames. Other sizes and JPEG XL weren't measured | No change |
+
+### License
+
+The aim was a program that stays open source and can be published and sold in app stores. Reversal has one copyright holder and no code ported from other programs, so it could change license.
+
+| Option | Pros | Cons | Outcome |
+| --- | --- | --- | --- |
+| GPL with added permissions | The whole program stays open | Anyone passing it on can remove an added permission (GPL section 7), and LibRaw's LGPL option asks that users can relink it, which is hard to offer through an app store | Rejected |
+| [MPL 2.0](https://www.mozilla.org/en-US/MPL/2.0/) | Changes to existing files stay open. Section 3.2 lets the executable go under different terms as long as recipients' source rights stay intact. No conflict with LibRaw under the [CDDL 1.0](https://opensource.org/license/cddl-1-0), whose section 3.5 says much the same | New files in a fork may be closed | Chosen |
+| Permissive licenses | Fewest conditions on distribution | Improvements can be closed entirely | Rejected |
+| Source-available | Full control over selling it | Not open source | Rejected |
+
+There's App Store precedent for the MPL: [VLC for iOS returned in 2013](https://www.videolan.org/press/ios2out.html) with the MPL 2.0 as the license for that distribution, and [Firefox for iOS](https://github.com/mozilla-mobile/firefox-ios/blob/main/LICENSE) is under it.
+
+The effect is on licenses and notices only: LibRaw's version and build options stay the same, the source of LibRaw and the crates stays attached to each release, as CDDL section 3.1 and MPL section 3.2 require, and DNGs stayed byte-identical on three test files.
 
 ## Sources
 

@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Interleaved floating-point RGB image buffer.
 
 /// Linear RGB image, interleaved, row-major. Values are relative to sensor white (1.0).

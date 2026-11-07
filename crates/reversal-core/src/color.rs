@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Color-space matrices for the output DNG (linear Rec.2020) and previews (sRGB).
 
 pub type Mat3 = [[f64; 3]; 3];
