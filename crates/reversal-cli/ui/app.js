@@ -493,8 +493,8 @@ function showRollFlow() {
   const count = roll.files?.length ?? 0;
   if (roll.step === "intro") {
     const scope = selected.size ? `the ${count} selected frame${count > 1 ? "s" : ""}` : `all ${count} frames in this folder`;
-    body.innerHTML = `<p>In roll mode, all frames will share the same film base selection. Use it to unify analysis across the roll, or when some of the scans don't have a visible film edge.</p>
-      <p>Reversal measures the film base on <b></b>. Nothing changes yet. You can choose between detected and custom selection on each frame, and choose which frames to use for the roll.</p>
+    body.innerHTML = `<p>In roll mode, all frames will share the same film base selection. Use it to unify the film base setting across the roll, or when some of the scans don't have a visible film edge.</p>
+      <p>Reversal measures the film base on <b></b>. You can include both detected and custom film base selection on each frame, and pick which frames to use for the roll. You can verify and apply changes in the next step.</p>
       <p>Each frame keeps its own color curves and exposure.</p>`;
     body.querySelector("b").textContent = scope;
     if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Select at least two frames, or none to use the whole folder.</p>`);
