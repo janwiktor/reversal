@@ -91,7 +91,7 @@ The centered measuring area doesn't suit full film strips: for those, set a cust
 
 ### Matching a roll
 
-Frames of one roll can share a film base. Choose Match film base… under Setup, review the film base measured on each frame, and select which frames to use; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Each frame keeps its own color curves and exposure.
+Frames of one roll can share a film base. Choose Match film base… under Setup, review the film base measured on each frame, and select which frames to use; or pass `--roll` on the command line. This helps most when some scans don't show the unexposed edge of the film, as long as most of them do. Each frame keeps its own color analysis and Develop settings.
 
 ### Command line
 
