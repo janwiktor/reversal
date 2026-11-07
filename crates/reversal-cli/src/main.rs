@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! `reversal` — convert film negative scans to positive LinearRaw DNGs.
 
 mod batch;
@@ -20,11 +22,12 @@ use reversal_core::render::Look;
     long_version = concat!(
         env!("REVERSAL_VERSION_LABEL"),
         "\nCopyright (C) 2026 Jan Ambroziewicz\n",
-        "License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\n",
-        "This is free software: you are free to change and redistribute it.\n",
+        "Reversal is under the Mozilla Public License 2.0 <https://mozilla.org/MPL/2.0/>.\n",
+        "Source code: <https://github.com/janwiktor/reversal>.\n",
         "There is NO WARRANTY, to the extent permitted by law.\n",
-        "Uses LibRaw, Copyright (C) 2008-2025 LibRaw LLC, under the GNU LGPL 2.1\n",
-        "<https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>.\n",
+        "Uses LibRaw, Copyright (C) 2008-2025 LibRaw LLC, under the CDDL 1.0\n",
+        "<https://opensource.org/license/cddl-1-0>. Its source code is available from\n",
+        "<https://www.libraw.org/download>.\n",
         "Includes DNG technology under license by Adobe."
     ),
     about = "Convert film negative scans into positive raw DNGs"

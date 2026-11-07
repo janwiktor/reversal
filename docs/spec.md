@@ -208,14 +208,14 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 | Need | Choice | Note |
 | --- | --- | --- |
 | Language | Rust, stable, Cargo workspace | Memory-safe parsing of untrusted files |
-| Raw decoding | LibRaw over its C API | System library in development; in the Mac app, 0.22.3 built in statically under the LGPL 2.1, without OpenMP, lcms or libjpeg |
+| Raw decoding | LibRaw over its C API, under the CDDL 1.0 in every build | System library in development; in the Mac app, 0.22.3 built in statically, without OpenMP, lcms or libjpeg |
 | DNG writing | Our own minimal writer, including lossless JPEG | No Adobe SDK in the product |
 | JPEG previews | `jpeg-encoder` | Always without chroma subsampling |
 | Web server | `tiny_http` | One small dependency, no framework |
 | Settings and arguments | `serde`, `serde_json`, `clap` |  |
 | Web UI | Plain HTML, CSS and JS | No frontend build step |
 | Mac app | Swift, Cocoa and WKWebView | arm64, macOS 13 or later, ad hoc signed; building it needs Xcode |
-| License | GNU GPL, version 3 or later | Forks and improvements stay open; the photo in the README screenshot isn't covered |
+| License | Mozilla Public License 2.0 | Open source, can be sold in app stores, and improvements to existing files stay open; the photo in the README screenshot isn't covered |
 | Tests | `cargo test`, on small synthetic images | CI runs them on Linux and macOS; golden reference images aren't built yet |
 
 ## Known limits

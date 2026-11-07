@@ -19,11 +19,11 @@ Tested with Nikon D5100 scans of color negative film. Other cameras should open,
 color is tuned to this camera. DNGs with lossy JPEG compression can't be read.
 
 License
-Copyright (C) 2026 Jan Ambroziewicz. Reversal is free software under the GNU GPL,
-version 3 or later, with no warranty. The license and the licenses of what's inside
-are in the app, under Contents/Resources/Licenses.
+Copyright (C) 2026 Jan Ambroziewicz. Reversal is under the Mozilla Public License 2.0,
+with no warranty. The license and the licenses of what's inside are in the app, under
+Contents/Resources/Licenses.
 Source code: https://github.com/janwiktor/reversal
 This product includes DNG technology under license by Adobe.
-RAW decoding uses LibRaw, copyright (C) 2008-2025 LibRaw LLC, under the GNU LGPL 2.1;
-see LICENSE.LGPL in the same folder. Each release also includes the source of LibRaw and
-of the Rust crates in the app.
+RAW decoding uses LibRaw, copyright (C) 2008-2025 LibRaw LLC, under the CDDL 1.0;
+see LICENSE.CDDL and LibRaw.txt in the same folder. Each release also includes the source
+of LibRaw and of the Rust crates in the app.

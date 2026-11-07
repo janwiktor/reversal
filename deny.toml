@@ -1,5 +1,6 @@
-# `cargo deny check`, run by CI: every crate's license has to be one that may ship in a GPL
-# program, no crate may carry a known vulnerability, and every crate has to come from crates.io.
+# `cargo deny check`, run by CI: every crate's license has to be one that may ship in an MPL
+# program and through app stores, no crate may carry a known vulnerability, and every crate has
+# to come from crates.io.
 
 [graph]
 all-features = true
@@ -9,7 +10,7 @@ yanked = "deny"
 
 [licenses]
 allow = [
-  "GPL-3.0-or-later",
+  "MPL-2.0",
   "MIT",
   "Apache-2.0",
   "Unicode-3.0",

@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Lossless JPEG (ITU T.81 process 14, "LJPEG-92") encoder for DNG tiles.
 //!
 //! 16-bit samples, interleaved components, predictor 1 (left), one Huffman table

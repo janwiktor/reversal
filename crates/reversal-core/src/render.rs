@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Display rendering: linear Rec.2020 → tone curve in ProPhoto → sRGB. Used for UI previews
 //! and the previews embedded in the DNG. Raw editors render the DNG themselves; this only
 //! approximates them with the same tone curve the DNG's main profile carries.

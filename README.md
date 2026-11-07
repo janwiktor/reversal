@@ -129,8 +129,8 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 
 ## License
 
-Copyright © 2026 Jan Ambroziewicz. Reversal is free software under the [GNU General Public License](LICENSE), version 3 or later, with no warranty. If you share a changed version, share its source under the same license. The photo in the screenshot isn't covered by this license.
+Copyright © 2026 Jan Ambroziewicz. Reversal is under the [Mozilla Public License 2.0](LICENSE), with no warranty. If you share a changed version, your changes to existing files stay open under the same license; new files of your own may be under other terms. The photo in the screenshot isn't covered by this license. Releases 0.1.0 to 0.1.2 remain available under the GPL they were published with.
 
 This product includes DNG technology under license by Adobe.
 
-RAW decoding uses [LibRaw](https://www.libraw.org/), under the GNU LGPL 2.1. It's a system library when you build from source, and built into the Mac app. Each release includes the source of LibRaw and of the Rust crates in the app. LibRaw is copyright © 2008-2025 LibRaw LLC.
+RAW decoding uses [LibRaw](https://www.libraw.org/), under the CDDL 1.0, with its source available. It's a system library when you build from source, and built into the Mac app. Each release includes the source of LibRaw and of the Rust crates in the app. LibRaw is copyright © 2008-2025 LibRaw LLC.

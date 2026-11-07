@@ -137,14 +137,19 @@ packaging/macos/build.sh                    # Mac app disk image in dist/
 
 ## License
 
-- Reversal is under `GPL-3.0-or-later`, and new dependencies must be compatible with it. CI runs
-  `cargo deny check` against the licenses allowed in `deny.toml` and the advisory database;
-  add a license there only after checking that it is compatible with the GPL.
-- The Mac app links LibRaw statically, under LibRaw's LGPL 2.1 option. Never its CDDL option,
-  which isn't compatible with the GPL. Each release carries the source of LibRaw and the crates.
+- Reversal is under `MPL-2.0`. New dependencies must be compatible with it and with distribution
+  through app stores, so no GPL or LGPL dependency gets linked in. CI runs `cargo deny check`
+  against the licenses allowed in `deny.toml` and the advisory database; add a license there only
+  after checking both.
+- Every first-party source file starts with the MPL's Exhibit A notice, after any shebang or
+  doctype, and new files need it too. Don't add Exhibit B: the code stays compatible with Secondary
+  Licenses.
+- Every build uses LibRaw under its CDDL 1.0 option, whether it's linked statically in the Mac app
+  or as a system library. Never its LGPL 2.1 option. Each release carries the source of LibRaw and
+  the crates: the CDDL (3.1) and the MPL (3.2) ask that the source be available and that recipients
+  be told how to get it.
 - Keep the notices in the web UI's About dialog, `Info.plist`, `--version`, `Read me first.txt` and
-  the README in step. The Adobe DNG notice and LibRaw's copyright stay in all of them, as the LGPL
-  asks of a program that displays copyright notices.
+  the README in step. The Adobe DNG notice and LibRaw's copyright stay in all of them.
 
 ## Experiments and docs
 

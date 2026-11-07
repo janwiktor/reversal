@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // Reversal.app: a window around the local web UI. All the work happens in `reversal-engine`,
 // the same program as the `reversal` command line; this file only adds what a web page can't
 // do itself: start the engine, choose a folder and show a file in Finder.

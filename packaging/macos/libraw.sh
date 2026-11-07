@@ -1,3 +1,5 @@
+# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # Builds the LibRaw that goes in the Mac app, in "$build", unless it's already there. Sourced
 # by build.sh and by CI, so the tests run against the same library the app ships with.
 # Sets prefix, source_dir, LIBRAW_VERSION and MACOS_TARGET.

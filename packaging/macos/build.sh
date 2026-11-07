@@ -1,4 +1,6 @@
 #!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # Builds dist/Reversal-<version>-arm64.dmg: an ad hoc signed app with LibRaw built in.
 # Needs Rust, pkgconf and Xcode (for the icon); no Homebrew libraries end up in the app.
 set -euo pipefail
@@ -52,11 +54,11 @@ fi
 
 # Licenses of what's inside.
 licenses="$app/Contents/Resources/Licenses"
-cp "$root/LICENSE" "$licenses/Reversal GPL-3.0.txt"
-# LibRaw offers two licenses. It has to be the LGPL: the CDDL isn't compatible with the GPL.
-cp "$source_dir/LICENSE.LGPL" "$source_dir/COPYRIGHT" "$licenses/"
+cp "$root/LICENSE" "$licenses/Reversal MPL-2.0.txt"
+# LibRaw offers two licenses. It's the CDDL in every build, which lets the app go through app stores.
+cp "$source_dir/LICENSE.CDDL" "$source_dir/COPYRIGHT" "$licenses/"
 {
-  echo "LibRaw $LIBRAW_VERSION is used under the GNU LGPL 2.1, see LICENSE.LGPL."
+  echo "LibRaw $LIBRAW_VERSION is used under the CDDL 1.0, see LICENSE.CDDL."
   echo "Its source code is attached to each release of Reversal, and is at"
   echo "https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
 } >"$licenses/LibRaw.txt"

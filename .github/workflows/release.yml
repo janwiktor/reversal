@@ -55,8 +55,9 @@ jobs:
           path: assets
       - name: Add the checksum and the source of what's in the app
         run: |
-          # The GPL asks for the source of everything in the app. GitHub adds this repo's own to
-          # the release, and these are the rest: LibRaw and the Rust crates.
+          # The MPL (3.2) and the CDDL (3.1) ask that the source be available and that recipients be
+          # told how to get it. GitHub adds this repo's own to the release, and these are the rest:
+          # LibRaw and the Rust crates.
           version="${GITHUB_REF_NAME#v}"
           cargo vendor --locked vendor >/dev/null
           tar -czf "assets/Reversal-$version-rust-crates-source.tar.gz" vendor
