@@ -18,6 +18,16 @@ const RAW_EXTENSIONS: &[&str] = &[
     "nef", "nrw", "cr2", "cr3", "arw", "raf", "rw2", "orf", "pef", "srw", "dng",
 ];
 
+/// Whether a file of this name is a frame to invert.
+pub fn is_scan_name(name: &str) -> bool {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    RAW_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+        && !name.to_ascii_lowercase().ends_with(POSITIVE_SUFFIX)
+}
+
 pub struct Folder {
     pub dir: PathBuf,
     out_dir: PathBuf,
@@ -126,14 +136,7 @@ impl Folder {
             .flatten()
             .filter(|e| e.path().is_file())
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| {
-                let ext = Path::new(n)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("");
-                RAW_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
-                    && !n.to_ascii_lowercase().ends_with(POSITIVE_SUFFIX)
-            })
+            .filter(|n| is_scan_name(n))
             .collect();
         files.sort();
         files

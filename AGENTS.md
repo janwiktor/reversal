@@ -9,6 +9,7 @@ One shared engine serves every front end:
 
 1. **CLI and local web UI** — the `reversal` binary.
 2. **Mac app** — a small window around the web UI, with the same binary as its engine.
+3. **iPad app (prototype)** — the same page around the same engine, linked into the app.
 
 Key design decisions: input is camera raw or
 DNG via LibRaw; output is a **positive, scene-linear LinearRaw DNG** (16-bit, linear
@@ -26,7 +27,9 @@ works like, is taken from, or matches, another product. Clean implementation bas
 crates/reversal-core/   Conversion engine — decode, invert, DNG writer; no UI, no host APIs
 crates/reversal-cli/    `reversal` binary: `convert` command + `ui` (local web UI server)
 crates/reversal-cli/ui/ Web UI assets (plain HTML/JS, embedded in the binary)
+crates/reversal-ios/    The engine as a static library with a C interface, for the iPad app
 packaging/macos/        Mac app: a small Swift window around the UI, with the binary as its engine
+packaging/ios/          iPad app prototype: Xcode project, Swift shell, engine build script
 Samples/              Local sample scans (git-ignored)
 ```
 
@@ -82,6 +85,7 @@ Rules:
 - Own minimal **DNG writer** in `reversal-core` (no Adobe DNG SDK in the product).
 - **Web UI:** plain HTML/CSS/JS served by the `reversal ui` command; no frontend build step.
 - **Mac app:** `packaging/macos/build.sh`. The window adds only what a page can't do (start the engine, choose a folder), so features belong in the engine and the page, not in Swift.
+- **iPad app:** `packaging/ios/Reversal.xcodeproj`. iOS can't start another process, so the same server runs on a thread of the app. The Swift shell adds only access to files outside the app and handing DNGs to Files, Photos and other apps. Its build phase runs `packaging/ios/engine.sh`, which builds LibRaw and `reversal-ios` for the SDK.
 
 ## Commands
 
@@ -92,6 +96,8 @@ cargo fmt && cargo clippy --all-targets -- -D warnings    # format and lint
 cargo run --release -- convert Samples/_DSC5384.NEF -o out.dng   # convert one file
 cargo run --release -- ui Samples           # web UI at http://127.0.0.1:8787
 packaging/macos/build.sh                    # Mac app disk image in dist/
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim   # once, for the iPad app
+open packaging/ios/Reversal.xcodeproj       # iPad app; for a device, set DEVELOPMENT_TEAM in packaging/ios/Local.xcconfig
 ```
 
 ## CI

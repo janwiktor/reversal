@@ -1,0 +1,15 @@
+[package]
+name = "reversal-ios"
+description = "Reversal engine as a library, for the iOS app that can't start it as a process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+reversal-cli = { path = "../reversal-cli" }

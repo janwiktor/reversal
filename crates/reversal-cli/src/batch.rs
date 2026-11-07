@@ -34,6 +34,8 @@ pub struct Progress {
     pub canceled: bool,
     /// The latest file written.
     pub last_path: Option<String>,
+    /// Every file written, for a shell that hands them to other apps.
+    pub saved_paths: Vec<String>,
     pub running: bool,
     #[serde(skip)]
     queue: VecDeque<String>,
@@ -155,6 +157,7 @@ impl Batch {
                     report(warning);
                 }
                 progress.done += 1;
+                progress.saved_paths.push(done.path.clone());
                 progress.last_path = Some(done.path);
             }
             Err(message) => {
@@ -222,6 +225,7 @@ mod tests {
         assert_eq!(status["done"], 2);
         assert_eq!(status["failed"], 1);
         assert_eq!(status["issues"].as_array().unwrap().len(), 2);
+        assert_eq!(status["saved_paths"], serde_json::json!(["f1", "f2"]));
     }
 
     #[test]

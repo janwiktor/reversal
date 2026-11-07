@@ -204,6 +204,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reversal-ios"
+version = "0.2.0"
+dependencies = [
+ "reversal-cli",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
