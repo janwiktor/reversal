@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "reversal-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "clap",
  "reversal-core",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "reversal-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "jpeg-encoder",
  "pkg-config",
