@@ -5,7 +5,7 @@ const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "bla
 const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "vivid"];
 const TOOL_TEXT = {
-  crop: "Drag to crop the area for the final DNG export.",
+  crop: "Adjust area for the final DNG export.",
   area: "Drag over the exposed image only, avoiding film base, film holder or sprocket holes. This area drives negative conversion, and doesn't affect final crop.",
   base: "Drag over clear unexposed part of the film, avoiding sprocket holes, numbers and film stock markings.",
   show: "Showing the film base, measured area, final crop, and auto-detected film holder area excluded from analysis.",
@@ -13,6 +13,7 @@ const TOOL_TEXT = {
 
 let current = null;   // { file, auto, settings }
 let tool = null;      // null | "crop" | "area" | "base" | "show"
+let cropDraft = null;  // the open crop frame in scan coordinates; applied by Done or Enter
 let timer = null;
 let saveTimer = null;
 let opening = null;       // the frame being loaded
@@ -177,6 +178,7 @@ function rememberSoon() {
 }
 
 async function open(name) {
+  applyOpenCrop();
   try {
     await measureSettled();
     await rememberSettings(true);
@@ -293,12 +295,13 @@ for (const id of [...SLIDERS, "straighten"]) {
   $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; if (id === "straighten") straightenMoved(); changed(0); } });
 }
 
-// A new angle closes the areas, which no longer fit, and measures again once it settles: on letting
+// A new angle closes the areas, which no longer fit, but not the crop frame, since straightening and
+// cropping go together. It measures again once it settles: on letting
 // go of the slider, or after a short pause for arrow keys and typed values. Never while it's held.
 const STRAIGHTEN_PAUSE_MS = 300;
 let straightenTimer = null, straightenHeld = false, straightenUnmeasured = false;
 function straightenMoved() {
-  if (tool) setTool(null);
+  if (tool && tool !== "crop") setTool(null);
   straightenUnmeasured = true;
   clearTimeout(straightenTimer);
   if (!straightenHeld) straightenTimer = setTimeout(measureStraightened, STRAIGHTEN_PAUSE_MS);
@@ -389,25 +392,34 @@ $("flip").addEventListener("click", () => {
 $("rotate").addEventListener("click", () => { if (current) { adj().rotate = (adj().rotate + 1) % 4; changed(0); } });
 
 // Choosing anything else cancels an unfinished drawing. Show areas stays open to show the result.
+// Only another crop choice cancels the crop frame: other tools apply it first.
 function cancelDrawing() {
   if (tool && tool !== "show") setTool(null);
 }
-$("crop-full").addEventListener("click", () => { if (current) { cancelDrawing(); adj().crop = null; changed(0); } });
-$("crop-frame").addEventListener("click", () => { if (current) { cancelDrawing(); adj().crop = { ...current.settings.estimate.area }; changed(0); } });
-$("crop-draw").addEventListener("click", () => { if (current) setTool(tool === "crop" ? null : "crop"); });
-$("area-draw").addEventListener("click", () => { if (current) setTool(tool === "area" ? null : "area"); });
-$("base-draw").addEventListener("click", () => { if (current) setTool(tool === "base" ? null : "base"); });
-$("show-areas").addEventListener("click", () => { if (current) setTool(tool === "show" ? null : "show"); });
+$("crop-full").addEventListener("click", () => { if (current) { cancelDrawing(); setCrop(null); changed(0); } });
+$("crop-frame").addEventListener("click", () => { if (current) { cancelDrawing(); setCrop({ ...current.settings.estimate.area }); changed(0); } });
+$("crop-draw").addEventListener("click", () => { if (current && tool !== "crop") setTool("crop"); });
+function toggleTool(t) {
+  if (!current) return;
+  applyOpenCrop();
+  setTool(tool === t ? null : t);
+}
+$("area-draw").addEventListener("click", () => toggleTool("area"));
+$("base-draw").addEventListener("click", () => toggleTool("base"));
+$("show-areas").addEventListener("click", () => toggleTool("show"));
 $("area-auto").addEventListener("click", () => {
+  applyOpenCrop();
   cancelDrawing();
   if (current && hints().analysis) setHint("analysis", null);
 });
 $("base-auto").addEventListener("click", () => {
+  applyOpenCrop();
   cancelDrawing();
   if (current && (hints().base || hints().base_rgb)) setHint("base", null);
 });
 $("base-roll").addEventListener("click", openRollFlow);
-$("tool-done").addEventListener("click", () => setTool(null));
+$("tool-cancel").addEventListener("click", () => setTool(null));
+$("tool-done").addEventListener("click", () => { if (tool === "crop") applyCrop(); else setTool(null); });
 document.addEventListener("keydown", (e) => {
   if ($("roll-flow").open || $("about").open) return;
   if (e.key === "Escape") {
@@ -420,6 +432,20 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (batch?.task !== "save" && !$("export").disabled) $("export").click();
     return;
+  }
+  if (tool === "crop") {
+    // A button reached with the keyboard keeps its own Enter.
+    if (e.key === "Enter" && !e.target.matches("button:not(.crop-h):focus-visible")) {
+      e.preventDefault();
+      applyCrop();
+      return;
+    }
+    const step = CROP_NUDGE[e.key];
+    if (step && !e.target.matches("input[type=range], input[type=text]")) {
+      e.preventDefault();
+      nudgeCrop(step, e.shiftKey ? 10 : 1, e.target.dataset?.edge);
+      return;
+    }
   }
   // Up and down walk the frames, unless a slider or text box has the keys.
   if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.target.matches("input[type=range], input[type=text]")) {
@@ -445,6 +471,7 @@ $("export").addEventListener("click", async () => {
     if (batch.task === "save") api("/api/export/cancel", {}).catch(() => {});
     return;
   }
+  applyOpenCrop();
   const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
   if (!files.length) return;
   $("reveal").hidden = true;
@@ -755,9 +782,18 @@ async function measureNow(done, clearsWarning) {
 // Region tools show the whole scan (straightened, mirrored, rotated) with the areas drawn on it.
 function setTool(t) {
   tool = t;
-  $("overlay").toggleAttribute("hidden", !t); // SVG elements don't reflect .hidden
+  cropDraft = t === "crop" ? { ...cropToAdjust() } : null;
+  cropDrag = null;
+  // The crop frame shows once the entire scan is on screen.
+  $("crop-layer").hidden = true;
+  $("crop-layer").style.cursor = "";
+  $("overlay").toggleAttribute("hidden", !t || t === "crop"); // SVG elements don't reflect .hidden
   $("toolbar").hidden = !t;
   $("tool-text").textContent = TOOL_TEXT[t] ?? "";
+  $("tool-cancel").hidden = t === "show";
+  $("tool-done").hidden = t === "area" || t === "base";
+  $("tool-done").title = t === "crop" ? "Enter" : "Esc";
+  $("tool-done").setAttribute("aria-keyshortcuts", t === "crop" ? "Enter" : "Escape");
   if (current) changed(0);
 }
 
@@ -826,6 +862,14 @@ async function loadHolder() {
 }
 function drawOverlay(drag) {
   if (!current || !tool) return;
+  if (tool === "crop") {
+    drawCropFrame();
+    if ($("crop-layer").hidden) {
+      $("crop-layer").hidden = false;
+      $("crop-box").focus({ preventScroll: true });
+    }
+    return;
+  }
   const e = current.settings.estimate;
   // The dashed measured area goes over the crop, so both show when they're the same rectangle.
   let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(e.area, "area") + svgRect(e.base_area, "base");
@@ -836,11 +880,11 @@ function drawOverlay(drag) {
 
 let dragStart = null;
 const eventPoint = (ev) => {
-  const b = $("overlay").getBoundingClientRect();
+  const b = $("view").getBoundingClientRect();
   return [Math.min(1, Math.max(0, (ev.clientX - b.left) / b.width)), Math.min(1, Math.max(0, (ev.clientY - b.top) / b.height))];
 };
 $("overlay").addEventListener("pointerdown", (ev) => {
-  if (!["crop", "area", "base"].includes(tool)) return;
+  if (!["area", "base"].includes(tool)) return;
   dragStart = eventPoint(ev);
   $("overlay").setPointerCapture(ev.pointerId);
 });
@@ -855,9 +899,130 @@ $("overlay").addEventListener("pointerup", (ev) => {
   const a = adj();
   const scan = rectFromPoints(viewToScan([view.x0, view.y0], a), viewToScan([view.x1, view.y1], a));
   const t = tool;
-  if (t === "crop") { a.crop = scan; setTool(null); }
-  else { setTool(null); setHint(t === "area" ? "analysis" : "base", scan); }
+  setTool(null);
+  setHint(t === "area" ? "analysis" : "base", scan);
 });
+
+// ---------- Crop frame ----------
+// The draft stays in scan coordinates so it follows a rotate or mirror. Drags work in the displayed
+// view, where 0–1 spans the entire scan as shown.
+const FULL_SCAN = { x0: 0, y0: 0, x1: 1, y1: 1 };
+const CROP_MIN_PX = 40;      // so the frame's handles stay usable
+const CROP_DRAW_MIN_PX = 4;  // a shorter drag is a click, which leaves the frame alone
+const CROP_NUDGE = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+let cropDrag = null;  // { kind: "move" | "draw" | an edge, start: view point, from: view rect }
+
+const isCustomCrop = (c) => c && !sameRect(c, current.settings.estimate.area);
+// A custom crop stays with the frame when another crop replaces it, so Custom can bring it back.
+function setCrop(crop) {
+  if (isCustomCrop(adj().crop)) current.settings.custom_crop = adj().crop;
+  adj().crop = crop;
+}
+function cropToAdjust() {
+  const crop = adj().crop;
+  return isCustomCrop(crop) ? crop : current.settings.custom_crop ?? crop ?? FULL_SCAN;
+}
+function applyCrop() {
+  setCrop(sameRect(cropDraft, FULL_SCAN) ? null : cropDraft);
+  setTool(null);
+}
+function applyOpenCrop() {
+  if (tool === "crop" && current) applyCrop();
+}
+const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
+function cropView() {
+  const a = adj();
+  return rectFromPoints(scanToView([cropDraft.x0, cropDraft.y0], a), scanToView([cropDraft.x1, cropDraft.y1], a));
+}
+function setCropView(v) {
+  const a = adj();
+  cropDraft = rectFromPoints(viewToScan([v.x0, v.y0], a), viewToScan([v.x1, v.y1], a));
+  drawCropFrame();
+}
+const cropFills = (v) => v.x1 - v.x0 > 0.999 && v.y1 - v.y0 > 0.999;
+function drawCropFrame() {
+  const v = cropView();
+  for (const el of [$("crop-box"), $("crop-hole")]) {
+    el.style.left = `${v.x0 * 100}%`;
+    el.style.top = `${v.y0 * 100}%`;
+    el.style.width = `${(v.x1 - v.x0) * 100}%`;
+    el.style.height = `${(v.y1 - v.y0) * 100}%`;
+  }
+  $("crop-box").classList.toggle("fills", cropFills(v));
+}
+function cropMinSize() {
+  const b = $("view").getBoundingClientRect();
+  return [Math.min(1, CROP_MIN_PX / b.width), Math.min(1, CROP_MIN_PX / b.height)];
+}
+function movedRect(v, dx, dy) {
+  const w = v.x1 - v.x0, h = v.y1 - v.y0;
+  const x0 = clamp(v.x0 + dx, 0, 1 - w), y0 = clamp(v.y0 + dy, 0, 1 - h);
+  return { x0, y0, x1: x0 + w, y1: y0 + h };
+}
+// `edge` names the sides that move: "n", "e", "s", "w", or a corner like "nw".
+function resizedRect(v, edge, dx, dy, keepShape) {
+  const [minW, minH] = cropMinSize();
+  const r = { ...v };
+  if (edge.includes("w")) r.x0 = clamp(v.x0 + dx, 0, v.x1 - minW);
+  if (edge.includes("e")) r.x1 = clamp(v.x1 + dx, v.x0 + minW, 1);
+  if (edge.includes("n")) r.y0 = clamp(v.y0 + dy, 0, v.y1 - minH);
+  if (edge.includes("s")) r.y1 = clamp(v.y1 + dy, v.y0 + minH, 1);
+  if (!keepShape || edge.length < 2) return r;
+  // Grow the short side to match, then shrink both if that would leave the scan.
+  const ratio = (v.x1 - v.x0) / (v.y1 - v.y0);
+  let w = r.x1 - r.x0, h = r.y1 - r.y0;
+  if (w / h > ratio) h = w / ratio; else w = h * ratio;
+  const fit = Math.min(1, (edge.includes("w") ? v.x1 : 1 - v.x0) / w, (edge.includes("n") ? v.y1 : 1 - v.y0) / h);
+  w *= fit; h *= fit;
+  if (edge.includes("w")) r.x0 = v.x1 - w; else r.x1 = v.x0 + w;
+  if (edge.includes("n")) r.y0 = v.y1 - h; else r.y1 = v.y0 + h;
+  return r;
+}
+function drawnRect(p, q) {
+  const [minW, minH] = cropMinSize();
+  const r = rectFromPoints(p, q);
+  if (r.x1 - r.x0 < minW) { r.x1 = Math.min(1, r.x0 + minW); r.x0 = r.x1 - minW; }
+  if (r.y1 - r.y0 < minH) { r.y1 = Math.min(1, r.y0 + minH); r.y0 = r.y1 - minH; }
+  return r;
+}
+// Arrows move the frame, or the edge or corner that has focus.
+function nudgeCrop([dx, dy], px, edge) {
+  const b = $("view").getBoundingClientRect();
+  if (!b.width) return;
+  const v = cropView(), x = dx * px / b.width, y = dy * px / b.height;
+  setCropView(edge ? resizedRect(v, edge, x, y, false) : movedRect(v, x, y));
+}
+$("crop-layer").addEventListener("pointerdown", (ev) => {
+  if (tool !== "crop" || ev.button !== 0) return;
+  ev.preventDefault();
+  const from = cropView();
+  const edge = ev.target.closest("[data-edge]")?.dataset.edge;
+  // A frame filling the scan has nowhere to move, so dragging inside it draws a new one.
+  const kind = edge ?? (ev.target.closest("#crop-box") && !cropFills(from) ? "move" : "draw");
+  cropDrag = { kind, start: eventPoint(ev), from };
+  // The capture decides the cursor, so keep the one for what was grabbed.
+  $("crop-layer").style.cursor = getComputedStyle(ev.target).cursor;
+  $("crop-layer").setPointerCapture(ev.pointerId);
+  $("crop-box").focus({ preventScroll: true });
+});
+$("crop-layer").addEventListener("pointermove", (ev) => {
+  if (!cropDrag) return;
+  const { kind, start, from } = cropDrag;
+  const p = eventPoint(ev), dx = p[0] - start[0], dy = p[1] - start[1];
+  if (kind === "move") setCropView(movedRect(from, dx, dy));
+  else if (kind !== "draw") setCropView(resizedRect(from, kind, dx, dy, ev.shiftKey));
+  else {
+    const b = $("view").getBoundingClientRect();
+    if (Math.max(Math.abs(dx) * b.width, Math.abs(dy) * b.height) >= CROP_DRAW_MIN_PX) setCropView(drawnRect(start, p));
+    else setCropView(from);
+  }
+});
+for (const type of ["pointerup", "pointercancel"]) {
+  $("crop-layer").addEventListener(type, () => {
+    cropDrag = null;
+    $("crop-layer").style.cursor = "";
+  });
+}
 
 // ---------- Preview, fit and histogram ----------
 async function refresh() {
@@ -898,7 +1063,9 @@ function fit() {
   if (!img.naturalWidth) return;
   const stage = $("stage");
   const pad = 56;
-  const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - pad) / img.naturalHeight);
+  // An open tool's bar takes the top of the stage, so nothing on the image sits under it.
+  const padY = tool ? 112 : pad;
+  const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
   $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
   $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
 }

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use reversal_core::dng::Compression;
-use reversal_core::image::Rgb32;
+use reversal_core::image::{NRect, Rgb32};
 use reversal_core::invert::{self, Adjust, Hints, Settings, MODEL_VERSION};
 use serde::Serialize;
 
@@ -59,6 +59,8 @@ struct SavedChoices {
     hints: Hints,
     #[serde(default)]
     adjust: Adjust,
+    #[serde(default)]
+    custom_crop: Option<NRect>,
 }
 
 /// Settings from a sidecar, for a frame with analysis image `small` and automatic settings
@@ -89,6 +91,7 @@ pub fn saved_settings(
         choices.adjust,
     );
     settings.hints = choices.hints;
+    settings.custom_crop = choices.custom_crop;
     let warning = "These settings are from an older version, so colors were measured again. \
                    Check your adjustments.";
     (settings, Some(warning.to_string()))
@@ -219,6 +222,7 @@ impl Folder {
         match on_disk {
             Some(mut saved) => {
                 saved.adjust = settings.adjust.clone();
+                saved.custom_crop = settings.custom_crop;
                 self.write_settings(file, &saved)
             }
             None => self.write_settings(file, settings),
@@ -399,6 +403,36 @@ mod tests {
         assert_eq!(saved.adjust.exposure, 42.0);
         assert_eq!(saved.hints, rolled.hints);
         assert_eq!(saved.estimate.base_rgb, rolled.estimate.base_rgb);
+    }
+
+    #[test]
+    fn a_kept_custom_crop_survives_saving_and_never_marks_a_frame_edited() {
+        let temp = TempFolder::new("kept-crop");
+        let folder = &temp.0;
+        let area = NRect {
+            x0: 0.1,
+            y0: 0.2,
+            x1: 0.6,
+            y1: 0.7,
+        };
+        let mut kept = self::settings();
+        kept.custom_crop = Some(area);
+        folder.save_settings("a.NEF", &kept).unwrap();
+        assert!(!folder.frame_state("a.NEF").edited);
+
+        let mut next = self::settings();
+        next.custom_crop = Some(area);
+        folder.save_adjustments("a.NEF", &next).unwrap();
+        let bytes = std::fs::read(folder.sidecar("a.NEF")).unwrap();
+        let saved: Settings = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved.custom_crop, Some(area));
+
+        // An older model's sidecar is measured again, and the kept crop stays.
+        let mut old = serde_json::to_value(&kept).unwrap();
+        old["model"] = serde_json::json!(0);
+        let (auto, small) = (self::settings(), small_scan());
+        let (remeasured, _) = saved_settings(&serde_json::to_vec(&old).unwrap(), &auto, &small);
+        assert_eq!(remeasured.custom_crop, Some(area));
     }
 
     #[test]

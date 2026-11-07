@@ -26,7 +26,7 @@
     <div class="seg" role="group" aria-labelledby="crop-label" title="What the saved DNG keeps. This doesn't change the colors.">
       <button type="button" id="crop-full" aria-pressed="true">Entire scan</button>
       <button type="button" id="crop-frame" aria-pressed="false" title="Keep the area measured in Setup">Measured area</button>
-      <button type="button" id="crop-draw" aria-pressed="false" title="Draw what the saved DNG keeps. This doesn't change the colors.">Custom</button>
+      <button type="button" id="crop-draw" aria-pressed="false" title="Set what the saved DNG keeps">Custom</button>
     </div>
     <span class="sep"></span>
     <div class="slider"><label for="straighten">Straighten</label><input id="straighten" type="range" min="-10" max="10" step="0.1" value="0"><input class="val" id="straighten-val" type="text" inputmode="decimal" aria-label="Straighten value" value="0.0°"></div>
@@ -48,8 +48,21 @@
   <div id="view" hidden>
     <img id="photo" alt="Positive preview" draggable="false">
     <svg id="overlay" hidden viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div id="crop-layer" hidden>
+      <div id="crop-dim" aria-hidden="true"><div id="crop-hole"></div></div>
+      <div id="crop-box" tabindex="-1" role="group" aria-label="Crop frame">
+        <button type="button" class="crop-h n" data-edge="n" aria-label="Top edge"><i></i></button>
+        <button type="button" class="crop-h e" data-edge="e" aria-label="Right edge"><i></i></button>
+        <button type="button" class="crop-h s" data-edge="s" aria-label="Bottom edge"><i></i></button>
+        <button type="button" class="crop-h w" data-edge="w" aria-label="Left edge"><i></i></button>
+        <button type="button" class="crop-h nw" data-edge="nw" aria-label="Top left corner"><i></i></button>
+        <button type="button" class="crop-h ne" data-edge="ne" aria-label="Top right corner"><i></i></button>
+        <button type="button" class="crop-h se" data-edge="se" aria-label="Bottom right corner"><i></i></button>
+        <button type="button" class="crop-h sw" data-edge="sw" aria-label="Bottom left corner"><i></i></button>
+      </div>
+    </div>
   </div>
-  <div id="toolbar" hidden><span id="tool-text"></span><button type="button" class="btn" id="tool-done">Done</button></div>
+  <div id="toolbar" hidden><span id="tool-text"></span><span id="tool-actions"><button type="button" class="btn" id="tool-cancel" title="Esc" aria-keyshortcuts="Escape">Cancel</button><button type="button" class="btn" id="tool-done">Done</button></span></div>
   <p id="message">Choose a frame on the left to convert it.</p>
 </main>
 
