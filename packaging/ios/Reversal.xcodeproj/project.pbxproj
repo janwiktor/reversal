@@ -64,7 +64,7 @@
 				A10000000000000000000041 /* Sources */,
 				A10000000000000000000020 /* Frameworks */,
 				A10000000000000000000042 /* Resources */,
-				A10000000000000000000051 /* Stamp version */,
+				A10000000000000000000051 /* Finish app */,
 			);
 			buildRules = (
 			);
@@ -135,7 +135,7 @@
 			shellScript = "exec \"$PROJECT_DIR/engine.sh\" \"$PLATFORM_NAME\"\n";
 			showEnvVarsInLog = 0;
 		};
-		A10000000000000000000051 /* Stamp version */ = {
+		A10000000000000000000051 /* Finish app */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -143,12 +143,12 @@
 			);
 			inputPaths = (
 			);
-			name = "Stamp version";
+			name = "Finish app";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "exec \"$PROJECT_DIR/stamp-version.sh\"\n";
+			shellScript = "exec \"$PROJECT_DIR/finish-app.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! C interface for the iOS app. An iOS app can't start the `reversal` binary, so it runs the same
 //! web UI server on a thread of its own process. See `packaging/ios/Engine.h`.
 

@@ -733,11 +733,13 @@ mod tests {
     }
 
     #[test]
-    fn notices_name_libraw_and_adobe_wherever_a_copyright_shows() {
+    fn notices_name_the_licenses_wherever_a_copyright_shows() {
         let plist = include_str!("../../../packaging/macos/Info.plist");
         let read_me = include_str!("../../../packaging/macos/Read me first.txt");
         let ios_plist = include_str!("../../../packaging/ios/Info.plist");
         for text in [INDEX_HTML, plist, read_me, ios_plist] {
+            assert!(text.contains("Mozilla Public License 2.0"));
+            assert!(text.contains("CDDL 1.0"));
             assert!(text.contains("2008-2025 LibRaw LLC"));
             assert!(text.contains("under license by Adobe"));
         }

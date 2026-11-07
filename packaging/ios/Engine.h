@@ -1,3 +1,5 @@
+// This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 // The engine, from crates/reversal-ios. The app links it and runs the web UI server in-process.
 
 #include <stdbool.h>
