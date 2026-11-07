@@ -264,7 +264,7 @@ function syncControls() {
   showValue("area-percent", percent);
   $("flip").setAttribute("aria-pressed", String(a.flip_h));
   // One choice per group: the tool being used, otherwise what the frame uses now.
-  const cropMode = tool === "crop" || (a.crop && !sameRect(a.crop, current.settings.estimate.area)) ? "draw" : a.crop ? "frame" : "full";
+  const cropMode = tool === "crop" || isCustomCrop(a.crop) ? "draw" : a.crop ? "frame" : "full";
   for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m));
   const customArea = tool === "area" || !!hints().analysis;
   $("area-auto").setAttribute("aria-pressed", String(!customArea));
@@ -396,6 +396,10 @@ $("rotate").addEventListener("click", () => { if (current) { adj().rotate = (adj
 function cancelDrawing() {
   if (tool && tool !== "show") setTool(null);
 }
+function finishDrawing() {
+  applyOpenCrop();
+  cancelDrawing();
+}
 $("crop-full").addEventListener("click", () => { if (current) { cancelDrawing(); setCrop(null); changed(0); } });
 $("crop-frame").addEventListener("click", () => { if (current) { cancelDrawing(); setCrop({ ...current.settings.estimate.area }); changed(0); } });
 $("crop-draw").addEventListener("click", () => { if (current && tool !== "crop") setTool("crop"); });
@@ -408,13 +412,11 @@ $("area-draw").addEventListener("click", () => toggleTool("area"));
 $("base-draw").addEventListener("click", () => toggleTool("base"));
 $("show-areas").addEventListener("click", () => toggleTool("show"));
 $("area-auto").addEventListener("click", () => {
-  applyOpenCrop();
-  cancelDrawing();
+  finishDrawing();
   if (current && hints().analysis) setHint("analysis", null);
 });
 $("base-auto").addEventListener("click", () => {
-  applyOpenCrop();
-  cancelDrawing();
+  finishDrawing();
   if (current && (hints().base || hints().base_rgb)) setHint("base", null);
 });
 $("base-roll").addEventListener("click", openRollFlow);
@@ -499,7 +501,7 @@ function rollFrames() {
 
 function openRollFlow() {
   if (batch) { status("Wait for the current work to finish."); return; }
-  cancelDrawing();
+  finishDrawing();
   roll = { step: "intro", files: rollFrames() };
   showRollFlow();
   $("roll-flow").showModal();
@@ -717,11 +719,12 @@ async function followBatch() {
 // moves made while measuring. A frame being opened already reads them.
 async function reopenAfterRoll() {
   if (!current) return;
-  const { file, settings: { adjust } } = current;
+  const { file, settings: { adjust, custom_crop } } = current;
   current.remembered = JSON.stringify(current.settings);
   await open(file);
   if (current?.file === file) {
     current.settings.adjust = adjust;
+    current.settings.custom_crop = custom_crop;
     changed(0);
   }
 }
@@ -759,7 +762,7 @@ function measure(done, clearsWarning = false) {
 // True once the frame holds the result, or a newer call has taken over.
 async function measureNow(done, clearsWarning) {
   const file = current.file, id = ++latestMeasure;
-  const wasAreaCrop = adj().crop && sameRect(adj().crop, current.settings.estimate.area);
+  const areaBefore = current.settings.estimate.area;
   status("Measuring…");
   try {
     const { estimate, baseFound } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
@@ -767,7 +770,9 @@ async function measureNow(done, clearsWarning) {
     current.settings.estimate = estimate;
     current.baseFound = baseFound;
     if (clearsWarning) current.warning = null;
-    if (wasAreaCrop) adj().crop = { ...current.settings.estimate.area };
+    // A crop on the measured area follows it, checked now because the crop may have changed meanwhile.
+    if (adj().crop && sameRect(adj().crop, areaBefore)) adj().crop = { ...estimate.area };
+    if (cropDraft && sameRect(cropDraft, areaBefore)) cropDraft = { ...estimate.area };
     status(done);
   } catch (e) {
     if (current?.file !== file || id !== latestMeasure) return true;
@@ -820,9 +825,9 @@ function viewToScan([u, v], a) {
 function rectFromPoints(p, q) {
   return { x0: Math.min(p[0], q[0]), y0: Math.min(p[1], q[1]), x1: Math.max(p[0], q[0]), y1: Math.max(p[1], q[1]) };
 }
+const rectInView = (r, a) => rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
 function svgRect(r, cls) {
-  const a = adj();
-  const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
+  const v = rectInView(r, adj());
   return `<rect class="${cls}" x="${v.x0}" y="${v.y0}" width="${v.x1 - v.x0}" height="${v.y1 - v.y0}"/>`;
 }
 // What the analysis ignores as film holder, while Show areas is on. A custom area is measured as drawn.
@@ -843,7 +848,7 @@ function holderShape() {
   if (!areas.length) return "";
   const a = adj();
   const d = areas.map((r) => {
-    const v = rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
+    const v = rectInView(r, a);
     return `M${v.x0} ${v.y0}H${v.x1}V${v.y1}H${v.x0}Z`;
   }).join("");
   // Hatched, because a holder can show in any color, and a tint would read as one of the others.
@@ -910,7 +915,7 @@ const FULL_SCAN = { x0: 0, y0: 0, x1: 1, y1: 1 };
 const CROP_MIN_PX = 40;      // so the frame's handles stay usable
 const CROP_DRAW_MIN_PX = 4;  // a shorter drag is a click, which leaves the frame alone
 const CROP_NUDGE = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-let cropDrag = null;  // { kind: "move" | "draw" | an edge, start: view point, from: view rect }
+let cropDrag = null;  // { pointer, kind: "move" | "draw" | an edge, start: view point, from: view rect }
 
 const isCustomCrop = (c) => c && !sameRect(c, current.settings.estimate.area);
 // A custom crop stays with the frame when another crop replaces it, so Custom can bring it back.
@@ -931,8 +936,7 @@ function applyOpenCrop() {
 }
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
 function cropView() {
-  const a = adj();
-  return rectFromPoints(scanToView([cropDraft.x0, cropDraft.y0], a), scanToView([cropDraft.x1, cropDraft.y1], a));
+  return rectInView(cropDraft, adj());
 }
 function setCropView(v) {
   const a = adj();
@@ -993,20 +997,20 @@ function nudgeCrop([dx, dy], px, edge) {
   setCropView(edge ? resizedRect(v, edge, x, y, false) : movedRect(v, x, y));
 }
 $("crop-layer").addEventListener("pointerdown", (ev) => {
-  if (tool !== "crop" || ev.button !== 0) return;
+  if (tool !== "crop" || ev.button !== 0 || cropDrag) return;
   ev.preventDefault();
   const from = cropView();
   const edge = ev.target.closest("[data-edge]")?.dataset.edge;
   // A frame filling the scan has nowhere to move, so dragging inside it draws a new one.
   const kind = edge ?? (ev.target.closest("#crop-box") && !cropFills(from) ? "move" : "draw");
-  cropDrag = { kind, start: eventPoint(ev), from };
+  cropDrag = { pointer: ev.pointerId, kind, start: eventPoint(ev), from };
   // The capture decides the cursor, so keep the one for what was grabbed.
   $("crop-layer").style.cursor = getComputedStyle(ev.target).cursor;
   $("crop-layer").setPointerCapture(ev.pointerId);
   $("crop-box").focus({ preventScroll: true });
 });
 $("crop-layer").addEventListener("pointermove", (ev) => {
-  if (!cropDrag) return;
+  if (cropDrag?.pointer !== ev.pointerId) return;
   const { kind, start, from } = cropDrag;
   const p = eventPoint(ev), dx = p[0] - start[0], dy = p[1] - start[1];
   if (kind === "move") setCropView(movedRect(from, dx, dy));
@@ -1018,7 +1022,8 @@ $("crop-layer").addEventListener("pointermove", (ev) => {
   }
 });
 for (const type of ["pointerup", "pointercancel"]) {
-  $("crop-layer").addEventListener(type, () => {
+  $("crop-layer").addEventListener(type, (ev) => {
+    if (cropDrag?.pointer !== ev.pointerId) return;
     cropDrag = null;
     $("crop-layer").style.cursor = "";
   });
@@ -1031,7 +1036,8 @@ async function refresh() {
   rendering = true;
   const file = current.file;
   try {
-    const res = await api("/api/preview", { file, settings: current.settings, full: !!tool });
+    const full = !!tool;
+    const res = await api("/api/preview", { file, settings: current.settings, full });
     const clipped = Number(res.headers.get("X-Clipped") || 0);
     const blob = await res.blob();
     if (file !== current?.file) return;
@@ -1048,7 +1054,8 @@ async function refresh() {
       await loadHolder();
       if (file !== current?.file) return;
     }
-    drawOverlay();
+    // A preview requested before a tool opened isn't the entire scan. Another follows it.
+    if (full) drawOverlay();
     histogram(img, clipped);
   } catch (e) {
     if (file === current?.file) status(`Could not update the preview: ${e.message}`);

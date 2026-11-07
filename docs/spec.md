@@ -148,7 +148,7 @@ Each group shows one choice: the one in use, or Custom while its drag tool is op
 | Straighten | ±10°. A new angle closes Show areas and any open drag tool, but not the crop frame. Film base and colors are measured again on letting go of the slider, or after a short pause for arrow keys and typed values, never while it's held. Saving or changing frame waits for that measurement. Custom areas keep their place on the scan, so a large turn can move them off their target | Pixels and measuring |
 | Crop | Entire scan, Measured area, or Custom. Sets what the DNG keeps, never the colors | Pixels |
 
-Custom crop shows the entire scan with a frame on the frame's custom crop, or around the whole scan if it has none, and dims what's outside it. Choosing Entire scan or Measured area keeps the custom crop with the frame's settings, so Custom brings it back. It stays out of the DNG and doesn't count as an edit. Film base and measured area stay single drags because they pick a sample; a crop is a composition, so it stays adjustable until it's accepted.
+Custom crop shows the entire scan and dims what's outside a frame. The frame opens on the custom crop if there is one, otherwise on the crop in use, which starts as the entire scan. Choosing Entire scan or Measured area keeps the custom crop with the frame's settings, so Custom brings it back. It stays out of the DNG and doesn't count as an edit. Film base and measured area stay single drags because they pick a sample; a crop is a composition, so it stays adjustable until it's accepted.
 
 | Action | Result |
 | --- | --- |
@@ -159,7 +159,7 @@ Custom crop shows the entire scan with a frame on the frame's custom crop, or ar
 | Done or Enter | Applies the frame |
 | Cancel or Escape | Keeps the crop as it was |
 | Entire scan or Measured area | Closes the frame and uses that choice |
-| Saving, changing frame, or opening another area tool | Applies the frame first, so what's saved matches what's shown and adjustments aren't lost |
+| Saving, changing frame, opening another area tool, or Match film base | Applies the frame first, so what's saved matches what's shown and adjustments aren't lost |
 
 Straighten, Rotate and Mirror keep the frame open, and it holds its place on the scan. Its corner and edge markers sit outside the frame, so they never cover a pixel the DNG keeps.
 
