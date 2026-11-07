@@ -5,10 +5,11 @@ mod folder;
 mod pipeline;
 mod ui;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use reversal_core::image::Rgb32;
 use reversal_core::invert::{self, Adjust, Hints, Settings};
 use reversal_core::render::Look;
 
@@ -35,11 +36,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Convert one or more raw negatives to positive DNGs.
+    /// Convert one or more raw scans to positive DNGs.
     Convert(ConvertArgs),
     /// Start the local web UI for a folder of scans.
     Ui {
-        /// Folder with raw negatives.
+        /// Folder of raw scans.
         dir: PathBuf,
         /// Port on 127.0.0.1; 0 picks a free one.
         #[arg(long, default_value_t = 8787)]
@@ -87,7 +88,7 @@ struct ConvertArgs {
     /// Highlights, −100…+100.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     highlights: f32,
-    /// Whites, −100 (roll off, bringing back clipped highlights) … +100 (clip sooner).
+    /// Whites, −100 (recover clipped highlights) … +100 (clip sooner).
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     whites: f32,
     /// Profile the DNG opens with; the others stay selectable in a raw editor.
@@ -99,27 +100,28 @@ struct ConvertArgs {
     /// Tint, −100 (greener) … +100 (more magenta).
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     tint: f32,
-    /// Saturation on top of the built-in boost, −100 (black and white) … +100.
+    /// Saturation, −100 (black and white) … +100.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     saturation: f32,
-    /// Fine rotation in degrees, clockwise positive.
+    /// Straighten, in degrees. Positive turns clockwise.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     straighten: f32,
-    /// Size of the centered image area that color and exposure are measured on, in percent.
+    /// Center size, in percent: the centered area where color and exposure are measured.
     #[arg(long, default_value_t = invert::DEFAULT_AREA_PERCENT)]
     area_percent: f32,
-    /// Crop to the image area (default keeps the whole scan).
+    /// Crop to the measured area. The default keeps the entire scan.
     #[arg(long)]
     crop_area: bool,
     /// Treat the inputs as one roll: measure one film base across them and use it on each.
     #[arg(long)]
     roll: bool,
-    /// Mirror left-right (emulsion-up scans).
+    /// Mirror left-right, for scans made emulsion side up.
     #[arg(long)]
     flip: bool,
     /// Clockwise quarter turns (0–3), applied after mirroring.
     #[arg(long, default_value_t = 0)]
     rotate: u8,
+    /// DNG compression: lossless JPEG, or none.
     #[arg(long, value_enum, default_value_t = CompressionArg::Ljpeg)]
     compression: CompressionArg,
 }
@@ -138,6 +140,11 @@ fn main() {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
+}
+
+/// Decodes one input, naming it in the error, since a run can have many.
+fn decode_input(input: &Path) -> Result<Rgb32, String> {
+    reversal_core::decode::decode(input).map_err(|e| format!("{}: {e}", input.display()))
 }
 
 fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -175,15 +182,17 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             .inputs
             .iter()
             .map(|input| {
-                let scan = reversal_core::decode::decode(input)?;
+                let scan = decode_input(input)?;
                 let small = invert::analysis_image(&scan).straighten(args.straighten);
                 Ok(invert::detect_base(&small))
             })
-            .collect::<Result<Vec<_>, reversal_core::decode::DecodeError>>()?;
+            .collect::<Result<Vec<_>, String>>()?;
         // Frames with no clear film don't get a say, unless none has any.
         let mut bases: Vec<_> = readings.iter().filter(|r| r.found).map(|r| r.rgb).collect();
         if bases.is_empty() {
-            eprintln!("warning: no frame shows clear film, so the roll's film base is a guess");
+            eprintln!(
+                "warning: no clear film detected on any frame, so the roll's film base is a guess"
+            );
             bases = readings.iter().map(|r| r.rgb).collect();
         }
         Some(invert::roll_base(&bases))
@@ -192,7 +201,7 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
     for (input, out) in args.inputs.iter().zip(&outs) {
         let t = Instant::now();
-        let scan = reversal_core::decode::decode(input)?;
+        let scan = decode_input(input)?;
         let hints = Hints {
             base_rgb,
             ..area_hints.clone()

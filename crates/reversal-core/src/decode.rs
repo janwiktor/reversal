@@ -49,7 +49,7 @@ pub struct DecodeError(pub String);
 
 impl std::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "raw decode failed: {}", self.0)
+        write!(f, "can't read this raw file ({})", self.0)
     }
 }
 
@@ -113,7 +113,7 @@ pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
         check(libraw_dcraw_process(lr), "process")?;
         let mut err = 0;
         let img = libraw_dcraw_make_mem_image(lr, &mut err);
-        check(err, "make_mem_image")?;
+        check(err, "output")?;
         if img.is_null() {
             return Err(DecodeError("no image returned".into()));
         }

@@ -429,7 +429,11 @@ fn assert_reads_back(
 fn a_missing_file_is_an_error() {
     let dir = TempDir::new("decode-missing");
     let err = decode(&dir.0.join("nothing.dng")).unwrap_err();
-    assert!(err.to_string().contains("open"), "{err}");
+    assert!(
+        err.to_string()
+            .starts_with("can't read this raw file (open: "),
+        "{err}"
+    );
 }
 
 #[test]

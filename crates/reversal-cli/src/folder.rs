@@ -66,18 +66,19 @@ pub fn saved_settings(
     auto: &Settings,
     small: &Rgb32,
 ) -> (Settings, Option<String>) {
-    let unreadable = |e: serde_json::Error| {
-        let warning = format!("Saved settings couldn't be read ({e}). Saving will replace them.");
-        (auto.clone(), Some(warning))
+    let unreadable = || {
+        let warning = "Could not read this frame's saved settings, so it uses the automatic ones. \
+                       Saving replaces them.";
+        (auto.clone(), Some(warning.to_string()))
     };
     let choices: SavedChoices = match serde_json::from_slice(sidecar) {
         Ok(c) => c,
-        Err(e) => return unreadable(e),
+        Err(_) => return unreadable(),
     };
     if choices.model == MODEL_VERSION {
         return match serde_json::from_slice(sidecar) {
             Ok(saved) => (saved, None),
-            Err(e) => unreadable(e),
+            Err(_) => unreadable(),
         };
     }
     // An older model's measurements mean nothing now: measure again, keep the user's choices.
@@ -87,8 +88,8 @@ pub fn saved_settings(
         choices.adjust,
     );
     settings.hints = choices.hints;
-    let warning = "These settings came from an older version. Colors were measured again, \
-                   and your adjustments may need another look.";
+    let warning = "These settings are from an older version, so colors were measured again. \
+                   Check your adjustments.";
     (settings, Some(warning.to_string()))
 }
 
@@ -142,7 +143,7 @@ impl Folder {
         if self.raw_files().iter().any(|f| f == file) {
             Ok(self.dir.join(file))
         } else {
-            Err((404, format!("unknown file: {file}")))
+            Err((404, format!("file not found: {file}")))
         }
     }
 

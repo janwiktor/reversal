@@ -132,7 +132,7 @@ pub fn serve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dir = dir.canonicalize()?;
     let server = Server::http(("127.0.0.1", port))
-        .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
+        .map_err(|e| format!("could not use port {port}: {e}. Choose another with --port."))?;
     let port = server
         .server_addr()
         .to_ip()
@@ -479,7 +479,7 @@ impl State {
             self.folder.resolve(file)?;
         }
         if self.batch.is_running() {
-            return Err((409, "still saving the previous DNGs".to_string()));
+            return Err((409, "another task is still running".to_string()));
         }
         lock(&self.roll_readings).clear();
         let (folder, readings) = (self.folder.clone(), self.roll_readings.clone());
@@ -526,9 +526,7 @@ impl State {
                 move || {
                     let frames = std::mem::take(&mut *lock(&prepared));
                     if frames.len() < total {
-                        return Some(
-                            "Not every frame could be read, so nothing changed.".to_string(),
-                        );
+                        return Some("Could not read every frame, so nothing changed.".to_string());
                     }
                     apply_folder.apply_roll_base(&frames, base_rgb).err()
                 },
@@ -541,7 +539,7 @@ impl State {
 /// The roll's film base from the frames chosen to count.
 fn voted_base(bases: &[[f32; 3]]) -> Result<[f32; 3], (u16, String)> {
     if bases.is_empty() {
-        return Err((400, "choose at least one frame to measure from".to_string()));
+        return Err((400, "select at least one frame".to_string()));
     }
     Ok(invert::roll_base(bases))
 }
