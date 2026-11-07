@@ -11,10 +11,11 @@ use crate::dng;
 use crate::image::{for_each_part, Rgb32};
 use crate::invert;
 
-/// Sample count of the tone curves written to the DNG and used for previews.
-const CURVE_POINTS: usize = 129;
-/// Reach of the shoulder: frame white opens at 0.8 and the data ends at this display value.
-const STORED_REACH: f32 = 4.0; // = 2^STORE_EV
+/// Sample count of the tone curves written to the DNG and used for previews. Apple's raw engine
+/// reads a curve correctly only with evenly spaced samples, and at most 1024 of them.
+const CURVE_POINTS: usize = 1024;
+/// Display value of stored full scale before the shoulder, which places frame white at 0.8.
+const STORED_REACH: f32 = 4.0;
 /// How far the blacks slider moves the black point, in the gamma-2.2 domain.
 const BLACKS_RANGE: f32 = 0.12;
 /// Strength of the shadows and highlights bumps; below 1 the curve can't fold over.
@@ -29,7 +30,7 @@ const ROLLOFF_KNEE: f32 = 0.2;
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Look {
-    /// The standard rendering: an S-curve, with highlights clipping as on a print.
+    /// The standard rendering: an S-curve, with a short roll-off above frame white.
     #[default]
     Neutral,
     /// Low contrast, with the whole stored range rolled off below white.
@@ -79,7 +80,7 @@ impl Look {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Tone {
     pub contrast: f32,
-    /// − crushes the black point, + lifts it.
+    /// − crushes the black point, + lifts it, except at the very bottom of the stored range.
     pub blacks: f32,
     pub shadows: f32,
     pub highlights: f32,
@@ -91,42 +92,31 @@ fn unit(slider: f32) -> f32 {
     slider.clamp(-100.0, 100.0) / 100.0
 }
 
-/// Whites control, −1…+1, of a look and tone: below 0 the curve needs the stored range.
+/// Whites control, −1…+1, of a look and tone.
 fn white_amount(look: Look, tone: Tone) -> f32 {
     unit(look.whites() + tone.whites)
 }
 
-/// Display value of linear `l` before the S-curve. At −1 an extended Reinhard shoulder takes
-/// `STORED_REACH` to white; at +1 the top is pushed into clipping. Below 0 the curve sees the
-/// stored range, so it does the raw editor's roll-off itself: that's what 0 looks like, and
-/// the image stays continuous as the slider passes it.
+/// Display value of linear `l` before the S-curve: the roll-off a raw editor would apply to data
+/// above white, built in so that every renderer gets it. At −1 an extended Reinhard shoulder
+/// takes `STORED_REACH` to white; at +1 the top is pushed into clipping.
 fn shoulder(l: f32, amount: f32) -> f32 {
+    let start = highlight_rolloff(l);
     if amount < 0.0 {
         let reach2 = STORED_REACH * STORED_REACH;
         let rolled = l * (1.0 + l / reach2) / (1.0 + l);
-        let start = highlight_rolloff(l);
         start + -amount * (rolled - start)
     } else {
-        l * (1.0 + amount * l)
+        start * (1.0 + amount * start)
     }
 }
 
-/// Exposure the profile adds to the standard baseline: the curve then sees the whole stored
-/// range instead of only what reaches display white.
-fn exposure_offset(look: Look, tone: Tone) -> f32 {
-    if white_amount(look, tone) < 0.0 {
-        -dng::STORE_EV
-    } else {
-        0.0
-    }
-}
-
-/// Tone curve as (x, y) pairs on linear values in [0, 1], for a profile with
-/// `exposure_offset`: shoulder, black point, S-curve in a gamma-2.2 domain, then shadows
-/// and highlights bumps. x is spaced quadratically for the shadows.
+/// Tone curve as (x, y) pairs on stored values in [0, 1]: shoulder, black point, S-curve in a
+/// gamma-2.2 domain, then shadows and highlights bumps. x is evenly spaced. The ends are pinned
+/// to (0, 0) and (1, 1), even where lifted blacks or the roll-off would stop short of them:
+/// Apple's engine replaces a curve that doesn't reach both with a default of its own.
 pub fn tone_curve(look: Look, tone: Tone, points: usize) -> Vec<(f32, f32)> {
     let amount = white_amount(look, tone);
-    let domain = 2f32.powf(-exposure_offset(look, tone));
     // Contrast: ×/÷ 2.6 at the ends.
     let slope = look.slope() * 2.6f32.powf(unit(tone.contrast));
     let norm = (slope * 0.5).tanh();
@@ -137,9 +127,13 @@ pub fn tone_curve(look: Look, tone: Tone, points: usize) -> Vec<(f32, f32)> {
     );
     (0..points)
         .map(|i| {
-            let t = i as f32 / (points - 1) as f32;
-            let x = t * t;
-            let p = shoulder(x * domain, amount).clamp(0.0, 1.0).powf(1.0 / 2.2);
+            let x = i as f32 / (points - 1) as f32;
+            if i == 0 || i == points - 1 {
+                return (x, x);
+            }
+            let p = shoulder(x * STORED_REACH, amount)
+                .clamp(0.0, 1.0)
+                .powf(1.0 / 2.2);
             let p = ((p - black) / (1.0 - black)).clamp(0.0, 1.0);
             let q = 0.5 * (1.0 + (slope * (p - 0.5)).tanh() / norm);
             let q = q.clamp(0.0, 1.0);
@@ -154,7 +148,6 @@ pub fn profile(look: Look, tone: Tone) -> dng::Profile {
     dng::Profile {
         name: look.profile_name().into(),
         tone_curve: tone_curve(look, tone, CURVE_POINTS),
-        exposure_offset: exposure_offset(look, tone),
         saturation: look.saturation(),
     }
 }
@@ -176,8 +169,9 @@ fn srgb_encode(v: f32) -> f32 {
     }
 }
 
-/// Roll-off a raw editor applies to data above white when a profile's curve leaves it there:
-/// linear up to the knee, then an exponential that meets it with equal slope and approaches 1.
+/// Roll-off a raw editor applies to data above white when a profile's curve leaves it there,
+/// which ours don't: linear up to the knee, then an exponential that meets it with equal slope
+/// and approaches 1.
 fn highlight_rolloff(l: f32) -> f32 {
     if l <= ROLLOFF_KNEE {
         l
@@ -192,31 +186,24 @@ fn highlight_rolloff(l: f32) -> f32 {
 pub fn to_srgb8(img: &Rgb32, profile: &dng::Profile) -> Vec<u8> {
     let to_prophoto = color::rec2020_to_prophoto();
     let to_srgb = color::prophoto_to_srgb();
-    let lift = dng::DISPLAY_LIFT * 2f32.powf(profile.exposure_offset);
-    // A negative offset already brings the whole stored range under the curve.
-    let rolls_off = profile.exposure_offset >= 0.0;
     // Lookup over the stored range, spaced by square root to stay fine for curves steep
     // near black.
     const N: usize = 16384;
     let lut: Vec<f32> = (0..N)
         .map(|i| {
             let t = i as f32 / (N - 1) as f32;
-            let x = t * t * STORED_REACH;
-            interp(
-                &profile.tone_curve,
-                if rolls_off { highlight_rolloff(x) } else { x },
-            )
+            interp(&profile.tone_curve, t * t)
         })
         .collect();
     let tone = |v: f32| {
-        let t = (v / STORED_REACH).clamp(0.0, 1.0).sqrt();
+        let t = v.clamp(0.0, 1.0).sqrt();
         lut[(t * (N - 1) as f32 + 0.5) as usize]
     };
     let mut out = vec![0u8; img.data.len()];
     for_each_part(&mut out, 3, |start, part| {
         let pixels = img.data[start..].as_chunks::<3>().0;
         for (out, &p) in part.as_chunks_mut::<3>().0.iter_mut().zip(pixels) {
-            let p = invert::saturate(p.map(|v| v * lift), profile.saturation);
+            let p = invert::saturate(p.map(|v| v * dng::STORE_SCALE), profile.saturation);
             let s = color::apply(&to_srgb, color::apply(&to_prophoto, p).map(tone));
             *out = s.map(|v| (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8);
         }
@@ -255,8 +242,8 @@ mod tests {
 
     /// Display value of linear `l` as a look's profile renders it.
     fn display(look: Look, tone: Tone, l: f32) -> f32 {
-        let curve = tone_curve(look, tone, 513);
-        interp(&curve, l * 2f32.powf(exposure_offset(look, tone)))
+        let curve = tone_curve(look, tone, CURVE_POINTS);
+        interp(&curve, l / STORED_REACH)
     }
 
     #[test]
@@ -280,6 +267,8 @@ mod tests {
                                     "{look:?} {tone:?}"
                                 );
                                 assert!(c.iter().all(|p| (0.0..=1.0).contains(&p.1)));
+                                assert_eq!(c[0], (0.0, 0.0), "{look:?} {tone:?}");
+                                assert_eq!(c[CURVE_POINTS - 1], (1.0, 1.0), "{look:?} {tone:?}");
                             }
                         }
                     }
@@ -289,31 +278,35 @@ mod tests {
     }
 
     #[test]
-    fn looks_without_slider_moves_are_pinned() {
-        for look in Look::ALL {
-            let c = tone_curve(look, Tone::default(), CURVE_POINTS);
-            assert!(c[0].1.abs() < 1e-6, "{look:?}");
-            assert!((c[CURVE_POINTS - 1].1 - 1.0).abs() < 1e-5, "{look:?}");
+    fn curve_samples_are_evenly_spaced_and_few_enough_for_apples_engine() {
+        let c = profile(Look::Neutral, Tone::default()).tone_curve;
+        assert!(c.len() <= 1024);
+        let step = 1.0 / (CURVE_POINTS - 1) as f32;
+        for (i, &(x, _)) in c.iter().enumerate() {
+            assert!((x - i as f32 * step).abs() < 1e-5, "{i}");
         }
     }
 
     #[test]
-    fn neutral_is_the_plain_s_curve() {
+    fn neutral_is_the_plain_s_curve_on_the_rolled_off_range() {
         let c = tone_curve(Look::Neutral, Tone::default(), 65);
         let norm = 0.75f32.tanh();
-        for &(x, y) in &c {
-            let q = 0.5 * (1.0 + (1.5 * (x.powf(1.0 / 2.2) - 0.5)).tanh() / norm);
-            assert!((y - q.clamp(0.0, 1.0).powf(2.2)).abs() < 1e-5);
+        for &(x, y) in &c[..64] {
+            let p = highlight_rolloff(x * STORED_REACH).powf(1.0 / 2.2);
+            let q = 0.5 * (1.0 + (1.5 * (p - 0.5)).tanh() / norm);
+            assert!((y - q.clamp(0.0, 1.0).powf(2.2)).abs() < 1e-5, "{x}");
         }
-        assert_eq!(exposure_offset(Look::Neutral, Tone::default()), 0.0);
     }
 
     #[test]
-    fn flat_keeps_the_whole_stored_range_and_neutral_doesnt() {
+    fn flat_holds_the_top_of_the_stored_range_lower_than_neutral() {
         let top = STORED_REACH;
         assert!(display(Look::Flat, Tone::default(), 0.9 * top) < 0.995);
-        assert!(display(Look::Flat, Tone::default(), top) > 0.99);
-        assert!(display(Look::Neutral, Tone::default(), 1.0) > 0.999);
+        assert!(
+            display(Look::Flat, Tone::default(), 0.5)
+                < display(Look::Neutral, Tone::default(), 0.5)
+        );
+        assert!(display(Look::Neutral, Tone::default(), 0.9 * top) > 0.97);
     }
 
     #[test]
@@ -369,7 +362,7 @@ mod tests {
         assert!((n(highlights, 0.02) - n(d, 0.02)).abs() < 0.005);
         let blacks = |blacks| Tone { blacks, ..d };
         assert!(n(blacks(-100.0), 0.01) < n(d, 0.01));
-        assert!(n(blacks(100.0), 0.0) > 0.0);
+        assert!(n(blacks(100.0), 0.01) > n(d, 0.01) + 0.005);
         let whites = Tone { whites: 100.0, ..d };
         assert!(n(whites, 0.7) > n(d, 0.7));
     }
@@ -415,13 +408,14 @@ mod tests {
     }
 
     #[test]
-    fn previews_keep_neutrals_on_the_rolled_off_curve() {
-        let p = profile(Look::Neutral, Tone::default());
-        for v in [0.05, 0.3, 0.8] {
-            let out = to_srgb8(&gray(v), &p);
-            let x = highlight_rolloff(v * dng::DISPLAY_LIFT);
-            let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
-            assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0), "{v}");
+    fn previews_keep_neutrals_on_the_curve() {
+        for look in Look::ALL {
+            let p = profile(look, Tone::default());
+            for v in [0.05, 0.3, 0.8, 3.0] {
+                let out = to_srgb8(&gray(v), &p);
+                let want = srgb_encode(interp(&p.tone_curve, v * dng::STORE_SCALE)) * 255.0;
+                assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0), "{v}");
+            }
         }
     }
 
@@ -431,17 +425,6 @@ mod tests {
         let g = |v| to_srgb8(&gray(v), &p)[1];
         assert!(g(2.0) > g(1.0) + 5);
         assert!(g(2.0) < 255);
-    }
-
-    #[test]
-    fn profiles_with_the_whole_range_under_the_curve_dont_roll_off() {
-        let p = profile(Look::Flat, Tone::default());
-        assert!(p.exposure_offset < 0.0);
-        let v = 3.0;
-        let x = v * dng::DISPLAY_LIFT * 2f32.powf(p.exposure_offset);
-        let want = srgb_encode(interp(&p.tone_curve, x)) * 255.0;
-        let out = to_srgb8(&gray(v), &p);
-        assert!(out.iter().all(|&c| (c as f32 - want).abs() <= 2.0));
     }
 
     #[test]
