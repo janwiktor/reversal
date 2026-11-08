@@ -47,7 +47,6 @@
   --check-hit: 14px;
   --bar-h: 40px;
   --head-h: 28px;
-  --foot-h: 24px;
   --row-gap: 4px;
   --slider-label-h: 16px;
   --slider-track-h: 16px;
@@ -74,7 +73,6 @@
     --check-hit: 44px;
     --bar-h: 52px;
     --head-h: 44px;
-    --foot-h: 44px;
     --row-gap: 0px;
     --slider-label-h: 16px;
     --slider-track-h: 34px;
@@ -86,7 +84,7 @@
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
 body {
   background: var(--surround); color: var(--ink); font: 400 var(--text)/var(--leading) var(--font);
-  display: grid; grid-template: "bar bar bar" var(--bar-h) "roll stage dock" minmax(0, 1fr) "foot foot foot" var(--foot-h) / var(--left) minmax(0, 1fr) var(--right);
+  display: grid; grid-template: "bar bar bar" var(--bar-h) "roll stage dock" minmax(0, 1fr) / var(--left) minmax(0, 1fr) var(--right);
   font-variant-numeric: tabular-nums;
   -webkit-user-select: none; user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -206,23 +204,27 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 
 /* Top bar, lined up with the columns below it. */
 #bar { grid-area: bar; display: grid; grid-template-columns: var(--left) minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
-#choose-folder { display: flex; align-items: center; gap: 6px; width: calc(100% - 12px); margin: 0 6px; padding: 0 4px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
+/* Where the open frame lives: the folder gives way first, so the frame's name stays readable. */
+#where { display: flex; align-items: center; min-width: 0; margin: 0 6px; }
+#choose-folder { flex: 0 1000 auto; min-width: 28px; display: flex; align-items: center; gap: 6px; padding: 0 4px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
 @media (hover: hover) { #choose-folder:not(:disabled):hover { background: var(--control); } }
 #choose-folder svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--ink-quiet); stroke-width: 1.25; stroke-linejoin: round; }
-#folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+#folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px; min-width: 0; }
 #frame-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
 #crop-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); margin-right: 4px; }
 /* Straighten takes what the bar has left, for precision: 0.1° steps over ±10°. Its value,
    like −10.0°, is the widest, so its box is too. */
 #frame-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
+#file-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#file-name:not(:empty)::before { content: "›"; margin: 0 6px 0 2px; color: var(--ink-quiet); }
 #save { display: flex; justify-content: flex-end; padding: 0 10px; }
 .primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
 @media (hover: hover) { .primary:not(:disabled):hover { background: #2a7ae0; } }
 .primary:not(:disabled):active { background: #1a61b8; }
 .primary:disabled { background: var(--control); opacity: .55; }
-#export.cancel { background: var(--control); box-shadow: inset 0 0 0 1px #4a4a4a; font-weight: 400; }
-@media (hover: hover) { #export.cancel:hover { background: var(--control-hover); } }
+#export.cancel { background-color: var(--control); background-image: linear-gradient(to right, rgb(255 255 255 / .16) var(--done, 0%), transparent 0); box-shadow: inset 0 0 0 1px #4a4a4a; font-weight: 400; font-variant-numeric: tabular-nums; }
+@media (hover: hover) { #export.cancel:hover { background-color: var(--control-hover); } }
 
 /* Frames */
 #roll { grid-area: roll; background: var(--panel); border-right: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
@@ -232,6 +234,8 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 /* The checkbox answers to --check-hit around it, so the row starts that much further left. */
 #files li { display: flex; align-items: center; gap: 8px; height: var(--hit); padding-left: max(0px, calc(10px - (var(--check-hit) - var(--check)) / 2)); }
 #files .pick { flex: none; display: grid; place-items: center; width: var(--check-hit); align-self: stretch; }
+#roll-foot { flex: none; display: flex; align-items: center; height: var(--head-h); padding: 0 4px; border-top: 1px solid var(--line); }
+#about-open { color: var(--ink-quiet); font-size: 11px; text-decoration-color: transparent; }
 @media (hover: hover) { #files li:hover { background: var(--row-hover); } }
 #files li:has(button[aria-current="true"]) { background: var(--row-on); }
 #files button { flex: 1; min-width: 0; height: 100%; text-align: left; background: none; border: 0; padding: 0 10px 0 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -289,14 +293,21 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 .crop-h.ne i, .crop-h.se i { right: var(--inset); border-right-width: var(--mark); }
 @media (any-pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
-#toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); padding: 6px 6px 6px 12px; display: flex; gap: 12px; align-items: center; }
-#tool-actions { flex: none; display: flex; gap: 6px; }
-#tool-done { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
-@media (hover: hover) { #tool-done:hover { background: #606060; } }
+/* What floats over the image: a tool's bar, then a message, in one look. Only the bars take
+   pointers, so the image stays draggable around them. */
+#floats { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: min(560px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+.float { pointer-events: auto; max-width: 100%; display: grid; grid-template: "text actions" auto "more more" auto / minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 6px 6px 12px; background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); }
+.float-text { grid-area: text; margin: 0; overflow-wrap: anywhere; }
+.float-actions { grid-area: actions; display: flex; gap: 6px; }
+#note { -webkit-user-select: text; user-select: text; }
+#note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; color: var(--ink-quiet); }
+.btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
+@media (hover: hover) { .btn.strong:hover { background: #606060; } }
 
 /* Dock */
 #dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
-#hist { flex: none; padding: 10px; }
+#hist { flex: none; position: relative; padding: 10px; }
+#stored { position: absolute; top: 14px; left: 14px; right: 14px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
 #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
 .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
@@ -345,20 +356,6 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 #about-license { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: 11px; white-space: pre-wrap; color: var(--ink-quiet); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* Status bar */
-#foot { grid-area: foot; position: relative; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--bar); border-top: 1px solid var(--seam); color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
-#status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; -webkit-user-select: text; user-select: text; }
-#progress { flex: none; width: 120px; height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; }
-#progress div { height: 100%; width: 0; background: #cfcfcf; }
-/* Lives here so that it appears without moving the slider being dragged. */
-#stored { flex: 0 100 auto; min-width: 0; margin-left: auto; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; color: var(--warn); }
-#position { flex: none; margin-left: auto; padding-left: 12px; display: flex; gap: 12px; }
-#stored:not([hidden]) + #position { margin-left: 0; }
-#status-more {
-  position: absolute; left: 6px; bottom: calc(var(--foot-h) + 4px); z-index: 2; width: min(640px, calc(100vw - 12px)); max-height: 40vh; overflow-y: auto; padding: 8px 10px;
-  background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; color: var(--ink);
-  -webkit-user-select: text; user-select: text;
-}
 
 /* A narrow window: drop what names itself, then stack. */
 @media (max-width: 1180px) {
@@ -368,12 +365,11 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 }
 @media (max-width: 900px) {
   html, body { height: auto; overflow: auto; }
-  body { grid-template: "bar" auto "roll" auto "stage" 55vh "dock" auto "foot" auto / minmax(0, 1fr); }
+  body { grid-template: "bar" auto "roll" auto "stage" 55vh "dock" auto / minmax(0, 1fr); }
   #bar { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 0; padding: 6px 0; }
   #frame-tools { grid-row: 2; grid-column: 1 / -1; flex-wrap: wrap; }
   #roll { border-right: 0; border-bottom: 1px solid var(--seam); }
   #files { flex: none; max-height: 30vh; }
   #dock { border-left: 0; }
   #develop { overflow: visible; }
-  #foot { position: sticky; bottom: 0; height: var(--foot-h); }
 }

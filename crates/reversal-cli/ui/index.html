@@ -15,8 +15,9 @@
 </svg>
 
 <header id="bar">
-  <div>
+  <div id="where">
     <button type="button" id="choose-folder"><svg aria-hidden="true"><use href="#i-folder"/></svg><span id="folder"></span></button>
+    <span id="file-name"></span>
   </div>
   <div id="frame-tools" role="toolbar" aria-label="Frame">
     <button type="button" class="icon" id="rotate" title="Rotate 90°" aria-label="Rotate 90°"><svg aria-hidden="true"><use href="#i-rotate"/></svg></button>
@@ -42,6 +43,7 @@
     <span id="frame-count"></span>
   </div>
   <ul id="files"></ul>
+  <div id="roll-foot"><button type="button" class="link" id="about-open" title="About Reversal"></button></div>
 </nav>
 
 <main id="stage">
@@ -62,7 +64,18 @@
       </div>
     </div>
   </div>
-  <div id="toolbar" hidden><span id="tool-text"></span><span id="tool-actions"><button type="button" class="btn" id="tool-cancel" title="Esc" aria-keyshortcuts="Escape">Cancel</button><button type="button" class="btn" id="tool-done">Done</button></span></div>
+  <!-- One place for everything floating over the image: a tool's bar, then a message. -->
+  <div id="floats">
+    <div class="float" id="toolbar" hidden>
+      <span class="float-text" id="tool-text"></span>
+      <span class="float-actions"><button type="button" class="btn" id="tool-cancel" title="Esc" aria-keyshortcuts="Escape">Cancel</button><button type="button" class="btn strong" id="tool-done">Done</button></span>
+    </div>
+    <div class="float" id="note" role="status" hidden>
+      <p class="float-text" id="note-text"></p>
+      <span class="float-actions"><button type="button" class="btn" id="note-details" aria-expanded="false" aria-controls="note-more" hidden>Details</button><button type="button" class="btn" id="reveal" hidden>Show in Finder</button><button type="button" class="btn" id="note-dismiss">Dismiss</button></span>
+      <div id="note-more" hidden></div>
+    </div>
+  </div>
   <p id="message">Choose a frame on the left to convert it.</p>
 </main>
 
@@ -70,6 +83,8 @@
   <div id="hist">
     <canvas id="histogram" width="504" height="176" aria-label="RGB histogram of the preview"></canvas>
     <div class="clip"><span>Clipped</span><span id="clip-low">Shadows 0%</span><span id="clip-high">Highlights 0%</span></div>
+    <!-- Over the histogram, so it appears without moving the slider being dragged. -->
+    <p id="stored" hidden></p>
   </div>
 
   <!-- How the scan is read. These can break the conversion, so they always stay in view. -->
@@ -134,17 +149,6 @@
     </section>
   </div>
 </aside>
-
-<footer id="foot">
-  <p id="status" role="status"></p>
-  <button type="button" class="link" id="status-details" aria-expanded="false" aria-controls="status-more" hidden>Details</button>
-  <button type="button" class="link" id="reveal" hidden>Show in Finder</button>
-  <div id="progress" hidden><div></div></div>
-  <p id="stored" hidden></p>
-  <div id="position"><span id="position-name"></span><span id="position-index"></span></div>
-  <button type="button" class="link" id="about-open" title="About Reversal"></button>
-  <div id="status-more" hidden></div>
-</footer>
 
 <dialog id="about" aria-labelledby="about-title">
   <h2 id="about-title">Reversal</h2>

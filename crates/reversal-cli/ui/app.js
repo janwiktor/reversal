@@ -39,20 +39,37 @@ async function api(path, body) {
 
 const adj = () => current.settings.adjust;
 const hints = () => current.settings.hints;
-// The status bar holds one line; anything longer opens from Details.
-function status(text) {
-  const [head, ...rest] = text.split("\n");
-  $("status").textContent = head;
-  $("status").title = head;
-  $("status-more").textContent = text;
-  $("status-details").hidden = !rest.length;
+// Everything the app has to say floats at the top of the image, under an open tool's bar, one
+// message at a time. A message that needs reading or doing stays until dismissed or replaced; a
+// confirmation fades. Anything longer than a line opens from Details.
+let noteTimer = 0;
+function status(text = "", { stay = false, reveal = false } = {}) {
+  const note = $("note"), [head, ...rest] = text.split("\n");
+  clearTimeout(noteTimer);
+  $("note-text").textContent = head;
+  $("note-more").textContent = rest.join("\n");
   showDetails(false);
+  $("note-details").hidden = !rest.length;
+  $("reveal").hidden = !reveal;
+  note.dataset.stays = String(stay || rest.length > 0);
+  note.hidden = !text;
+  if (text && note.dataset.stays === "false") fadeLater();
+  fit();
+}
+function fadeLater() {
+  noteTimer = setTimeout(() => {
+    if ($("note").matches(":hover, :focus-within")) fadeLater();
+    else status();
+  }, 5000);
 }
 function showDetails(on) {
-  $("status-more").hidden = !on;
-  $("status-details").setAttribute("aria-expanded", String(on));
+  $("note-more").hidden = !on;
+  $("note-details").setAttribute("aria-expanded", String(on));
+  // Reading the details keeps the message.
+  if (on) { clearTimeout(noteTimer); $("note").dataset.stays = "true"; fit(); }
 }
-$("status-details").addEventListener("click", () => showDetails($("status-more").hidden));
+$("note-details").addEventListener("click", () => showDetails($("note-more").hidden));
+$("note-dismiss").addEventListener("click", () => status());
 
 
 // ---------- Files ----------
@@ -134,16 +151,25 @@ $("select-all-box").addEventListener("change", (e) => {
   updateSaveButton();
 });
 
+// The open frame's place in the roll, or how many are selected.
+let shownName = null;
+function showCount() {
+  const at = frames.findIndex((f) => f.name === shownName), n = frames.length;
+  $("frame-count").textContent = !n ? "" : selected.size ? `${selected.size} of ${n} selected` : at >= 0 ? `${at + 1} of ${n}` : `${n} frame${n > 1 ? "s" : ""}`;
+}
+
+// While saving, the button stops the save and fills as frames finish.
 function updateSaveButton() {
   const button = $("export");
   shell?.postMessage({ action: "busy", busy: !!batch });
-  $("frame-count").textContent = !frames.length ? "" : selected.size ? `${selected.size} of ${frames.length}` : `${frames.length} frame${frames.length > 1 ? "s" : ""}`;
-  $("progress").hidden = batch?.task !== "save";
+  showCount();
   const saving = batch?.task === "save";
   button.classList.toggle("cancel", saving);
   button.title = saving ? "Finish the frames being saved, then stop." : SAVE_SHORTCUT;
   if (saving) {
-    button.textContent = "Stop saving";
+    const { done = 0, failed = 0, total = 1 } = batch;
+    button.textContent = total > 1 ? `Stop · ${Math.min(done + failed + 1, total)} of ${total}` : "Stop saving";
+    button.style.setProperty("--done", `${100 * (done + failed) / total}%`);
     button.disabled = false;
     return;
   }
@@ -159,9 +185,10 @@ function markCurrent(name) {
     b.setAttribute("aria-current", String(b.dataset.name === name));
     if (b.dataset.name === name) b.scrollIntoView({ block: "nearest" });
   }
-  const at = frames.findIndex((f) => f.name === name);
-  $("position-name").textContent = at < 0 ? "" : name;
-  $("position-index").textContent = at < 0 ? "" : `${at + 1} of ${frames.length}`;
+  shownName = frames.some((f) => f.name === name) ? name : null;
+  $("file-name").textContent = shownName ?? "";
+  $("file-name").title = shownName ?? "";
+  showCount();
 }
 
 // ---------- Remembering settings ----------
@@ -184,7 +211,7 @@ async function rememberSettings(leaving = false) {
 
 function rememberSoon() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not save settings: ${e.message}`)), 300);
+  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not save settings: ${e.message}`, { stay: true })), 300);
 }
 
 async function open(name) {
@@ -193,7 +220,7 @@ async function open(name) {
     await measureSettled();
     await rememberSettings(true);
   } catch (e) {
-    status(`Could not save settings, so this frame stays open: ${e.message}`);
+    status(`Could not save settings, so this frame stays open: ${e.message}`, { stay: true });
     return;
   }
   clearTimeout(timer);
@@ -441,7 +468,7 @@ document.addEventListener("keydown", (e) => {
   if ($("roll-flow").open || $("about").open) return;
   if (e.key === "Escape") {
     if (tool) setTool(null);
-    showDetails(false);
+    status();
     return;
   }
   // ⌘S or Ctrl+S saves, and never stops a save already running.
@@ -473,7 +500,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 // In the app, a right-click shouldn't offer a web page's Reload.
-if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text], #status, #status-more") && !e.target.closest("#about")) e.preventDefault(); });
+if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text], #note") && !e.target.closest("#about")) e.preventDefault(); });
 
 $("reset").addEventListener("click", () => {
   if (!current) return;
@@ -499,7 +526,7 @@ $("export").addEventListener("click", async () => {
     updateSaveButton();
     followBatch();
   } catch (e) {
-    status(`Could not save: ${e.message}`);
+    status(`Could not save: ${e.message}`, { stay: true });
   }
 });
 
@@ -620,7 +647,7 @@ async function voteRoll() {
     showRollReview();
   } catch (e) {
     closeRollFlow();
-    status(`Could not measure the roll: ${e.message}`);
+    status(`Could not measure the roll: ${e.message}`, { stay: true });
   }
 }
 
@@ -634,7 +661,7 @@ async function startRollTask(step, url, body) {
     followBatch();
   } catch (e) {
     closeRollFlow();
-    status(`Could not measure the roll: ${e.message}`);
+    status(`Could not measure the roll: ${e.message}`, { stay: true });
   }
 }
 
@@ -684,7 +711,7 @@ async function followBatch() {
   } catch (e) {
     batch = null;
     updateSaveButton();
-    status(`Could not get save progress: ${e.message}`);
+    status(`Could not get save progress: ${e.message}`, { stay: true });
     return;
   }
   const inRoll = batch.task === "roll" || batch.task === "roll-read";
@@ -698,8 +725,7 @@ async function followBatch() {
     if (inRoll) {
       showRollProgress();
     } else {
-      status(`Saving ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`);
-      $("progress").firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
+      updateSaveButton();
     }
     showFrameStates();
     setTimeout(followBatch, 150);
@@ -711,7 +737,7 @@ async function followBatch() {
     updateSaveButton();
     rollReadingsDone(finished).catch((e) => {
       closeRollFlow();
-      status(`Could not measure the roll: ${e.message}`);
+      status(`Could not measure the roll: ${e.message}`, { stay: true });
     });
     return;
   }
@@ -725,9 +751,8 @@ async function followBatch() {
   if (finished.done === finished.total) selected.clear();
   updateSaveButton();
   for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
-  status(batchSummary(finished));
   lastPath = finished.last_path;
-  $("reveal").hidden = !(shell && lastPath);
+  status(batchSummary(finished), { stay: true, reveal: !!(shell && lastPath) });
 }
 
 // The open frame's base and measurements changed on disk: read them back, and keep the slider
@@ -778,7 +803,7 @@ function measure(done, clearsWarning = false) {
 async function measureNow(done, clearsWarning) {
   const file = current.file, id = ++latestMeasure;
   const areaBefore = current.settings.estimate.area;
-  status("Measuring…");
+  status("Measuring…", { stay: true });
   try {
     const { estimate, baseFound } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
     if (current?.file !== file || id !== latestMeasure) return true;
@@ -791,7 +816,7 @@ async function measureNow(done, clearsWarning) {
     status(done);
   } catch (e) {
     if (current?.file !== file || id !== latestMeasure) return true;
-    status(`Could not measure: ${e.message}`);
+    status(`Could not measure: ${e.message}`, { stay: true });
     return false;
   }
   changed(0);
@@ -877,7 +902,7 @@ async function loadHolder() {
     const { areas } = await (await api("/api/holder", { file, base_rgb, straighten: adj().straighten })).json();
     if (current?.file === file) current.holder = { key, areas };
   } catch (e) {
-    if (current?.file === file) status(`Could not find the film holder: ${e.message}`);
+    if (current?.file === file) status(`Could not find the film holder: ${e.message}`, { stay: true });
   }
 }
 function drawOverlay(drag) {
@@ -1073,7 +1098,7 @@ async function refresh() {
     if (full) drawOverlay();
     histogram(img, clipped);
   } catch (e) {
-    if (file === current?.file) status(`Could not update the preview: ${e.message}`);
+    if (file === current?.file) status(`Could not update the preview: ${e.message}`, { stay: true });
   } finally {
     rendering = false;
     if (renderAgain) { renderAgain = false; refresh(); }
@@ -1086,11 +1111,15 @@ function fit() {
   const stage = $("stage");
   const pad = 56;
   // An open tool's bar takes the top of the stage, so nothing on the image sits under it: not
-  // the crop frame's handles either, which reach out past the image's edge. The bar grows on
-  // a touch screen, so this measures it. Twice, because the image stays centered.
-  const bar = $("toolbar");
+  // the crop frame's handles either, which reach out past the image's edge. A message that stays
+  // takes room too, leaving out its details so the image doesn't move as they open; one that
+  // fades just passes over. Bars grow on a touch screen, so this measures them. Twice, because
+  // the image stays centered.
+  const floats = $("floats"), note = $("note"), more = $("note-more");
   const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--edge-hit")) / 2 : 0;
-  const padY = tool && !bar.hidden ? Math.max(pad, 2 * (bar.offsetTop + bar.offsetHeight + Math.max(10, reach))) : pad;
+  const held = !note.hidden && note.dataset.stays === "true" ? note.offsetTop + note.offsetHeight - (more.hidden ? 0 : more.offsetHeight + parseFloat(getComputedStyle(more).marginTop))
+    : tool ? $("toolbar").offsetTop + $("toolbar").offsetHeight : 0;
+  const padY = held ? Math.max(pad, 2 * (floats.offsetTop + held + Math.max(10, reach))) : pad;
   const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
   $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
   $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
