@@ -166,8 +166,45 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(
 #overlay .holder { fill: url(#holder-hatch); }
 #overlay .hatch { fill: var(--holder); stroke: none; }
 #overlay .drag { stroke-dasharray: 3 3; }
+/* The crop frame. Its markers sit outside the frame, so they never cover a pixel the DNG keeps. */
+#crop-layer { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
+#crop-dim { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+#crop-hole { position: absolute; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .58); }
+#crop-box { --mark: 3px; --corner-hit: 28px; --edge-hit: 18px; position: absolute; outline: 1px solid var(--crop); outline-offset: 0; cursor: move; }
+#crop-box.fills { cursor: crosshair; }
+.crop-h { position: absolute; padding: 0; border: 0; border-radius: 0; background: none; }
+.crop-h i { position: absolute; pointer-events: none; }
+.crop-h.n, .crop-h.s { left: 0; width: 100%; height: var(--edge-hit); cursor: ns-resize; }
+.crop-h.e, .crop-h.w { top: 0; width: var(--edge-hit); height: 100%; cursor: ew-resize; }
+.crop-h.n { top: calc(var(--edge-hit) / -2); }
+.crop-h.s { bottom: calc(var(--edge-hit) / -2); }
+.crop-h.e { right: calc(var(--edge-hit) / -2); }
+.crop-h.w { left: calc(var(--edge-hit) / -2); }
+.crop-h.n i, .crop-h.s i { left: calc(50% - 14px); width: 28px; height: var(--mark); background: var(--crop); }
+.crop-h.e i, .crop-h.w i { top: calc(50% - 14px); width: var(--mark); height: 28px; background: var(--crop); }
+.crop-h.n i { top: calc(var(--edge-hit) / 2 - var(--mark)); }
+.crop-h.s i { bottom: calc(var(--edge-hit) / 2 - var(--mark)); }
+.crop-h.e i { right: calc(var(--edge-hit) / 2 - var(--mark)); }
+.crop-h.w i { left: calc(var(--edge-hit) / 2 - var(--mark)); }
+.crop-h.nw, .crop-h.ne, .crop-h.se, .crop-h.sw { z-index: 1; width: var(--corner-hit); height: var(--corner-hit); }
+.crop-h.nw, .crop-h.se { cursor: nwse-resize; }
+.crop-h.ne, .crop-h.sw { cursor: nesw-resize; }
+.crop-h.nw, .crop-h.ne { top: calc(var(--corner-hit) / -2); }
+.crop-h.se, .crop-h.sw { bottom: calc(var(--corner-hit) / -2); }
+.crop-h.nw, .crop-h.sw { left: calc(var(--corner-hit) / -2); }
+.crop-h.ne, .crop-h.se { right: calc(var(--corner-hit) / -2); }
+/* One box with two borders, so each corner is a single shape. */
+.crop-h.nw i, .crop-h.ne i, .crop-h.se i, .crop-h.sw i { --inset: calc(var(--corner-hit) / 2 - var(--mark)); width: 18px; height: 18px; border: 0 solid var(--crop); }
+.crop-h.nw i, .crop-h.ne i { top: var(--inset); border-top-width: var(--mark); }
+.crop-h.se i, .crop-h.sw i { bottom: var(--inset); border-bottom-width: var(--mark); }
+.crop-h.nw i, .crop-h.sw i { left: var(--inset); border-left-width: var(--mark); }
+.crop-h.ne i, .crop-h.se i { right: var(--inset); border-right-width: var(--mark); }
+@media (pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
 #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); padding: 6px 6px 6px 12px; display: flex; gap: 12px; align-items: center; }
+#tool-actions { flex: none; display: flex; gap: 6px; }
+#tool-done { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
+#tool-done:hover { background: #606060; }
 
 /* Dock */
 #dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }

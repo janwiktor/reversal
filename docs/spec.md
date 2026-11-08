@@ -113,7 +113,7 @@ A settings file records a model version. When the model changes, older settings 
 
 ## Controls and workflow
 
-The screen separates what can break a conversion from what develops it: frames on the left, the image in the middle, and on the right the histogram, then Setup, then development controls. Frame tools and Save sit in a top bar; messages and save progress sit in a status bar. Controls are plain sliders from −100 to +100, with 0 as the automatic result and a value you can type. Double-clicking a slider resets it. Up and down arrows move between frames, and ⌘S or Ctrl+S saves. The look is neutral gray in the system font, with one blue for checkboxes, focus and Save.
+The screen separates what can break a conversion from what develops it: frames on the left, the image in the middle, and on the right the histogram, then Setup, then development controls. Frame tools and Save sit in a top bar; messages and save progress sit in a status bar. Controls are plain sliders from −100 to +100, with 0 as the automatic result and a value you can type. Double-clicking a slider resets it. Up and down arrows move between frames, except while the crop frame is open, and ⌘S or Ctrl+S saves. The look is neutral gray in the system font, with one blue for checkboxes, focus and Save.
 
 ### Writing
 
@@ -129,7 +129,7 @@ Setup decides how the scan is read. It stays pinned above the development contro
 | Measured | Center (size 50–100%, default 85%, without the holder), or Custom to drag over the picture by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
 | Show areas | Draws the film base, measured area and crop on the entire scan, each in the color of its label. With Center, the detected holder is hatched in magenta and labeled Film holder (detected) under Measured. A custom area leaves nothing out, so neither the hatching nor the label shows |
 
-Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Done or Escape does too. A dot in the frame list marks a custom film base or measured area.
+Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Cancel or Escape does too. A dot in the frame list marks a custom film base or measured area.
 
 ### Development
 
@@ -145,8 +145,23 @@ Each group shows one choice: the one in use, or Custom while its drag tool is op
 | Tint | Green against red and blue | Pixels |
 | Saturation | −100 is black and white | Pixels |
 | Rotate 90°, Mirror | Quarter turns, left-right flip; both act on the image as shown | Pixels |
-| Straighten | ±10°. A new angle closes Show areas and any open drag tool. Film base and colors are measured again on letting go of the slider, or after a short pause for arrow keys and typed values, never while it's held. Saving or changing frame waits for that measurement. Custom areas keep their place on the scan, so a large turn can move them off their target | Pixels and measuring |
+| Straighten | ±10°. A new angle closes Show areas and any open drag tool, but not the crop frame. Film base and colors are measured again on letting go of the slider, or after a short pause for arrow keys and typed values, never while it's held. Saving or changing frame waits for that measurement. Custom areas keep their place on the scan, so a large turn can move them off their target | Pixels and measuring |
 | Crop | Entire scan, Measured area, or Custom. Sets what the DNG keeps, never the colors | Pixels |
+
+Custom crop shows the entire scan and dims what's outside a frame. The frame opens on the custom crop if there is one, otherwise on the crop in use, which starts as the entire scan. Choosing Entire scan or Measured area keeps the custom crop with the frame's settings, so Custom brings it back. It stays out of the DNG and doesn't count as an edit. Film base and measured area stay single drags because they pick a sample; a crop is a composition, so it stays adjustable until it's accepted.
+
+| Action | Result |
+| --- | --- |
+| Drag a corner or edge | Resizes the frame. Shift on a corner keeps its shape. The frame stops at the scan and at a minimum size |
+| Drag inside | Moves the frame. A frame filling the scan can't move, so this draws a new one |
+| Drag outside | Draws a new frame |
+| Arrows | Move the frame, or the focused edge or corner, by one screen pixel. Shift moves by 10. Tab reaches the edges and corners |
+| Done or Enter | Applies the frame |
+| Cancel or Escape | Keeps the crop as it was |
+| Entire scan or Measured area | Closes the frame and uses that choice |
+| Saving, changing frame, opening another area tool, or Match film base | Applies the frame first, so what's saved matches what's shown and adjustments aren't lost |
+
+Straighten, Rotate and Mirror keep the frame open, and it holds its place on the scan. Its corner and edge markers sit outside the frame, so they never cover a pixel the DNG keeps.
 
 Reset, in the Develop header, returns the tone and color controls to 0 and the profile to Neutral. It leaves geometry, crop and Setup alone.
 

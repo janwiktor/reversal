@@ -25,7 +25,11 @@ use invert::Settings;
 
 /// XMP packet stored in every positive: conversion settings and model version, plus `crs:WhiteBalance="As Shot"` so raw editors start from our neutral.
 pub fn xmp_packet(source_name: &str, settings: &Settings) -> String {
-    let json = serde_json::to_string(settings).expect("settings serialize");
+    let conversion = Settings {
+        custom_crop: None,
+        ..settings.clone()
+    };
+    let json = serde_json::to_string(&conversion).expect("settings serialize");
     let esc = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -100,6 +104,29 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kept_custom_crop_stays_out_of_the_dng() {
+        let estimate = invert::estimate_on(
+            &Rgb32 {
+                width: 1,
+                height: 1,
+                data: vec![0.2, 0.3, 0.4],
+            },
+            &invert::Hints::default(),
+        );
+        let plain = Settings::new(estimate, invert::Adjust::default());
+        let kept = Settings {
+            custom_crop: Some(image::NRect {
+                x0: 0.1,
+                y0: 0.2,
+                x1: 0.6,
+                y1: 0.7,
+            }),
+            ..plain.clone()
+        };
+        assert_eq!(xmp_packet("a.NEF", &kept), xmp_packet("a.NEF", &plain));
+    }
 
     #[test]
     fn the_chosen_look_is_the_main_profile_and_the_others_stay_selectable() {

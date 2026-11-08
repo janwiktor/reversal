@@ -258,6 +258,10 @@ pub struct Settings {
     pub hints: Hints,
     #[serde(default)]
     pub adjust: Adjust,
+    /// The last custom crop, kept while another crop is in use so it can be picked again.
+    /// It never affects the conversion, and it stays out of the DNG.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_crop: Option<NRect>,
 }
 
 impl Settings {
@@ -267,6 +271,7 @@ impl Settings {
             estimate,
             hints: Hints::default(),
             adjust,
+            custom_crop: None,
         }
     }
 }
