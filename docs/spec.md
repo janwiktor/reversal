@@ -70,6 +70,8 @@ The CLI refuses to overwrite a source file or to write two inputs to one output.
 
 The DNG opens correctly in Lightroom Classic, Lightroom mobile, Camera Raw and Apple Photos. Camera Raw is the reference for how a file should look, and Apple Photos now opens close to it, with a slight shift left.
 
+Raising Exposure or curves in Apple Photos clips bright highlights sooner than in Camera Raw, and turns saturated colors near white to white, because Photos applies its edits through a tone curve rebuilt from three samples of the profile's. Camera raws show it too, but the headroom our curves roll off makes it start sooner. For frames with bright highlights, set exposure in Reversal, or edit in Camera Raw or Lightroom.
+
 ## Conversion science
 
 Conversion happens in density and writes a scene-linear positive. Film records log exposure as optical density, and density is additive: the orange mask is a constant per-channel offset, so it subtracts exactly. In plain RGB the same operation is a multiplication, which is why curve-based inversion fights color balance.
