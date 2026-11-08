@@ -42,18 +42,20 @@ const hints = () => current.settings.hints;
 // Everything the app has to say floats at the top of the image, under an open tool's bar, one
 // message at a time. A message that needs reading or doing stays until dismissed or replaced; a
 // confirmation fades. Anything longer than a line opens from Details.
-let noteTimer = 0;
+let noteTimer = 0, noteStays = false;
 function status(text = "", { stay = false, reveal = false } = {}) {
   const note = $("note"), [head, ...rest] = text.split("\n");
   clearTimeout(noteTimer);
+  noteStays = !!text && (stay || rest.length > 0);
+  // A message that stays needs reading, so it interrupts; a confirmation waits its turn.
+  note.setAttribute("role", noteStays ? "alert" : "status");
   $("note-text").textContent = head;
   $("note-more").textContent = rest.join("\n");
   showDetails(false);
   $("note-details").hidden = !rest.length;
   $("reveal").hidden = !reveal;
-  note.dataset.stays = String(stay || rest.length > 0);
   note.hidden = !text;
-  if (text && note.dataset.stays === "false") fadeLater();
+  if (text && !noteStays) fadeLater();
   fit();
 }
 function fadeLater() {
@@ -66,7 +68,7 @@ function showDetails(on) {
   $("note-more").hidden = !on;
   $("note-details").setAttribute("aria-expanded", String(on));
   // Reading the details keeps the message.
-  if (on) { clearTimeout(noteTimer); $("note").dataset.stays = "true"; fit(); }
+  if (on) { clearTimeout(noteTimer); noteStays = true; fit(); }
 }
 $("note-details").addEventListener("click", () => showDetails($("note-more").hidden));
 $("note-dismiss").addEventListener("click", () => status());
@@ -170,9 +172,13 @@ function updateSaveButton() {
     const { done = 0, failed = 0, total = 1 } = batch;
     button.textContent = total > 1 ? `Stop · ${Math.min(done + failed + 1, total)} of ${total}` : "Stop saving";
     button.style.setProperty("--done", `${100 * (done + failed) / total}%`);
+    // The button isn't announced as it changes, so progress is told separately.
+    const told = `Saving ${Math.min(done + failed + 1, total)} of ${total}`;
+    if ($("save-progress").textContent !== told) $("save-progress").textContent = told;
     button.disabled = false;
     return;
   }
+  $("save-progress").textContent = "";
   button.textContent = selected.size ? `Save ${selected.size} DNG${selected.size > 1 ? "s" : ""}` : "Save DNG";
   button.disabled = !!batch || (!selected.size && !current);
   const box = $("select-all-box");
@@ -467,8 +473,9 @@ $("tool-done").addEventListener("click", () => { if (tool === "crop") applyCrop(
 document.addEventListener("keydown", (e) => {
   if ($("roll-flow").open || $("about").open) return;
   if (e.key === "Escape") {
+    // One step back: out of a tool first, and only then away from a message.
     if (tool) setTool(null);
-    status();
+    else status();
     return;
   }
   // ⌘S or Ctrl+S saves, and never stops a save already running.
@@ -500,7 +507,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 // In the app, a right-click shouldn't offer a web page's Reload.
-if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text], #note") && !e.target.closest("#about")) e.preventDefault(); });
+if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text]") && !e.target.closest("#note, #about")) e.preventDefault(); });
 
 $("reset").addEventListener("click", () => {
   if (!current) return;
@@ -518,7 +525,6 @@ $("export").addEventListener("click", async () => {
   applyOpenCrop();
   const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
   if (!files.length) return;
-  $("reveal").hidden = true;
   try {
     await measureSettled();
     await rememberSettings();
@@ -667,7 +673,6 @@ async function startRollTask(step, url, body) {
 
 $("roll-go").addEventListener("click", () => {
   if (roll?.step === "intro") {
-    $("reveal").hidden = true;
     startRollTask("reading", "/api/roll", { files: roll.files });
   } else if (roll?.step === "review") {
     const bases = roll.readings.filter((r) => roll.ticked.has(r.file)).map((r) => r.base_rgb);
@@ -803,7 +808,7 @@ function measure(done, clearsWarning = false) {
 async function measureNow(done, clearsWarning) {
   const file = current.file, id = ++latestMeasure;
   const areaBefore = current.settings.estimate.area;
-  status("Measuring…", { stay: true });
+  status("Measuring…");
   try {
     const { estimate, baseFound } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
     if (current?.file !== file || id !== latestMeasure) return true;
@@ -1117,7 +1122,7 @@ function fit() {
   // the image stays centered.
   const floats = $("floats"), note = $("note"), more = $("note-more");
   const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--edge-hit")) / 2 : 0;
-  const held = !note.hidden && note.dataset.stays === "true" ? note.offsetTop + note.offsetHeight - (more.hidden ? 0 : more.offsetHeight + parseFloat(getComputedStyle(more).marginTop))
+  const held = !note.hidden && noteStays ? note.offsetTop + note.offsetHeight - (more.hidden ? 0 : more.offsetHeight + parseFloat(getComputedStyle(more).marginTop))
     : tool ? $("toolbar").offsetTop + $("toolbar").offsetHeight : 0;
   const padY = held ? Math.max(pad, 2 * (floats.offsetTop + held + Math.max(10, reach))) : pad;
   const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
@@ -1165,8 +1170,8 @@ function histogram(img, storedClipped) {
   $("clip-high").classList.toggle("over", high / n > 0.005);
   $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
   $("stored").hidden = storedClipped < 0.0005;
-  $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
-  $("stored").title = $("stored").textContent;
+  $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% is too bright to store. Lower Exposure.`;
+  $("stored").title = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
 }
 
 api("/api/version").then((r) => r.json()).then(({ version, commit }) => {
