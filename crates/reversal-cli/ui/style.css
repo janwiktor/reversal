@@ -32,12 +32,61 @@
   --right: 272px;
   --label: 74px;
   --value: 40px;
+  /* Sizes. Controls read these, and a touch screen swaps their values below, so there is one
+     layout with two densities. --hit is the row pitch and the least a control answers to;
+     a control may look smaller and still answer to all of it. */
+  --text: 12px;
+  --leading: 16px;
+  --hit: 24px;
+  --control-h: 24px;
+  --seg: 22px;
+  --field-h: 20px;
+  --thumb: 12px;
+  --thumb-hit: 16px;
+  --check: 14px;
+  --check-hit: 14px;
+  --bar-h: 40px;
+  --head-h: 28px;
+  --foot-h: 24px;
+  --row-gap: 4px;
+  --slider-label-h: 16px;
+  --slider-track-h: 16px;
+  --val-text: var(--text);
+}
+/* Fingers need 44px targets. A mouse doesn't, and at 44px the desktop's Develop panel would
+   scroll and the frame list would show half as many frames, so this is for touch only. Any
+   touch screen counts, also a laptop's next to its trackpad. */
+@media (any-pointer: coarse) {
+  :root {
+    --left: 240px;
+    --right: 312px;
+    --label: 84px;
+    --value: 52px;
+    --text: 13px;
+    --leading: 18px;
+    --hit: 44px;
+    --control-h: 34px;
+    --seg: 32px;
+    --field-h: 34px;
+    --thumb: 20px;
+    --thumb-hit: 44px;
+    --check: 20px;
+    --check-hit: 44px;
+    --bar-h: 52px;
+    --head-h: 44px;
+    --foot-h: 44px;
+    --row-gap: 0px;
+    --slider-label-h: 16px;
+    --slider-track-h: 34px;
+    /* Under 16px, iOS zooms the page in when a field takes focus. */
+    --val-text: 16px;
+  }
 }
 * { box-sizing: border-box; cursor: default; }
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
 body {
-  background: var(--surround); color: var(--ink); font: 400 12px/16px var(--font);
-  display: grid; grid-template: "bar bar bar" 40px "roll stage dock" minmax(0, 1fr) "foot foot foot" 24px / var(--left) minmax(0, 1fr) var(--right);
+  background: var(--surround); color: var(--ink); font: 400 var(--text)/var(--leading) var(--font);
+  display: grid; grid-template: "bar bar bar" var(--bar-h) "roll stage dock" minmax(0, 1fr) "foot foot foot" var(--foot-h) / var(--left) minmax(0, 1fr) var(--right);
   font-variant-numeric: tabular-nums;
   -webkit-user-select: none; user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -59,92 +108,131 @@ p, h2 { margin: 0; }
 
 /* Buttons */
 .btn, .icon, .seg button, .link {
-  height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: none; white-space: nowrap;
+  height: var(--control-h); padding: 0 10px; border: 0; border-radius: 4px; background: none; white-space: nowrap;
 }
+/* A button shorter than --hit still answers to all of it, above and below what it shows.
+   Crop handles place themselves and size their own targets. */
+button:not(.crop-h) { position: relative; }
+button:not(.crop-h)::after {
+  content: ""; position: absolute; left: 0; right: 0;
+  top: min(0px, calc((100% - var(--hit)) / 2)); bottom: min(0px, calc((100% - var(--hit)) / 2));
+}
+/* Hover styles need a pointer that hovers: after a tap, a touch screen keeps them until the
+   next tap, so a control would look active when it isn't. */
 .btn { background: var(--control); box-shadow: inset 0 0 0 1px #4a4a4a; }
-.btn:hover { background: var(--control-hover); }
+@media (hover: hover) { .btn:hover { background: var(--control-hover); } }
 .btn:active { background: var(--control-on); }
 .btn[aria-pressed="true"] { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; }
-.icon { width: 28px; padding: 0; display: inline-grid; place-items: center; color: #cfcfcf; }
-.icon:hover { background: var(--control); color: #fff; }
+.icon { width: max(28px, var(--hit)); padding: 0; display: inline-grid; place-items: center; color: #cfcfcf; }
+@media (hover: hover) { .icon:hover { background: var(--control); color: #fff; } }
 .icon:active, .icon[aria-pressed="true"] { background: var(--control-on); color: #fff; }
 .icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
 button:disabled { opacity: .45; background: none; }
 .link { height: 18px; padding: 0 6px; color: var(--ink); text-decoration: underline; text-decoration-color: #777; text-underline-offset: 2px; }
-.link:hover { text-decoration-color: currentColor; }
+@media (hover: hover) { .link:hover { text-decoration-color: currentColor; } }
 
 /* One control with a few choices. */
 .seg { display: flex; padding: 1px; background: var(--field); border-radius: 5px; box-shadow: inset 0 0 0 1px #3a3a3a; }
-.seg button { flex: 1 1 auto; min-width: 0; height: 22px; padding: 0 8px; color: var(--ink-quiet); }
-.seg button:hover { color: #fff; }
+.seg button { flex: 1 1 auto; min-width: 0; height: var(--seg); padding: 0 8px; color: var(--ink-quiet); }
+@media (hover: hover) { .seg button:hover { color: #fff; } }
 .seg button[aria-pressed="true"] { background: var(--control-on); color: #fff; box-shadow: 0 1px 0 rgb(0 0 0 / .4); }
 .seg button:focus-visible { outline-offset: -1px; }
 
 /* Checkboxes */
 input[type="checkbox"] {
-  appearance: none; -webkit-appearance: none; flex: none; width: 14px; height: 14px; border-radius: 3px;
-  background: var(--field) center / 10px 10px no-repeat; box-shadow: inset 0 0 0 1px #5e5e5e;
+  appearance: none; -webkit-appearance: none; flex: none; width: var(--check); height: var(--check); border-radius: 3px;
+  background: var(--field) center / calc(var(--check) - 4px) no-repeat; box-shadow: inset 0 0 0 1px #5e5e5e;
 }
-input[type="checkbox"]:hover { box-shadow: inset 0 0 0 1px #8c8c8c; }
+@media (hover: hover) { input[type="checkbox"]:hover { box-shadow: inset 0 0 0 1px #8c8c8c; } }
 input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 input[type="checkbox"]:checked { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.2 4 7.4l4.2-4.8' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 input[type="checkbox"]:indeterminate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5h6' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); }
 
 /* Sliders. The track is painted on the input so every browser draws the same thing;
-   --from and --to mark the filled part, measured to the thumb's center. */
+   --from and --to mark the filled part, measured to the thumb's center. The thumb is a
+   --thumb-hit square that paints a --thumb circle, so a finger can take it from around it. */
 input[type="range"] {
-  --x0: calc(6px + (100% - 12px) * var(--from, .5));
-  --x1: calc(6px + (100% - 12px) * var(--to, .5));
-  appearance: none; -webkit-appearance: none; display: block; width: 100%; min-width: 0; height: 20px; background:
+  --x0: calc(var(--thumb-hit) / 2 + (100% - var(--thumb-hit)) * var(--from, .5));
+  --x1: calc(var(--thumb-hit) / 2 + (100% - var(--thumb-hit)) * var(--to, .5));
+  --thumb-fill: #d6d6d6;
+  --thumb-ring: #141414;
+  --thumb-ring-w: 1px;
+  --thumb-paint: radial-gradient(circle closest-side, var(--thumb-fill) calc(var(--thumb) / 2 - .5px), var(--thumb-ring) calc(var(--thumb) / 2) calc(var(--thumb) / 2 + var(--thumb-ring-w) - .5px), transparent calc(var(--thumb) / 2 + var(--thumb-ring-w)));
+  appearance: none; -webkit-appearance: none; display: block; width: 100%; min-width: 0; height: var(--field-h); background:
     linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat,
     linear-gradient(to right, var(--track) var(--x0), #cfcfcf var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat;
 }
 input[type="range"].from-min { background: linear-gradient(to right, var(--track) var(--x0), #cfcfcf var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat; }
 #temperature { background: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat, linear-gradient(to right, #4f86cc, #6f6f6f 50%, #dcae4a) center / 100% 3px no-repeat; }
 #tint { background: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat, linear-gradient(to right, #57a862, #6f6f6f 50%, #c063ae) center / 100% 3px no-repeat; }
-input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #d6d6d6; box-shadow: 0 0 0 1px #141414; }
-input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #d6d6d6; box-shadow: 0 0 0 1px #141414; }
-input[type="range"]:hover::-webkit-slider-thumb { background: #fff; }
-input[type="range"]:hover::-moz-range-thumb { background: #fff; }
-input[type="range"]:focus-visible { outline: none; }
-input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--focus); }
-input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--focus); }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: var(--thumb-hit); height: var(--thumb-hit); border-radius: 50%;
+  background: var(--thumb-paint);
+}
+input[type="range"]::-moz-range-thumb {
+  width: var(--thumb-hit); height: var(--thumb-hit); border: 0; border-radius: 50%;
+  background: var(--thumb-paint);
+}
+@media (hover: hover) { input[type="range"]:hover { --thumb-fill: #fff; } }
+input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); --thumb-ring-w: 2px; }
 
 /* Label, track and a value you can type into, on one line. */
-.slider { display: grid; grid-template-columns: var(--label) minmax(0, 1fr) var(--value); align-items: center; gap: 0 6px; height: 24px; }
+.slider { display: grid; grid-template-columns: var(--label) minmax(0, 1fr) var(--value); align-items: center; gap: 0 6px; height: var(--hit); }
+.slider input[type="range"] { height: 100%; }
 .slider label { color: var(--ink-quiet); white-space: nowrap; }
 .val {
-  width: 100%; height: 20px; padding: 0 4px; text-align: right; border: 0; border-radius: 3px; background: none; color: var(--ink-quiet);
+  width: 100%; height: var(--field-h); padding: 0 4px; font-size: var(--val-text); text-align: right; border: 0; border-radius: 3px; background: none; color: var(--ink-quiet);
   -webkit-user-select: text; user-select: text; cursor: text;
 }
-.val:hover { box-shadow: inset 0 0 0 1px #4e4e4e; color: var(--ink); }
+@media (hover: hover) { .val:hover { box-shadow: inset 0 0 0 1px #4e4e4e; color: var(--ink); } }
 .val:focus { outline: none; background: var(--field); color: #fff; box-shadow: inset 0 0 0 1px var(--focus); }
+/* In the side panel, the label and value share a line and the track gets the panel's full width
+   below them, for precision. A thumb taller than its line reaches up into the label's. */
+#dock .slider {
+  grid-template: "label val" var(--slider-label-h) "range range" var(--slider-track-h) / minmax(0, 1fr) var(--value);
+  gap: 0; height: auto;
+}
+#dock .slider label { grid-area: label; }
+#dock .slider .val { grid-area: val; height: min(var(--field-h), calc(var(--slider-label-h) + 8px)); }
+#dock .slider input[type="range"] { grid-area: range; align-self: end; height: max(var(--slider-track-h), var(--thumb-hit)); }
+/* Where the thumb reaches into the label's line, it goes above the value box. Only the thumb
+   takes touches, so the rest of the line still edits the value: a touch on the track doesn't
+   move the thumb on iOS anyway. */
+@media (any-pointer: coarse) {
+  #dock .slider input[type="range"] { position: relative; z-index: 1; pointer-events: none; }
+  #dock .slider input[type="range"]::-webkit-slider-thumb { pointer-events: auto; }
+  #dock .slider input[type="range"]::-moz-range-thumb { pointer-events: auto; }
+}
 
 /* Top bar, lined up with the columns below it. */
 #bar { grid-area: bar; display: grid; grid-template-columns: var(--left) minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
-#choose-folder { display: flex; align-items: center; gap: 6px; width: calc(100% - 12px); margin: 0 6px; padding: 0 4px; height: 26px; background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
-#choose-folder:not(:disabled):hover { background: var(--control); }
+#choose-folder { display: flex; align-items: center; gap: 6px; width: calc(100% - 12px); margin: 0 6px; padding: 0 4px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
+@media (hover: hover) { #choose-folder:not(:disabled):hover { background: var(--control); } }
 #choose-folder svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--ink-quiet); stroke-width: 1.25; stroke-linejoin: round; }
 #folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px; min-width: 0; }
 #frame-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
 #crop-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); margin-right: 4px; }
-#frame-tools .slider { flex: 0 1 230px; grid-template-columns: auto minmax(60px, 1fr) var(--value); min-width: 110px; }
+/* Straighten takes what the bar has left, for precision: 0.1° steps over ±10°. Its value,
+   like −10.0°, is the widest, so its box is too. */
+#frame-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
 #save { display: flex; justify-content: flex-end; padding: 0 10px; }
-.primary { padding: 0 14px; border: 0; border-radius: 4px; height: 24px; background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
-.primary:not(:disabled):hover { background: #2a7ae0; }
+.primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
+@media (hover: hover) { .primary:not(:disabled):hover { background: #2a7ae0; } }
 .primary:not(:disabled):active { background: #1a61b8; }
 .primary:disabled { background: var(--control); opacity: .55; }
 #export.cancel { background: var(--control); box-shadow: inset 0 0 0 1px #4a4a4a; font-weight: 400; }
-#export.cancel:hover { background: var(--control-hover); }
+@media (hover: hover) { #export.cancel:hover { background: var(--control-hover); } }
 
 /* Frames */
 #roll { grid-area: roll; background: var(--panel); border-right: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
-#roll-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 28px; padding: 0 10px; background: var(--strip); border-bottom: 1px solid var(--seam); color: var(--ink-quiet); }
-#select-all { display: flex; align-items: center; gap: 8px; }
+#roll-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 10px; background: var(--strip); border-bottom: 1px solid var(--seam); color: var(--ink-quiet); }
+#select-all { display: flex; align-items: center; gap: 8px; align-self: stretch; }
 #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
-#files li { display: flex; align-items: center; gap: 8px; height: 24px; padding-left: 10px; }
-#files li:hover { background: var(--row-hover); }
+/* The checkbox answers to --check-hit around it, so the row starts that much further left. */
+#files li { display: flex; align-items: center; gap: 8px; height: var(--hit); padding-left: max(0px, calc(10px - (var(--check-hit) - var(--check)) / 2)); }
+#files .pick { flex: none; display: grid; place-items: center; width: var(--check-hit); align-self: stretch; }
+@media (hover: hover) { #files li:hover { background: var(--row-hover); } }
 #files li:has(button[aria-current="true"]) { background: var(--row-on); }
 #files button { flex: 1; min-width: 0; height: 100%; text-align: left; background: none; border: 0; padding: 0 10px 0 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #files button:focus-visible { outline-offset: -2px; }
@@ -199,12 +287,12 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(
 .crop-h.se i, .crop-h.sw i { bottom: var(--inset); border-bottom-width: var(--mark); }
 .crop-h.nw i, .crop-h.sw i { left: var(--inset); border-left-width: var(--mark); }
 .crop-h.ne i, .crop-h.se i { right: var(--inset); border-right-width: var(--mark); }
-@media (pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
+@media (any-pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
 #toolbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(560px, calc(100% - 24px)); background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); padding: 6px 6px 6px 12px; display: flex; gap: 12px; align-items: center; }
 #tool-actions { flex: none; display: flex; gap: 6px; }
 #tool-done { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
-#tool-done:hover { background: #606060; }
+@media (hover: hover) { #tool-done:hover { background: #606060; } }
 
 /* Dock */
 #dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
@@ -213,18 +301,18 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(
 .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
 
-.panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 28px; padding: 0 4px 0 10px; background: var(--strip); border-block: 1px solid var(--seam); font-weight: 600; }
-.head-btn { height: 20px; padding: 0 8px; background: none; border: 0; border-radius: 3px; color: var(--ink-quiet); font-weight: 400; }
-.head-btn:not(:disabled):hover { background: var(--control); color: var(--ink); }
+.panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 4px 0 10px; background: var(--strip); border-block: 1px solid var(--seam); font-weight: 600; }
+.head-btn { height: calc(var(--control-h) - 4px); padding: 0 8px; background: none; border: 0; border-radius: 3px; color: var(--ink-quiet); font-weight: 400; }
+@media (hover: hover) { .head-btn:not(:disabled):hover { background: var(--control); color: var(--ink); } }
 .head-btn[aria-pressed="true"] { background: var(--control-on); color: #fff; }
 
 #setup { flex: none; padding: 6px 10px 8px; }
 #develop { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 #develop section { padding: 8px 10px; }
 #develop section + section { border-top: 1px solid var(--line); }
-section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height: 20px; }
+section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-height: 20px; }
 .row.first { margin-top: 0; }
-.row { display: grid; grid-template-columns: var(--label) minmax(0, 1fr); align-items: center; gap: 0 6px; min-height: 24px; margin-top: 4px; }
+.row { display: grid; grid-template-columns: var(--label) minmax(0, 1fr); align-items: center; gap: 0 6px; min-height: var(--hit); margin-top: var(--row-gap); }
 .row-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); white-space: nowrap; }
 .swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
 .swatch.crop { border-color: var(--crop); }
@@ -232,7 +320,7 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
 .swatch.base { border-color: var(--base); }
 .swatch.holder { border-color: var(--holder); }
 #holder-legend .row-label { grid-column: 1 / -1; }
-#setup .slider { margin-top: 4px; }
+#setup .slider { margin-top: var(--row-gap); }
 #setup .row .btn { width: 100%; padding: 0 6px; }
 #roll-state { color: var(--ink-quiet); margin-top: 6px; }
 #setup-note { color: var(--warn); margin-top: 6px; }
@@ -246,7 +334,7 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
 .progress { height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; margin-bottom: 8px; }
 .progress div { height: 100%; width: 0; background: #cfcfcf; }
 #roll-table { max-height: 42vh; overflow-y: auto; margin-bottom: 10px; background: var(--field); border-radius: 4px; }
-.roll-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 26px; padding: 0 10px; }
+.roll-row { display: grid; grid-template-columns: var(--check) minmax(0, 1fr) auto; align-items: center; gap: 8px; height: max(26px, var(--hit)); padding: 0 10px; }
 .roll-row + .roll-row { border-top: 1px solid #2a2a2a; }
 .roll-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roll-row .note { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
@@ -267,7 +355,7 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
 #position { flex: none; margin-left: auto; padding-left: 12px; display: flex; gap: 12px; }
 #stored:not([hidden]) + #position { margin-left: 0; }
 #status-more {
-  position: absolute; left: 6px; bottom: 28px; z-index: 2; width: min(640px, calc(100vw - 12px)); max-height: 40vh; overflow-y: auto; padding: 8px 10px;
+  position: absolute; left: 6px; bottom: calc(var(--foot-h) + 4px); z-index: 2; width: min(640px, calc(100vw - 12px)); max-height: 40vh; overflow-y: auto; padding: 8px 10px;
   background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; color: var(--ink);
   -webkit-user-select: text; user-select: text;
 }
@@ -275,7 +363,7 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
 /* A narrow window: drop what names itself, then stack. */
 @media (max-width: 1180px) {
   #crop-label, #frame-tools .slider label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  #frame-tools .slider { grid-template-columns: minmax(60px, 1fr) var(--value); }
+  #frame-tools .slider { grid-template-columns: minmax(60px, 1fr) calc(var(--value) * 1.25); }
   #frame-tools .sep { margin: 0 4px; }
 }
 @media (max-width: 900px) {
@@ -287,5 +375,5 @@ section h2 { font-size: 12px; font-weight: 600; margin-bottom: 2px; line-height:
   #files { flex: none; max-height: 30vh; }
   #dock { border-left: 0; }
   #develop { overflow: visible; }
-  #foot { position: sticky; bottom: 0; height: 24px; }
+  #foot { position: sticky; bottom: 0; height: var(--foot-h); }
 }

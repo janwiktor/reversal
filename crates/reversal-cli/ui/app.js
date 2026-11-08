@@ -79,7 +79,17 @@ function frameRow(f) {
   box.checked = selected.has(f.name);
   box.dataset.name = f.name;
   box.setAttribute("aria-label", `Select ${f.name}`);
-  box.addEventListener("click", (e) => checkFrame(f.name, box.checked, e.shiftKey));
+  // The label is the checkbox's target, larger than the box on a touch screen. A click on it
+  // reaches the box as a second click, so Shift is read from the first.
+  const pick = document.createElement("label");
+  pick.className = "pick";
+  pick.append(box);
+  let shiftOnLabel = false;
+  pick.addEventListener("click", (e) => { if (e.target === pick) shiftOnLabel = e.shiftKey; });
+  box.addEventListener("click", (e) => {
+    checkFrame(f.name, box.checked, e.shiftKey || shiftOnLabel);
+    shiftOnLabel = false;
+  });
   const b = document.createElement("button");
   b.type = "button";
   b.dataset.name = f.name;
@@ -87,7 +97,7 @@ function frameRow(f) {
   const state = document.createElement("span");
   b.append(name, state);
   b.addEventListener("click", () => open(f.name));
-  li.append(box, b);
+  li.append(pick, b);
   showFrameState(f, state);
   return li;
 }
@@ -346,6 +356,11 @@ $("area-percent").addEventListener("dblclick", () => setAreaPercent(null));
 // A value box drives its slider, so a typed number goes the same way as a drag.
 for (const id of [...SLIDERS, "straighten", "area-percent"]) {
   const range = $(id), box = $(`${id}-val`);
+  // The label's whole line edits the value: on a touch screen the box alone is a small target.
+  range.closest(".slider").querySelector("label").addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!box.disabled) box.focus();
+  });
   const set = (v) => {
     const clamped = Math.min(Number(range.max), Math.max(Number(range.min), v));
     if (clamped === Number(range.value)) return;
@@ -1070,8 +1085,12 @@ function fit() {
   if (!img.naturalWidth) return;
   const stage = $("stage");
   const pad = 56;
-  // An open tool's bar takes the top of the stage, so nothing on the image sits under it.
-  const padY = tool ? 112 : pad;
+  // An open tool's bar takes the top of the stage, so nothing on the image sits under it: not
+  // the crop frame's handles either, which reach out past the image's edge. The bar grows on
+  // a touch screen, so this measures it. Twice, because the image stays centered.
+  const bar = $("toolbar");
+  const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--edge-hit")) / 2 : 0;
+  const padY = tool && !bar.hidden ? Math.max(pad, 2 * (bar.offsetTop + bar.offsetHeight + Math.max(10, reach))) : pad;
   const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
   $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
   $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
