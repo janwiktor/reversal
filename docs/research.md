@@ -179,7 +179,7 @@ Hand-made positive DNGs from D5100 samples settled the format. Capture One and d
 
 | Tested | Effect | Decision |
 | --- | --- | --- |
-| 16-bit integer with about 2.3 stops of headroom | Works in Lightroom Classic, Lightroom mobile and Apple Photos, and Highlights and Exposure recover the headroom | Keep |
+| 16-bit integer with about 2.3 stops of headroom | Works in Lightroom Classic, Lightroom mobile and Apple Photos, and Highlights and Exposure recover the headroom, except Exposure in Photos (below) | Keep |
 | Float16 with Deflate | Works in Adobe apps, fails in Photos and Finder | Reject |
 | Several embedded profiles | Lightroom Classic and mobile list all three; in Classic, only the Profile browser shows them. Photos shows no choice but applies the main profile's curve | Embed all three, with the chosen one as main |
 | What the headroom keeps | Display clipping is recoverable up to the stored limit, and real loss was 0–0.7% of the picture. On one frame cropped to the image, Whites −100 took display clipping from 3.0% to 0% | Tone shaping stays in the profile curve |
@@ -193,6 +193,8 @@ Hand-made positive DNGs from D5100 samples settled the format. Capture One and d
 | Exports of one frame from Photos and Camera Raw, same file, before and after those changes | Neutral: ΔE 6.10 to 1.37, Photos darker by 4.8 L, then 0.6 L. Flat: ΔE 10.89 to 1.30, darker by 10.7 L, then 0.7 L | Keep. What's left is that lightness difference and about 0.6 toward green in colored areas |
 | The same changes in Camera Raw | Opens 0.7 L brighter on Neutral and 1.5 L on Flat, which fits a small black subtraction, about 0.004 linear, going away. No export isolated the tag. The app's preview then matches it within 0.1 L on average, where it was 0.7 L and 1.5 L brighter | Accept: the preview, Camera Raw and Photos end up closer together |
 | `boostShadow` in Apple's raw engine | Its default of 0.9 lowers deep shadows slightly, and no tag controlling it was found | Leave it |
+| Exposure edits in Apple Photos, on gray ramps and a frame with sun patches (`_DSC4438`), rendered through Photos' own edit pipeline | Editing a raw adds a raw adjustment, and Photos then applies Exposure through a tone curve rebuilt from the main profile's curve at stored 0.2, 0.5 and 0.8. Neutral reads 0.68, 0.94 and 0.99 there, a Nikon raw about 0.43, 0.80 and 0.96. At +0.15 the frame's clipped share rose from 2.5% to 7.0%, against 3.3% without the raw adjustment, and saturated colors near white turned white. A camera NEF with a heavy highlight shows the same artifact in Photos | A limitation of Photos' raw editing, not of the file. The spec gives the workaround |
+| Giving Photos camera-like samples, by storing frame white higher or with BaselineExposure +1 and a remapped curve | Photos' edits then follow its unedited rendering, but data above about 2.5–3 times frame white clips, in the file or by default in Apple's engine. On `_DSC4438` that is the sun patches, and clipping in Photos' edits stayed at 6.9% | Reject: it gives up headroom in every editor |
 
 ### Language
 
