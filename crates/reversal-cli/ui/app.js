@@ -80,6 +80,10 @@ function frameRow(f) {
   box.dataset.name = f.name;
   box.setAttribute("aria-label", `Select ${f.name}`);
   box.addEventListener("click", (e) => checkFrame(f.name, box.checked, e.shiftKey));
+  // The label is the checkbox's target, larger than the box on a touch screen.
+  const pick = document.createElement("label");
+  pick.className = "pick";
+  pick.append(box);
   const b = document.createElement("button");
   b.type = "button";
   b.dataset.name = f.name;
@@ -87,7 +91,7 @@ function frameRow(f) {
   const state = document.createElement("span");
   b.append(name, state);
   b.addEventListener("click", () => open(f.name));
-  li.append(box, b);
+  li.append(pick, b);
   showFrameState(f, state);
   return li;
 }

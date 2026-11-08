@@ -113,7 +113,9 @@ A settings file records a model version. When the model changes, older settings 
 
 ## Controls and workflow
 
-The screen separates what can break a conversion from what develops it: frames on the left, the image in the middle, and on the right the histogram, then Setup, then development controls. Frame tools and Save sit in a top bar; messages and save progress sit in a status bar. Controls are plain sliders from −100 to +100, with 0 as the automatic result and a value you can type. Double-clicking a slider resets it. Up and down arrows move between frames, except while the crop frame is open, and ⌘S or Ctrl+S saves. The look is neutral gray in the system font, with one blue for checkboxes, focus and Save.
+The screen separates what can break a conversion from what develops it: frames on the left, the image in the middle, and on the right the histogram, then Setup, then development controls. Frame tools and Save sit in a top bar; messages and save progress sit in a status bar. Controls are plain sliders from −100 to +100, with 0 as the automatic result and a value you can type. In the side panel, a slider's label and value share a line and the track spans the panel's full width below them, for precision; choices keep their label on the left and their buttons on the right. Straighten in the top bar takes the bar's free width, up to 440 px. Double-clicking a slider resets it. Up and down arrows move between frames, except while the crop frame is open, and ⌘S or Ctrl+S saves. The look is neutral gray in the system font, with one blue for checkboxes, focus and Save.
+
+On a touch screen, including a laptop's, every control answers to at least 44 px, the size fingers need, and rows are 44 px apart. Sliders get a larger thumb, and typed values use 16 px text so that iOS doesn't zoom in. With a mouse, the layout keeps its 24 px density: at 44 px, the Develop panel would scroll on a 900 px high screen and the frame list would show half as many frames. Both densities are one layout with two sets of sizes.
 
 ### Writing
 
