@@ -364,9 +364,11 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 /* A message with no buttons is its words alone, with even margins. */
 #note:not(:has(.float-actions button:not([hidden]))) { padding-right: 12px; column-gap: 0; }
 #note:not(:has(.float-actions button:not([hidden]))) .float-actions { display: none; }
-/* While the box eases to new words, it uncovers them from the middle out. */
-#note[data-resizing] { overflow: hidden; }
-#note[data-resizing] .float-text { justify-self: center; }
+/* Growing to longer words, the box uncovers them in their final layout through a soft edge, which
+   the script narrows to nothing as the box arrives. */
+@property --edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
+#note-words { display: block; }
+#note[data-resizing] #note-text { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); }
 #note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; }
 .btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
 @media (hover: hover) { .btn.strong:hover { background: #606060; } }
@@ -489,8 +491,10 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
      at its open size against the corner and clipped by the moving edges. */
   #hist[data-resizing] { overflow: hidden; }
   #hist[data-resizing] #hist-body { display: block; position: absolute; top: 6px; right: 6px; }
-  /* Folding, the icon waits in the corner the box shrinks into. */
-  #hist[data-folded][data-resizing] #hist-fold { position: absolute; top: 0; right: 0; z-index: 1; }
+  /* Folding, the icon waits unseen in the corner the box shrinks into, and the script fades it in
+     once the box has arrived. */
+  #hist[data-folded][data-resizing] #hist-fold { position: absolute; inset: 0 0 auto auto; z-index: 1; }
+  #hist[data-folded][data-resizing] #hist-fold svg { opacity: 0; }
   body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist { display: none; opacity: 0; }
   /* It fades as it steps aside and comes back. */
   #hist { transition-property: opacity, display; transition-duration: var(--fade); transition-timing-function: var(--ease); transition-behavior: allow-discrete; }

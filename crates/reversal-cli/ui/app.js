@@ -55,7 +55,7 @@ function status(text = "", { stay = false, reveal = false } = {}) {
   showNote(() => {
     // A message that stays needs reading, so it interrupts; a confirmation waits its turn.
     $("note").setAttribute("role", noteStays ? "alert" : "status");
-    $("note-text").textContent = head;
+    $("note-words").textContent = head;
     $("note-more").textContent = rest.join("\n");
     showDetails(false);
     $("note-details").hidden = !rest.length;
@@ -63,8 +63,9 @@ function status(text = "", { stay = false, reveal = false } = {}) {
   });
   if (!noteStays) fadeLater();
 }
-// A message fades in, and one that follows it while it shows keeps the box, which eases to the
-// new words' size; the words change at once.
+// A message fades in, and one that follows it while it shows keeps the box: the words change at
+// once and the box takes their height, then eases to their width. Growing, it uncovers the words
+// in their final layout through a soft edge, which clears once it arrives.
 let noteFade = null, noteResize = null;
 const motion = (name) => ({ duration: cssTime(name), easing: getComputedStyle(document.documentElement).getPropertyValue("--ease").trim() });
 function showNote(write) {
@@ -72,35 +73,48 @@ function showNote(write) {
   const showing = !note.hidden && !note.dataset.leaving;
   if (!showing || stillMotion.matches) {
     noteFade?.cancel();
+    endNoteResize();
     delete note.dataset.leaving;
     write();
     note.hidden = false;
     if (!stillMotion.matches && !showing) noteFade = note.animate({ opacity: [0, 1] }, motion("--fade"));
     return;
   }
-  const from = note.getBoundingClientRect();
-  noteResize?.cancel();
+  const from = note.getBoundingClientRect().width;
+  endNoteResize();
   write();
-  const to = note.getBoundingClientRect();
-  if (Math.abs(from.width - to.width) < 1 && Math.abs(from.height - to.height) < 1) return;
-  // The words keep their final layout, which the box uncovers, rather than rewrapping as it grows.
-  const words = $("note-text");
-  words.style.width = `${words.getBoundingClientRect().width}px`;
-  note.dataset.resizing = "";
-  noteResize = note.animate({ width: [`${from.width}px`, `${to.width}px`], height: [`${from.height}px`, `${to.height}px`] }, motion("--slide"));
-  noteResize.onfinish = noteResize.oncancel = () => {
-    delete note.dataset.resizing;
-    words.style.width = "";
-  };
+  const to = note.getBoundingClientRect().width;
+  if (Math.abs(from - to) < 1) return;
+  const words = $("note-words"), { duration, easing } = motion("--slide");
+  if (to > from) {
+    words.style.width = `${$("note-text").getBoundingClientRect().width}px`;
+    note.dataset.resizing = "";
+    // The edge stays soft while the box grows, and sharpens as it settles.
+    $("note-text").animate({ "--edge": ["28px", "28px", "0px"], offset: [0, 0.7, 1] }, { duration, easing: "linear" });
+  }
+  const resize = note.animate({ width: [`${from}px`, `${to}px`] }, { duration, easing });
+  noteResize = resize;
+  resize.onfinish = () => { if (noteResize === resize) endNoteResize(); };
+}
+// Ends a resize at once, so a newer one starts clean.
+function endNoteResize() {
+  noteResize?.cancel();
+  noteResize = null;
+  for (const a of $("note-text").getAnimations()) a.cancel();
+  delete $("note").dataset.resizing;
+  $("note-words").style.width = "";
 }
 function hideNote() {
   const note = $("note");
   if (note.hidden || note.dataset.leaving) return;
+  endNoteResize();
   if (stillMotion.matches) { note.hidden = true; return; }
   note.dataset.leaving = "true";
   noteFade?.cancel();
-  noteFade = note.animate({ opacity: 0 }, motion("--fade"));
-  noteFade.onfinish = () => {
+  const fade = note.animate({ opacity: 0 }, motion("--fade"));
+  noteFade = fade;
+  fade.onfinish = () => {
+    if (noteFade !== fade) return;
     note.hidden = true;
     delete note.dataset.leaving;
   };
@@ -322,14 +336,14 @@ for (const button of document.querySelectorAll("#modes button")) {
 // Opening, the box grows from the icon's corner in one motion that reveals a part at a time: left
 // and down to the histogram, then down to the clipping numbers, then to the range warning when
 // there is one. Folding runs the same way back. The parts keep their open size and the box's
-// edges clip them.
+// edges clip them. The icon fades in once the box has folded.
 let histResize = null;
 $("hist-fold").addEventListener("click", () => {
   const hist = $("hist"), body = $("hist-body");
   const folded = !hist.hasAttribute("data-folded");
   const box = (r) => ({ width: r.width, height: r.height });
   const from = box(hist.getBoundingClientRect());
-  histResize?.cancel();
+  endHistResize();
   // The stops are measured open: before folding, or once opened.
   if (!folded) hist.toggleAttribute("data-folded", false);
   const { bodyWidth, stops } = histStops();
@@ -353,12 +367,23 @@ $("hist-fold").addEventListener("click", () => {
   });
   body.style.width = `${bodyWidth}px`;
   hist.dataset.resizing = "";
-  histResize = hist.animate(frames, { duration: cssTime("--slide") * 1.25, easing: getComputedStyle(hist).getPropertyValue("--ease").trim() });
-  histResize.onfinish = histResize.oncancel = () => {
-    delete hist.dataset.resizing;
-    body.style.width = "";
+  const resize = hist.animate(frames, { duration: cssTime("--slide") * 1.25, easing: getComputedStyle(hist).getPropertyValue("--ease").trim() });
+  histResize = resize;
+  resize.onfinish = () => {
+    if (histResize !== resize) return;
+    endHistResize();
+    // Folded, the icon is the last step.
+    if (folded) $("hist-fold").querySelector("svg").animate({ opacity: [0, 1] }, motion("--fade"));
   };
 });
+// Ends a fold or opening at once, so a newer one starts clean. A cancelled animation reports it
+// later, after the newer one has begun, so this doesn't wait for that.
+function endHistResize() {
+  histResize?.cancel();
+  histResize = null;
+  delete $("hist").dataset.resizing;
+  $("hist-body").style.width = "";
+}
 // The open box's size at each part's foot, measured on the open layout.
 function histStops() {
   const hist = $("hist"), body = $("hist-body");
@@ -1101,6 +1126,7 @@ function holderAreas() {
   return tool === "show" && !hints().analysis && holderKnown() ? current.holder.areas : [];
 }
 // Show areas names what it draws, each followed by a dot in its color, as the Setup labels are.
+// The dots pace the list, so it needs no commas.
 function showLegend() {
   if (tool !== "show") return;
   // Until the holder is known, keep it named so the text doesn't change under the reader.
@@ -1109,12 +1135,12 @@ function showLegend() {
   if (adj().crop) items.set("final crop", "crop");
   if (holder) items.set("detected film holder", "holder");
   const list = LIST.formatToParts([...items.keys()]).flatMap((p) => {
-    if (p.type !== "element") return [p.value];
+    if (p.type !== "element") return [p.value.replace(/,\s*/g, " ")];
     const dot = document.createElement("span");
     dot.className = `dot ${items.get(p.value)}`;
     return [p.value, dot];
   });
-  $("tool-text").replaceChildren("Showing the ", ...list, holder ? ", which measuring leaves out" : "");
+  $("tool-text").replaceChildren("Showing the ", ...list, holder ? " auto-ignored in measurement" : "");
 }
 function holderShape() {
   const areas = holderAreas();
