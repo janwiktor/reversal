@@ -9,7 +9,6 @@ const TOOL_TEXT = {
   crop: "Adjust area for the final DNG export.",
   area: "Drag over the exposed image only, avoiding film base, film holder or sprocket holes. This area drives negative conversion, and doesn't affect final crop.",
   base: "Drag over clear unexposed part of the film, avoiding sprocket holes, numbers and film stock markings.",
-  show: "Showing the film base, measured area, final crop, and auto-detected film holder area excluded from analysis.",
 };
 
 let current = null;   // { file, auto, settings }
@@ -350,7 +349,11 @@ function syncControls() {
   $("film-bw").setAttribute("aria-pressed", String(film === "bw"));
   const chosen = !!hints().film;
   const reads = current.filmDetected === "bw" ? "black and white" : "color";
-  $("l-film").classList.toggle("chosen", chosen);
+  // A label's dot says its choice departs from what's detected, in the color its area is drawn in.
+  $("l-film").classList.toggle("changed", chosen);
+  $("l-base").classList.toggle("changed", !!(hints().base || hints().base_rgb));
+  $("l-area").classList.toggle("changed", !!hints().analysis || hints().area_percent != null);
+  $("crop-label").classList.toggle("changed", !!a.crop);
   $("film-seg").title = chosen
     ? `Chosen for this frame. The scan reads as ${reads}; choose that to go back to detecting.`
     : "Detected from the scan. Choose the other type to convert this frame as that instead.";
@@ -370,7 +373,7 @@ function syncControls() {
   $("area-auto").setAttribute("aria-pressed", String(!customArea));
   $("area-draw").setAttribute("aria-pressed", String(customArea));
   $("area-percent-row").hidden = customArea;
-  showHolderLegend();
+  showLegend();
   const customBase = tool === "base" || !!hints().base;
   $("base-auto").setAttribute("aria-pressed", String(!customBase && !hints().base_rgb));
   $("roll-state").hidden = !!hints().base || !hints().base_rgb;
@@ -960,12 +963,23 @@ const holderKnown = () => current.holder?.key === holderKey();
 function holderAreas() {
   return tool === "show" && !hints().analysis && holderKnown() ? current.holder.areas : [];
 }
-function showHolderLegend() {
-  $("holder-legend").hidden = !holderAreas().length;
+// Show areas names what it draws, each followed by a dot in its color, as the Setup labels are.
+function showLegend() {
   if (tool !== "show") return;
-  // Until the holder is known, keep the full text so it doesn't change under the reader.
-  const noHolder = hints().analysis || (holderKnown() && !current.holder.areas.length);
-  $("tool-text").textContent = noHolder ? "Showing the film base, measured area, and final crop." : TOOL_TEXT.show;
+  // Until the holder is known, keep it named so the text doesn't change under the reader.
+  const holder = !hints().analysis && !(holderKnown() && !current.holder.areas.length);
+  const items = [["film base", "base"], ["measured area", "area"]];
+  if (adj().crop) items.push(["final crop", "crop"]);
+  if (holder) items.push(["detected film holder", "holder"]);
+  const parts = ["Showing the "];
+  items.forEach(([name, cls], i) => {
+    if (i) parts.push(i === items.length - 1 ? (items.length > 2 ? ", and " : " and ") : ", ");
+    const dot = document.createElement("span");
+    dot.className = `dot ${cls}`;
+    parts.push(name, dot);
+  });
+  parts.push(holder ? ", which the analysis leaves out." : ".");
+  $("tool-text").replaceChildren(...parts);
 }
 function holderShape() {
   const areas = holderAreas();
@@ -1004,7 +1018,7 @@ function drawOverlay(drag) {
   let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(e.area, "area") + svgRect(e.base_area, "base");
   if (drag) s += `<rect class="drag ${tool}" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
   $("overlay").innerHTML = s;
-  showHolderLegend();
+  showLegend();
 }
 
 let dragStart = null;
