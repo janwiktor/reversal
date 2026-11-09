@@ -4,13 +4,14 @@
 // its shell. The page is the same one the Mac app and a browser get.
 
 import Photos
+import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import WebKit
 
 final class ShellViewController: UIViewController, WKScriptMessageHandlerWithReply, WKNavigationDelegate,
-    UIDocumentPickerDelegate
+    UIDocumentPickerDelegate, PHPickerViewControllerDelegate
 {
     private enum Pick {
         case openFolder, importFolder, importFiles, saveToFiles
@@ -240,6 +241,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             openFolder: { [weak self] in self?.choose(.openFolder, [.folder]) },
             importFolder: { [weak self] in self?.choose(.importFolder, [.folder]) },
             importFiles: { [weak self] in self?.choose(.importFiles, [.rawImage], many: true) },
+            importPhotos: { [weak self] in self?.choosePhotos() },
             open: { [weak self] url in self?.switchTo(url) },
             close: { [weak self] in self?.dismiss(animated: true) }))
         home.modalPresentationStyle = .formSheet
@@ -264,6 +266,48 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             let parent = first.deletingLastPathComponent().lastPathComponent
             runImport(urls, rollName: parent)
         case .saveToFiles, nil: break
+        }
+    }
+
+    /// Scans opened from another app, such as Files or Mail: they join a roll named for where
+    /// they are, and that roll opens.
+    func open(scans: [URL]) {
+        guard let first = scans.first else { return }
+        runImport(scans, rollName: first.deletingLastPathComponent().lastPathComponent)
+    }
+
+    private func choosePhotos() {
+        // Without a library to read, the picker runs on its own and asks for no access.
+        var choice = PHPickerConfiguration()
+        choice.filter = .images
+        choice.selectionLimit = 0
+        // As they are: a raw photo must not arrive as a JPEG made from it.
+        choice.preferredAssetRepresentationMode = .current
+        let picker = PHPickerViewController(configuration: choice)
+        picker.delegate = self
+        top.present(picker, animated: true)
+    }
+
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true) { [weak self] in
+            guard let self, !results.isEmpty else { return }
+            // The day here, not in Greenwich.
+            let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+            self.runPhotosImport(results.map(\.itemProvider), rollName: "Photos \(day)")
+        }
+    }
+
+    private func runPhotosImport(_ photos: [NSItemProvider], rollName: String) {
+        let importer = PhotosImporter()
+        let panel = UIAlertController(title: "Importing", message: "Getting photos…", preferredStyle: .alert)
+        panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in importer.cancel() })
+        top.present(panel, animated: true) { [weak self] in
+            importer.run(
+                photos: photos, rollName: rollName,
+                progress: { finished, total in panel.message = "\(finished) of \(total)" },
+                done: { result, notRaw in
+                    self?.imported(result, panel: panel, notRaw: notRaw)
+                })
         }
     }
 
@@ -299,26 +343,37 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         importer.run(
             sources: sources, rollName: rollName,
             progress: { finished, total in panel.message = "\(finished) of \(total)" },
-            done: { [weak self] result in
-                guard let self else { return }
-                let finish = {
-                    if result.canceled && result.copied + result.skipped == 0 {
-                        // Stopped before anything arrived: nothing to say, and nothing to open.
-                    } else if !result.failed.isEmpty {
-                        let list = result.failed.joined(separator: "\n")
-                        self.top.present(self.alert("Could not import \(result.failed.count) files", list), animated: true)
-                    } else if result.copied + result.skipped == 0 {
-                        self.top.present(self.alert("No scans there", "Choose a folder or files with NEF, CR2, ARW, RAF or DNG scans."), animated: true)
-                    } else {
-                        self.switchTo(result.roll)
-                    }
-                }
-                if panel.presentingViewController != nil {
-                    panel.dismiss(animated: true, completion: finish)
-                } else {
-                    finish()
-                }
-            })
+            done: { [weak self] result in self?.imported(result, panel: panel) })
+    }
+
+    /// How an import ends: its roll opens, or there's a word on why there's nothing to open.
+    /// `notRaw` counts chosen photos that were left out for not being raw.
+    private func imported(_ result: Importer.Result, panel: UIAlertController, notRaw: Int = 0) {
+        let photos = notRaw == 1 ? "1 photo isn't raw" : "\(notRaw) photos aren't raw"
+        let finish = {
+            if result.canceled && result.copied + result.skipped == 0 {
+                // Stopped before anything arrived: nothing to say, and nothing to open.
+            } else if !result.failed.isEmpty {
+                let list = result.failed.joined(separator: "\n")
+                self.top.present(self.alert("Could not import \(result.failed.count) files", list), animated: true)
+            } else if result.copied + result.skipped == 0 {
+                let none = notRaw > 0
+                    ? self.alert("No raw photos there", "Reversal converts the raw file of a scan. A JPEG or HEIC has lost what it measures.")
+                    : self.alert("No scans there", "Choose a folder or files with NEF, CR2, ARW, RAF or DNG scans.")
+                self.top.present(none, animated: true)
+            } else if notRaw > 0 {
+                let note = UIAlertController(title: "\(photos) and stayed behind", message: nil, preferredStyle: .alert)
+                note.addAction(UIAlertAction(title: "OK", style: .default) { _ in self.switchTo(result.roll) })
+                self.top.present(note, animated: true)
+            } else {
+                self.switchTo(result.roll)
+            }
+        }
+        if panel.presentingViewController != nil {
+            panel.dismiss(animated: true, completion: finish)
+        } else {
+            finish()
+        }
     }
 
     // MARK: Getting DNGs out

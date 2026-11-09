@@ -4,6 +4,8 @@
 // which Files shows under On My iPad.
 
 import Foundation
+import PhotosUI
+import UniformTypeIdentifiers
 
 func isScan(_ name: String) -> Bool {
     name.withCString { reversal_is_scan($0) }
@@ -142,7 +144,7 @@ final class Importer {
         return try outcome.get()
     }
 
-    private static func copyCoordinated(_ file: URL, named name: String, into roll: URL) throws -> Bool {
+    static func copyCoordinated(_ file: URL, named name: String, into roll: URL) throws -> Bool {
         let fm = FileManager.default
         let size = { (url: URL) in try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize }
         // Same name and content: already here. Same name only: another frame, as on two cards
@@ -163,5 +165,75 @@ final class Importer {
         try fm.copyItem(at: file, to: partial)
         try fm.moveItem(at: partial, to: target)
         return true
+    }
+}
+
+/// Copies raw photos chosen from the photo library into a roll in the app. The system's picker
+/// runs outside the app and hands over only what was chosen, so this needs no access to the
+/// library. Photos that aren't raw are left out: a JPEG or HEIC of a negative has lost what the
+/// conversion measures.
+final class PhotosImporter {
+    private let lock = NSLock()
+    private var canceled = false
+
+    func cancel() {
+        lock.withLock { canceled = true }
+    }
+
+    private var isCanceled: Bool { lock.withLock { canceled } }
+
+    /// The type to ask a photo for: its raw file, if it has one.
+    private static func rawType(of photo: NSItemProvider) -> String? {
+        photo.registeredTypeIdentifiers.first { UTType($0)?.conforms(to: .rawImage) == true }
+    }
+
+    /// `progress` gets (photos finished, photos in all); both closures run on the main queue.
+    /// `notRaw` in the result counts the photos left out.
+    func run(
+        photos: [NSItemProvider], rollName: String,
+        progress: @escaping (Int, Int) -> Void, done: @escaping (Importer.Result, _ notRaw: Int) -> Void
+    ) {
+        let roll = Library.documents.appendingPathComponent(rollName, isDirectory: true)
+        let raws = photos.compactMap { photo in Self.rawType(of: photo).map { (photo, $0) } }
+        let notRaw = photos.count - raws.count
+        var (copied, skipped) = (0, 0)
+        var failed: [String] = []
+        let finish = {
+            let result = Importer.Result(
+                roll: roll, copied: copied, skipped: skipped, failed: failed, canceled: self.isCanceled)
+            done(result, notRaw)
+        }
+        do {
+            if !raws.isEmpty {
+                try FileManager.default.createDirectory(at: roll, withIntermediateDirectories: true)
+            }
+        } catch {
+            failed.append(error.localizedDescription)
+            return finish()
+        }
+        progress(0, raws.count)
+        // One at a time: each is tens of megabytes, and may come down from iCloud first.
+        func next(_ index: Int) {
+            guard index < raws.count, !isCanceled else { return finish() }
+            let (photo, type) = raws[index]
+            photo.loadFileRepresentation(forTypeIdentifier: type) { file, error in
+                // The file is the picker's copy, and is gone when this returns.
+                var outcome: Result<Bool, Error> = .failure(error ?? CocoaError(.fileReadUnknown))
+                if let file {
+                    outcome = Result { try Importer.copyCoordinated(file, named: file.lastPathComponent, into: roll) }
+                }
+                DispatchQueue.main.async {
+                    switch outcome {
+                    case .success(true): copied += 1
+                    case .success(false): skipped += 1
+                    case .failure(let error):
+                        failed.append("\(photo.suggestedName ?? "A photo"): \(error.localizedDescription)")
+                    }
+                    progress(index + 1, raws.count)
+                    next(index + 1)
+                }
+            }
+        }
+        next(0)
     }
 }

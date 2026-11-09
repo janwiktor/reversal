@@ -11,6 +11,7 @@ struct HomeView: View {
     let openFolder: () -> Void
     let importFolder: () -> Void
     let importFiles: () -> Void
+    let importPhotos: () -> Void
     let open: (URL) -> Void
     let close: () -> Void
 
@@ -36,10 +37,13 @@ struct HomeView: View {
                     Button(action: importFiles) {
                         Label("Import Files…", systemImage: "doc.on.doc")
                     }
+                    Button(action: importPhotos) {
+                        Label("Import from Photos…", systemImage: "photo.on.rectangle")
+                    }
                 } header: {
                     Text("Import")
                 } footer: {
-                    Text("Copy scans into Reversal, also from folders inside the one you choose. The originals stay where they are, and the card can go.")
+                    Text("Copy scans into Reversal, also from folders inside the one you choose. The originals stay where they are, and the card can go. From Photos, only raw photos come along.")
                 }
                 if !rolls.isEmpty {
                     Section("In Reversal") {

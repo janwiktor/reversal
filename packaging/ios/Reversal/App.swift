@@ -23,13 +23,29 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     private let shell = ShellViewController()
 
     func scene(
-        _ scene: UIScene, willConnectTo _: UISceneSession, options _: UIScene.ConnectionOptions
+        _ scene: UIScene, willConnectTo _: UISceneSession, options: UIScene.ConnectionOptions
     ) {
         guard let scene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: scene)
         window.rootViewController = shell
         window.makeKeyAndVisible()
         self.window = window
+        opened = options.urlContexts.map(\.url)
+    }
+
+    /// Scans another app opened in Reversal while it was closed, until the shell is on screen.
+    private var opened: [URL] = []
+
+    func sceneDidBecomeActive(_: UIScene) {
+        guard !opened.isEmpty else { return }
+        let scans = opened
+        opened = []
+        // After the shell's own start, which opens the last folder or asks for one.
+        DispatchQueue.main.async { self.shell.open(scans: scans) }
+    }
+
+    func scene(_: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+        shell.open(scans: contexts.map(\.url))
     }
 
     func sceneDidEnterBackground(_: UIScene) { shell.rememberEdits() }
