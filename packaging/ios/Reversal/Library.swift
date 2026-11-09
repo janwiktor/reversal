@@ -15,8 +15,31 @@ func isScan(_ name: String) -> Bool {
 struct Roll: Identifiable {
     let url: URL
     let frames: Int
+    /// The DNGs saved from it, in its positives folder.
+    let dngs: Int
+    /// Everything in it: scans, DNGs and settings.
+    let bytes: Int64
     var id: URL { url }
     var name: String { url.lastPathComponent }
+    var positives: URL { url.appendingPathComponent("positives", isDirectory: true) }
+
+    /// Such as "36 scans, 12 DNGs".
+    var contents: String {
+        let scans = frames == 1 ? "1 scan" : "\(frames) scans"
+        return dngs == 0 ? scans : "\(scans), \(dngs == 1 ? "1 DNG" : "\(dngs) DNGs")"
+    }
+
+    static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// The DNGs themselves, in name order.
+    func dngFiles() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: positives, includingPropertiesForKeys: nil)) ?? []
+        return files
+            .filter { $0.pathExtension.lowercased() == "dng" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
 }
 
 enum Library {
@@ -34,7 +57,12 @@ enum Library {
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
             .map { folder in
                 let names = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
-                return Roll(url: folder, frames: names.filter(isScan).count)
+                var bytes: Int64 = 0
+                for case let file as URL in fm.enumerator(at: folder, includingPropertiesForKeys: [.fileSizeKey]) ?? .init() {
+                    bytes += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+                }
+                let roll = Roll(url: folder, frames: names.filter(isScan).count, dngs: 0, bytes: bytes)
+                return Roll(url: folder, frames: roll.frames, dngs: roll.dngFiles().count, bytes: bytes)
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -51,6 +79,23 @@ enum Library {
         guard let bookmark = UserDefaults.standard.data(forKey: lastFolderKey) else { return nil }
         var stale = false
         return try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale)
+    }
+
+    /// A name a roll can take: one folder's worth, and not another roll's.
+    static func canRename(_ roll: Roll, to name: String) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != roll.name, !name.contains("/"), !name.hasPrefix(".") else { return false }
+        return !FileManager.default.fileExists(atPath: documents.appendingPathComponent(name).path)
+    }
+
+    static func rename(_ roll: Roll, to name: String) throws -> URL {
+        let target = documents.appendingPathComponent(name.trimmingCharacters(in: .whitespaces), isDirectory: true)
+        try FileManager.default.moveItem(at: roll.url, to: target)
+        return target
+    }
+
+    static func delete(_ roll: Roll) throws {
+        try FileManager.default.removeItem(at: roll.url)
     }
 
     static func isInApp(_ url: URL) -> Bool {

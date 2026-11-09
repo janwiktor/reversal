@@ -234,19 +234,80 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     }
 
     private func showHome() {
-        let home = UIHostingController(rootView: HomeView(
-            rolls: Library.rolls(),
-            lastFolder: Library.lastFolder(),
-            canClose: folder != nil,
+        let actions = HomeActions(
             openFolder: { [weak self] in self?.choose(.openFolder, [.folder]) },
             importFolder: { [weak self] in self?.choose(.importFolder, [.folder]) },
             importFiles: { [weak self] in self?.choose(.importFiles, [.rawImage], many: true) },
             importPhotos: { [weak self] in self?.choosePhotos() },
             open: { [weak self] url in self?.switchTo(url) },
-            close: { [weak self] in self?.dismiss(animated: true) }))
+            close: { [weak self] in self?.dismiss(animated: true) },
+            exportDngs: { [weak self] roll in
+                self?.buttonPlace = nil
+                self?.showExport(roll.dngFiles())
+            },
+            rename: { [weak self] roll, name, done in self?.rename(roll, to: name, then: done) },
+            delete: { [weak self] roll, done in self?.delete(roll, then: done) },
+            hasOpenFolder: { [weak self] in self?.folder != nil })
+        let home = UIHostingController(rootView: HomeView(lastFolder: Library.lastFolder(), actions: actions))
         home.modalPresentationStyle = .formSheet
         home.isModalInPresentation = folder == nil
+        self.home = home
         top.present(home, animated: true)
+    }
+
+    /// The start screen, while it's up. With no folder open it can't be put away.
+    private weak var home: UIViewController?
+
+    /// A roll that's open has to close before its folder moves or goes: the engine holds it,
+    /// and may be saving into it. `change` then runs with the engine closed.
+    private func closing(_ roll: Roll, then change: @escaping (_ wasOpen: Bool) -> Void) {
+        let isOpen = folder?.standardizedFileURL == roll.url.standardizedFileURL
+        guard isOpen else { return change(false) }
+        let close = { [weak self] in
+            self?.engine.close {
+                self?.folder = nil
+                self?.busy = false
+                self?.home?.isModalInPresentation = true
+                change(true)
+            }
+        }
+        busy ? stopWork(then: { close() }) : close()
+    }
+
+    /// Opens a roll again behind the start screen, which stays up, after a change to it.
+    private func reopen(_ url: URL, then done: @escaping () -> Void) {
+        show(folder: url) { [weak self] opened in
+            self?.home?.isModalInPresentation = !opened
+            done()
+        }
+    }
+
+    private func rename(_ roll: Roll, to name: String, then done: @escaping () -> Void) {
+        closing(roll) { [weak self] wasOpen in
+            guard let self else { return }
+            var now = roll.url
+            do {
+                now = try Library.rename(roll, to: name)
+            } catch {
+                self.top.present(self.alert("Could not rename \(roll.name)", error.localizedDescription), animated: true)
+            }
+            wasOpen ? self.reopen(now, then: done) : done()
+        }
+    }
+
+    private func delete(_ roll: Roll, then done: @escaping () -> Void) {
+        closing(roll) { [weak self] wasOpen in
+            guard let self else { return }
+            do {
+                try Library.delete(roll)
+                // The page still shows the roll that's gone, behind a start screen that now stays.
+                if wasOpen { self.web.loadHTMLString("", baseURL: Engine.page) }
+            } catch {
+                self.top.present(self.alert("Could not delete \(roll.name)", error.localizedDescription), animated: true)
+                if wasOpen { return self.reopen(roll.url, then: done) }
+            }
+            done()
+        }
     }
 
     private func choose(_ what: Pick, _ types: [UTType], many: Bool = false) {
@@ -406,7 +467,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         sheet.addAction(UIAlertAction(title: "Save to Files…", style: .default) { _ in self.saveToFiles(dngs) })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         anchor(sheet)
-        present(sheet, animated: true)
+        top.present(sheet, animated: true)
     }
 
     /// Where the page's button is, in the web view, as the page said with its request.
@@ -417,31 +478,36 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         return CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
     }
 
-    /// Points a popover at the page's button, as iPad requires.
+    /// Points a popover at the page's button, as iPad requires, or at the middle of what's on
+    /// top when the request didn't come from the page.
     private func anchor(_ popover: UIViewController) {
-        popover.popoverPresentationController?.sourceView = web
-        popover.popoverPresentationController?.sourceRect =
-            buttonPlace ?? CGRect(x: web.bounds.midX, y: web.bounds.maxY, width: 0, height: 0)
+        let (view, place): (UIView, CGRect) =
+            if let buttonPlace, top === self { (web, buttonPlace) } else {
+                (top.view, CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0))
+            }
+        popover.popoverPresentationController?.sourceView = view
+        popover.popoverPresentationController?.sourceRect = place
+        if view !== web { popover.popoverPresentationController?.permittedArrowDirections = [] }
     }
 
     private func share(_ dngs: [URL]) {
         let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: nil)
         anchor(sheet)
-        present(sheet, animated: true)
+        top.present(sheet, animated: true)
     }
 
     private func saveToFiles(_ dngs: [URL]) {
         pick = .saveToFiles
         let picker = UIDocumentPickerViewController(forExporting: dngs, asCopy: true)
         picker.delegate = self
-        present(picker, animated: true)
+        top.present(picker, animated: true)
     }
 
     private func saveToPhotos(_ dngs: [URL]) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
                 DispatchQueue.main.async {
-                    self.present(self.alert("Reversal can't add to Photos", "Allow it in Settings, under Privacy & Security."), animated: true)
+                    self.top.present(self.alert("Reversal can't add to Photos", "Allow it in Settings, under Privacy & Security."), animated: true)
                 }
                 return
             }
@@ -456,7 +522,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
                     let reply = added
                         ? self.alert("Saved to Photos", dngs.count == 1 ? dngs[0].lastPathComponent : "\(dngs.count) DNGs")
                         : self.alert("Photos did not accept this", error?.localizedDescription ?? "")
-                    self.present(reply, animated: true)
+                    self.top.present(reply, animated: true)
                 }
             }
         }

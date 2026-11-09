@@ -38,6 +38,14 @@ final class Engine {
         }
     }
 
+    /// Closes the open folder, after the requests already waiting. `done` runs on the main queue.
+    func close(done: @escaping () -> Void) {
+        queue.async {
+            reversal_engine_close()
+            DispatchQueue.main.async(execute: done)
+        }
+    }
+
     /// Lets go of what the engine keeps ready, after the request it's answering.
     func trim() {
         queue.async { reversal_engine_trim() }
