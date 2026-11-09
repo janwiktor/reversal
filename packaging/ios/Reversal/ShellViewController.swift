@@ -102,7 +102,10 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         guard !started else { return }
         started = true
         watchHeat()
-        backgroundWork.onExpired = { [weak self] in self?.stopForNow() }
+        backgroundWork.onExpired = { [weak self] stopped in
+            guard let self else { return stopped() }
+            self.stopForNow(then: stopped)
+        }
         // A card that's gone by now is no news: just ask what to open.
         guard let last = Library.lastFolder() else { return showHome() }
         show(folder: last) { [weak self] opened in

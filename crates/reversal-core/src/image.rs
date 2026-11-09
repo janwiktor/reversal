@@ -309,8 +309,9 @@ mod tests {
 
     fn numbered(w: usize, h: usize) -> Rgb32 {
         let mut img = Rgb32::new(w, h);
+        // Each channel its own value, so a pixel put together from two others would show.
         for (i, v) in img.data.iter_mut().enumerate() {
-            *v = (i / 3) as f32;
+            *v = (i / 3) as f32 + (i % 3) as f32 / 4.0;
         }
         img
     }
@@ -358,8 +359,18 @@ mod tests {
         let img = numbered(7, 5);
         let mut flipped = img.clone();
         flipped.flip_h_in_place();
-        assert_eq!(flipped.data, img.flip_h().data);
-        assert_eq!(flipped.get(0, 0), img.get(6, 0));
+        for y in 0..5 {
+            for x in 0..7 {
+                assert_eq!(flipped.get(x, y), img.get(6 - x, y));
+            }
+        }
+        // A half turn in place puts each pixel opposite, whole.
+        let half = img.clone().into_rotated_cw(2);
+        for y in 0..5 {
+            for x in 0..7 {
+                assert_eq!(half.get(x, y), img.get(6 - x, 4 - y));
+            }
+        }
         for turns in 0..5 {
             let turned = img.clone().into_rotated_cw(turns);
             let copy = img.rotate_cw(turns);

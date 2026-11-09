@@ -159,6 +159,8 @@ struct State {
     notices: Option<PathBuf>,
     folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
+    /// The frame last asked for: the one on screen.
+    shown: Option<String>,
     batch: Batch,
     roll_readings: Arc<Mutex<Vec<RollReading>>>,
 }
@@ -271,9 +273,15 @@ impl Engine {
     }
 
     /// Lets go of the frames kept ready to show, when the system is short of memory. They are
-    /// decoded again when opened.
+    /// decoded again when opened. The frame on screen stays: decoding it again at the next
+    /// slider move would take the most memory at the worst time.
     pub fn trim(&mut self) {
-        self.state.cache = HashMap::new();
+        let state = &mut self.state;
+        let shown = state
+            .shown
+            .as_ref()
+            .and_then(|file| state.cache.remove_entry(file));
+        state.cache = shown.into_iter().collect();
     }
 }
 
@@ -438,6 +446,7 @@ impl State {
         State {
             served,
             notices: None,
+            shown: None,
             folder: Arc::new(Folder::new(dir)),
             cache: HashMap::new(),
             batch: Batch::default(),
@@ -639,6 +648,7 @@ impl State {
     }
 
     fn ensure_loaded(&mut self, file: &str) -> Result<&Loaded, (u16, String)> {
+        self.shown = Some(file.to_string());
         if !self.cache.contains_key(file) {
             let path = self.folder.resolve(file)?;
             let t = Instant::now();
@@ -722,9 +732,10 @@ impl State {
         self.batch
             .start(files, export_workers(), move |file| {
                 let t = Instant::now();
-                let exported = folder.export_frame(file);
-                folder.saving_reached(file);
-                let (out, bytes, warning) = exported?;
+                // Also when the conversion panics: the save was through with the frame, and it
+                // mustn't be offered as one the save never reached.
+                let _reached = Reached(&folder, file);
+                let (out, bytes, warning) = folder.export_frame(file)?;
                 println!(
                     "exported {} ({:.1} MB, {:.1} s)",
                     out.display(),
@@ -802,6 +813,15 @@ impl State {
             )
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
+    }
+}
+
+/// Takes a frame off the list of those a save hasn't reached, when the save lets go of it.
+struct Reached<'a>(&'a Folder, &'a str);
+
+impl Drop for Reached<'_> {
+    fn drop(&mut self) {
+        self.0.saving_reached(self.1);
     }
 }
 
@@ -1011,6 +1031,44 @@ mod tests {
         let other = r#"{"files":["../a.NEF"]}"#;
         let outside = engine.respond(&request(Method::Post, "/api/positives", &own, other));
         assert_eq!(outside.status, 404);
+
+        // Frames a save was cut short before are listed until they're let go: by a Stop, or
+        // by the page when its offer is turned down. Stopping for later keeps them.
+        let left = ["a.NEF".to_string(), "b.NEF".to_string()];
+        let unfinished = |engine: &mut Engine| {
+            let files = engine.respond(&request(Method::Get, "/api/files", &[], ""));
+            let files: serde_json::Value = serde_json::from_slice(&files.body).unwrap();
+            files["unfinished"].clone()
+        };
+        let post = |engine: &mut Engine, url: &str, body: &str| {
+            engine
+                .respond(&request(Method::Post, url, &own, body))
+                .status
+        };
+        engine.state.folder.saving_starts(&left);
+        assert_eq!(unfinished(&mut engine), json!(["a.NEF", "b.NEF"]));
+        assert_eq!(
+            post(&mut engine, "/api/export/cancel", r#"{"later":true}"#),
+            200
+        );
+        assert_eq!(unfinished(&mut engine), json!(["a.NEF", "b.NEF"]));
+        assert_eq!(post(&mut engine, "/api/export/cancel", "{}"), 200);
+        assert_eq!(unfinished(&mut engine), json!([]));
+        engine.state.folder.saving_starts(&left);
+        assert_eq!(post(&mut engine, "/api/export/forget", "{}"), 200);
+        assert_eq!(unfinished(&mut engine), json!([]));
+        // A save that gets through its frames leaves no list, also when every frame fails:
+        // these aren't raw files.
+        assert_eq!(post(&mut engine, "/api/export", both), 200);
+        for _ in 0..500 {
+            if !engine.state.batch.is_running() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!engine.state.batch.is_running());
+        assert_eq!(unfinished(&mut engine), json!([]));
+        assert!(!dir.join("positives/.reversal-saving.json").exists());
 
         // Mistakes come back as JSON, not as a panic: a bad body, a path or a method unknown.
         let bad = engine.respond(&request(Method::Post, "/api/roll/vote", &own, "{"));

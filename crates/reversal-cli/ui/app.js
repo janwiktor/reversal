@@ -155,8 +155,19 @@ const READ_MS = 3500, READ_MS_PER_CHAR = 40, READ_FREE_CHARS = 40, READ_MAX_MS =
 const DOUBLE_CLICK_MS = 400;
 let noteTimer = 0, noteStays = false, dismissTimer = 0;
 let noteAction = null;  // what the message's own button does
+// An offer to finish a save that was cut short, as { text, label, reveal }, until it's answered:
+// taken, or put away by the user. Other messages come and go around it.
+let offer = null;
+let offerShown = false;  // the message on screen is the offer
 // `action` is { label, run }: one thing to do about the message, which closes it.
 function status(text = "", { stay = false, reveal = false, action = null } = {}) {
+  if (offer && !action?.offer) {
+    // A confirmation that would fade isn't worth losing the offer for, and nothing but the
+    // user puts the offer away. A message that needs reading takes its place for a while.
+    if (!text) { if (!offerShown) showOffer(); return; }
+    if (!stay && !text.includes("\n")) return;
+  }
+  offerShown = !!action?.offer;
   const [head, ...rest] = text.split("\n");
   clearTimeout(noteTimer);
   clearTimeout(dismissTimer);
@@ -229,14 +240,23 @@ $("note-details").addEventListener("click", () => showDetails($("note-more").hid
 $("note").addEventListener("click", (e) => {
   clearTimeout(dismissTimer);
   if (e.detail > 1 || e.target.closest("button, #note-more")) return;
-  dismissTimer = setTimeout(() => { if (getSelection().isCollapsed) status(); }, DOUBLE_CLICK_MS);
+  dismissTimer = setTimeout(() => { if (getSelection().isCollapsed) dismissNote(); }, DOUBLE_CLICK_MS);
 });
+// The user puts the message away. If it's the offer, that's its answer.
+function dismissNote() {
+  if (offerShown) forgetOffer();
+  status();
+}
 // For the keyboard and screen readers, which can't click the box.
-$("note-dismiss").addEventListener("click", () => status());
+$("note-dismiss").addEventListener("click", dismissNote);
 $("note-action").addEventListener("click", () => {
   const run = noteAction;
+  // Once: the message fades for a moment after it's answered. The offer waits for other work.
+  if (!run || (offerShown && batch)) return;
+  noteAction = null;
+  if (offerShown) offer = null;
   status();
-  run?.();
+  run();
 });
 
 
@@ -828,7 +848,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     // One step back: out of a tool first, and only then away from a message.
     if (tool) setTool(null);
-    else status();
+    else dismissNote();
     return;
   }
   // ⌘S or Ctrl+S saves, and never stops a save already running.
@@ -888,6 +908,9 @@ async function save(files) {
     await measureSettled();
     await rememberSettings();
     batch = await (await api("/api/export", { files })).json();
+    // A save lists its own frames, in place of what an earlier one left.
+    unfinished = [];
+    if (offer) { offer = null; if (offerShown) status(); }
     updateSaveButton();
     followBatch();
   } catch (e) {
@@ -896,13 +919,23 @@ async function save(files) {
 }
 
 // A save that was cut short, by the app being closed or the device needing a rest, left frames
-// unsaved. They're offered once: asked and not taken up, the user has moved on.
-function restOfSave(label) {
+// unsaved, and the folder lists them. They're offered until the user takes the offer, puts it
+// away, or saves something else: the list is only dropped then, so that closing the app or
+// leaving the folder with the offer on screen loses nothing.
+function offerRest(text, label, reveal = false) {
+  if (!unfinished.length) return false;
+  offer = { text, label, reveal };
+  showOffer();
+  return true;
+}
+function showOffer() {
   const files = unfinished;
-  if (!files.length) return null;
+  status(offer.text, { stay: true, reveal: offer.reveal, action: { label: offer.label, offer: true, run: () => save(files) } });
+}
+function forgetOffer() {
+  offer = null;
   unfinished = [];
   api("/api/export/forget", {}).catch(() => {});
-  return { label: label ?? (files.length > 1 ? "Save them" : "Save it"), run: () => save(files) };
 }
 
 // ---------- Matching the film base across a roll ----------
@@ -1126,10 +1159,11 @@ async function followBatch() {
   updateSaveButton();
   for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
   lastPath = finished.last_path;
+  const reveal = !!(shell && lastPath);
   // Stopped for now, not by the user: the rest is still wanted.
-  const rest = finished.canceled ? restOfSave("Save the rest") : null;
-  // Like any message, a save's result fades unless it has problems to read or a rest to save.
-  status(batchSummary(finished), { reveal: !!(shell && lastPath), stay: !!rest, action: rest });
+  if (finished.canceled && offerRest(batchSummary(finished), "Save the rest", reveal)) return;
+  // Like any message, a save's result fades unless it has problems to read.
+  status(batchSummary(finished), { reveal });
 }
 
 // The open frame's base and measurements changed on disk: read them back, and keep the slider
@@ -1631,8 +1665,8 @@ showHistRows(false, false, { now: true });
 $("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
 loadFiles().then(() => {
-  const left = unfinished.length, rest = restOfSave();
-  if (rest) status(`Saving stopped with ${left} frame${left > 1 ? "s" : ""} left`, { stay: true, action: rest });
+  const left = unfinished.length;
+  offerRest(`Saving stopped with ${left} frame${left > 1 ? "s" : ""} left`, left > 1 ? "Save them" : "Save it");
 }).catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
 // Reloaded while saving: pick the progress back up.
 api("/api/export/status").then((r) => r.json()).then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
