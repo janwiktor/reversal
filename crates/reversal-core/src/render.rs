@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::color;
 use crate::dng;
 use crate::image::{for_each_part, Rgb32};
-use crate::invert;
+use crate::invert::{self, Film};
 
 /// Sample count of the tone curves written to the DNG and used for previews. Apple's raw engine
 /// reads a curve correctly only with evenly spaced samples, and at most 1024 of them.
@@ -20,8 +20,8 @@ const STORED_REACH: f32 = 4.0;
 const BLACKS_RANGE: f32 = 0.12;
 /// Strength of the shadows and highlights bumps; below 1 the curve can't fold over.
 const BUMP_RANGE: f32 = 0.9;
-/// Saturation the Vivid profile adds, in its look table.
-const VIVID_SATURATION: f32 = 1.15;
+/// Saturation the Hard profile adds to color, in its look table.
+const HARD_SATURATION: f32 = 1.15;
 /// Display-linear value where a raw editor's highlight roll-off starts. Fitted to an
 /// editor's rendering of a Neutral frame.
 const ROLLOFF_KNEE: f32 = 0.2;
@@ -35,18 +35,22 @@ pub enum Look {
     Neutral,
     /// Low contrast, with the whole stored range rolled off below white.
     Flat,
-    /// More contrast and saturation.
-    Vivid,
+    /// More contrast, and on color more saturation. Called Vivid before black and white.
+    #[serde(alias = "vivid")]
+    Hard,
 }
 
 impl Look {
-    pub const ALL: [Look; 3] = [Look::Neutral, Look::Flat, Look::Vivid];
+    pub const ALL: [Look; 3] = [Look::Neutral, Look::Flat, Look::Hard];
 
-    pub fn profile_name(self) -> &'static str {
-        match self {
-            Look::Neutral => "Reversal Neutral",
-            Look::Flat => "Reversal Flat",
-            Look::Vivid => "Reversal Vivid",
+    pub fn profile_name(self, film: Film) -> &'static str {
+        match (film, self) {
+            (Film::Color, Look::Neutral) => "Reversal Neutral",
+            (Film::Color, Look::Flat) => "Reversal Flat",
+            (Film::Color, Look::Hard) => "Reversal Hard",
+            (Film::Bw, Look::Neutral) => "Reversal B&W Neutral",
+            (Film::Bw, Look::Flat) => "Reversal B&W Flat",
+            (Film::Bw, Look::Hard) => "Reversal B&W Hard",
         }
     }
 
@@ -55,7 +59,7 @@ impl Look {
         match self {
             Look::Neutral => 1.5,
             Look::Flat => 0.4,
-            Look::Vivid => 2.2,
+            Look::Hard => 2.2,
         }
     }
 
@@ -67,10 +71,14 @@ impl Look {
         }
     }
 
-    fn saturation(self) -> f32 {
-        match self {
-            Look::Vivid => VIVID_SATURATION,
-            _ => 1.0,
+    /// Saturation of the profile's look table. Black and white holds it at 0, so white balance
+    /// or saturation moves in an editor can't tint the picture; toning applied after the profile
+    /// still can.
+    fn saturation(self, film: Film) -> f32 {
+        match (film, self) {
+            (Film::Bw, _) => 0.0,
+            (Film::Color, Look::Hard) => HARD_SATURATION,
+            (Film::Color, _) => 1.0,
         }
     }
 }
@@ -143,12 +151,12 @@ pub fn tone_curve(look: Look, tone: Tone, points: usize) -> Vec<(f32, f32)> {
         .collect()
 }
 
-/// The DNG profile of a look under the current tone sliders.
-pub fn profile(look: Look, tone: Tone) -> dng::Profile {
+/// The DNG profile of a look for a film type, under the current tone sliders.
+pub fn profile(look: Look, tone: Tone, film: Film) -> dng::Profile {
     dng::Profile {
-        name: look.profile_name().into(),
+        name: look.profile_name(film).into(),
         tone_curve: tone_curve(look, tone, CURVE_POINTS),
-        saturation: look.saturation(),
+        saturation: look.saturation(film),
     }
 }
 
@@ -279,7 +287,7 @@ mod tests {
 
     #[test]
     fn curve_samples_are_evenly_spaced_and_few_enough_for_apples_engine() {
-        let c = profile(Look::Neutral, Tone::default()).tone_curve;
+        let c = profile(Look::Neutral, Tone::default(), Film::Color).tone_curve;
         assert!(c.len() <= 1024);
         let step = 1.0 / (CURVE_POINTS - 1) as f32;
         for (i, &(x, _)) in c.iter().enumerate() {
@@ -330,9 +338,9 @@ mod tests {
                 whites,
                 ..Tone::default()
             };
-            to_srgb8(&gray(v), &profile(look, tone))[1] as i32
+            to_srgb8(&gray(v), &profile(look, tone, Film::Color))[1] as i32
         };
-        for look in [Look::Neutral, Look::Vivid] {
+        for look in [Look::Neutral, Look::Hard] {
             for i in 0..=100 {
                 let v = i as f32 / 100.0;
                 let at_zero = shown(look, 0.0, v);
@@ -368,11 +376,14 @@ mod tests {
     }
 
     #[test]
-    fn vivid_is_harder_and_more_saturated_than_flat() {
+    fn hard_is_harder_and_more_saturated_than_flat() {
         let d = Tone::default();
-        assert!(display(Look::Vivid, d, 0.7) > display(Look::Flat, d, 0.7));
-        assert!(display(Look::Vivid, d, 0.02) < display(Look::Flat, d, 0.02));
-        assert!(profile(Look::Vivid, d).saturation > profile(Look::Neutral, d).saturation);
+        assert!(display(Look::Hard, d, 0.7) > display(Look::Flat, d, 0.7));
+        assert!(display(Look::Hard, d, 0.02) < display(Look::Flat, d, 0.02));
+        assert!(
+            profile(Look::Hard, d, Film::Color).saturation
+                > profile(Look::Neutral, d, Film::Color).saturation
+        );
     }
 
     #[test]
@@ -382,10 +393,23 @@ mod tests {
             height: 1,
             data: vec![0.9, 0.4, 0.2],
         };
-        let px = |look| to_srgb8(&img, &profile(look, Tone::default()));
-        // Vivid separates the channels further than Flat.
+        let px = |look| to_srgb8(&img, &profile(look, Tone::default(), Film::Color));
+        // Hard separates the channels further than Flat.
         let spread = |p: Vec<u8>| p[0] as i32 - p[2] as i32;
-        assert!(spread(px(Look::Vivid)) > spread(px(Look::Flat)));
+        assert!(spread(px(Look::Hard)) > spread(px(Look::Flat)));
+    }
+
+    #[test]
+    fn black_and_white_profiles_render_gray_whatever_reaches_them() {
+        let colored = Rgb32 {
+            width: 1,
+            height: 1,
+            data: vec![0.9, 0.4, 0.2],
+        };
+        for look in Look::ALL {
+            let px = to_srgb8(&colored, &profile(look, Tone::default(), Film::Bw));
+            assert!(px[0] == px[1] && px[1] == px[2], "{look:?} {px:?}");
+        }
     }
 
     fn gray(v: f32) -> Rgb32 {
@@ -410,7 +434,7 @@ mod tests {
     #[test]
     fn previews_keep_neutrals_on_the_curve() {
         for look in Look::ALL {
-            let p = profile(look, Tone::default());
+            let p = profile(look, Tone::default(), Film::Color);
             for v in [0.05, 0.3, 0.8, 3.0] {
                 let out = to_srgb8(&gray(v), &p);
                 let want = srgb_encode(interp(&p.tone_curve, v * dng::STORE_SCALE)) * 255.0;
@@ -421,7 +445,7 @@ mod tests {
 
     #[test]
     fn previews_keep_detail_above_white() {
-        let p = profile(Look::Neutral, Tone::default());
+        let p = profile(Look::Neutral, Tone::default(), Film::Color);
         let g = |v| to_srgb8(&gray(v), &p)[1];
         assert!(g(2.0) > g(1.0) + 5);
         assert!(g(2.0) < 255);

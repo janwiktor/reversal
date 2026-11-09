@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use reversal_core::dng::Compression;
 use reversal_core::image::{NRect, Rgb32};
-use reversal_core::invert::{self, Adjust, Hints, Settings, MODEL_VERSION};
+use reversal_core::invert::{self, Adjust, Film, Hints, Settings, MODEL_VERSION};
 use serde::Serialize;
 
 use crate::pipeline;
@@ -46,7 +46,7 @@ pub struct FrameState {
     pub saved: bool,
     /// The settings differ from that DNG's, or from the automatic ones if there is none.
     pub edited: bool,
-    /// The film base or measured area were set by hand.
+    /// The film type, film base or measured area were set by hand.
     pub manual_setup: bool,
 }
 
@@ -61,6 +61,16 @@ struct SavedChoices {
     adjust: Adjust,
     #[serde(default)]
     custom_crop: Option<NRect>,
+    #[serde(default)]
+    estimate: SavedEstimate,
+}
+
+/// The film type a sidecar converts as: it can change with no choice in the hints, when a frame
+/// goes back to the detected type.
+#[derive(serde::Deserialize, Default)]
+struct SavedEstimate {
+    #[serde(default)]
+    film: Film,
 }
 
 /// Settings from a sidecar, for a frame with analysis image `small` and automatic settings
@@ -200,8 +210,11 @@ impl Folder {
         };
         FrameState {
             saved,
-            edited: now.hints != before.hints || now.adjust != before.adjust,
-            manual_setup: now.hints.base.is_some()
+            edited: now.hints != before.hints
+                || now.adjust != before.adjust
+                || (saved && now.estimate.film != before.estimate.film),
+            manual_setup: now.hints.film.is_some()
+                || now.hints.base.is_some()
                 || now.hints.analysis.is_some()
                 || now.hints.area_percent.is_some(),
         }
@@ -284,7 +297,8 @@ impl Folder {
             let (mut settings, _) = settings_from(sidecar.as_deref(), &frame.small);
             settings.hints.base_rgb = Some(base_rgb);
             let straight = frame.small.straighten(settings.adjust.straighten);
-            settings.estimate = invert::estimate_on(&straight, &settings.hints);
+            let film = Some(settings.estimate.film);
+            settings.estimate = invert::measure_frame(&straight, &settings.hints, film).0;
             self.write_settings(&frame.file, &settings)
                 .map_err(|e| format!("{}: {e}", frame.file))?;
         }
@@ -358,6 +372,20 @@ mod tests {
         folder.save_settings("a.NEF", &settings).unwrap();
         let state = folder.frame_state("a.NEF");
         assert!(state.saved && state.edited && state.manual_setup);
+
+        // A chosen film type is set up by hand too.
+        settings.hints.base = None;
+        settings.hints.film = Some(invert::Film::Bw);
+        folder.save_settings("a.NEF", &settings).unwrap();
+        assert!(folder.frame_state("a.NEF").manual_setup);
+
+        // Back to the detected type: no choice in the hints, but not what the DNG holds.
+        settings.hints.film = None;
+        std::fs::write(folder.in_dng("a.NEF"), settings_json(&settings)).unwrap();
+        settings.estimate.film = invert::Film::Bw;
+        folder.save_settings("a.NEF", &settings).unwrap();
+        let state = folder.frame_state("a.NEF");
+        assert!(state.edited && !state.manual_setup);
     }
 
     #[test]

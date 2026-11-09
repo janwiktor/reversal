@@ -261,7 +261,7 @@ body[data-frames="closed"] #roll { display: none; }
 #files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #files .state { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
 #files .state.edited { color: var(--ink); }
-#files .state.manual::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--base); margin-right: 5px; vertical-align: 2px; }
+#l-film.chosen::after, #files .state.manual::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--base); margin-right: 5px; vertical-align: 2px; }
 
 /* Image: JS sizes #view to fit, so rotation always stays centered. */
 #stage { grid-area: stage; position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
@@ -361,8 +361,12 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 #holder-legend .row-label { grid-column: 1 / -1; }
 #setup .slider { margin-top: var(--row-gap); }
 #setup .row .btn { width: 100%; padding: 0 6px; }
+/* Equal halves, so the choices of every Setup row line up whatever their words. */
+#setup .seg button { flex: 1 1 0; }
 #roll-state { color: var(--ink-quiet); margin-top: 6px; }
 #setup-note { color: var(--warn); margin-top: 6px; }
+/* Black and white has no color to develop. */
+body[data-film="bw"] :is(#color, #modes [data-mode="color"]) { display: none; }
 
 /* The roll flow */
 #roll-flow, #about { width: min(480px, calc(100vw - 32px)); padding: 16px; border: 0; border-radius: 8px; background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--seam), 0 12px 40px rgb(0 0 0 / .5); }

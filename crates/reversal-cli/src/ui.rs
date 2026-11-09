@@ -8,8 +8,10 @@
 //! GET  /api/version                        version and the commit it was built from
 //! GET  /api/license                        the license text
 //! GET  /api/files                          raw files in the folder
-//! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
-//! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual areas
+//! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning,
+//!                                          and the film type the frame reads as
+//! POST /api/estimate {file, hints, straighten, film}   re-run the analysis with manual choices,
+//!                                          converting as `film` unless the hints choose
 //! POST /api/holder   {file, base_rgb, straighten}   where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
@@ -123,6 +125,10 @@ struct EstimateJob {
     hints: Hints,
     #[serde(default)]
     straighten: f32,
+    /// The film type the frame converts as now, which measuring again keeps unless the hints
+    /// choose one. Without it, the detected type.
+    #[serde(default)]
+    film: Option<invert::Film>,
 }
 
 /// Serve `dir` on `port`, or on a free port if it's 0. With `exit_with_stdin` the process ends
@@ -298,11 +304,13 @@ impl State {
                 let loaded = self.ensure_loaded(&job.file)?;
                 // Areas are on the straightened scan, so that's what gets measured.
                 let small = loaded.small.straighten(job.straighten);
+                let (estimate, reading) = invert::measure_frame(&small, &job.hints, job.film);
                 Ok(json_resp(
                     200,
                     &json!({
-                        "estimate": invert::estimate_on(&small, &job.hints),
-                        "baseFound": invert::detect_base(&small).found,
+                        "estimate": estimate,
+                        "filmDetected": reading.film,
+                        "baseFound": reading.base_found,
                     }),
                 ))
             }
@@ -407,15 +415,16 @@ impl State {
             Err(_) => (auto.clone(), None),
         };
         let straight = loaded.small.straighten(current.adjust.straighten);
-        let base_found = invert::detect_base(&straight).found;
+        let reading = invert::read_frame(&straight, &current.hints);
         Ok(json_resp(
             200,
             &json!({
+                "filmDetected": reading.film,
                 "auto": auto,
                 "settings": current,
                 "warning": warning,
                 "defaultAreaPercent": invert::DEFAULT_AREA_PERCENT,
-                "baseFound": base_found,
+                "baseFound": reading.base_found,
             }),
         ))
     }
@@ -426,7 +435,7 @@ impl State {
         let img = invert::convert_with(&loaded.small, &job.settings, full);
         let clipped =
             dng::clipped_share(&invert::picture_for_clipping(&loaded.small, &job.settings));
-        let (profile, _) = reversal_core::profiles(&job.settings.adjust);
+        let (profile, _) = reversal_core::profiles(&job.settings);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
         Ok(Response::from_data(jpeg)
             .with_header(header("Content-Type", "image/jpeg"))
