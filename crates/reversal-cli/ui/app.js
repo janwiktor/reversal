@@ -56,7 +56,6 @@ function status(text = "", { stay = false, reveal = false } = {}) {
   $("reveal").hidden = !reveal;
   note.hidden = !text;
   if (text && !noteStays) fadeLater();
-  fit();
 }
 function fadeLater() {
   noteTimer = setTimeout(() => {
@@ -68,7 +67,7 @@ function showDetails(on) {
   $("note-more").hidden = !on;
   $("note-details").setAttribute("aria-expanded", String(on));
   // Reading the details keeps the message.
-  if (on) { clearTimeout(noteTimer); noteStays = true; fit(); }
+  if (on) { clearTimeout(noteTimer); noteStays = true; }
 }
 $("note-details").addEventListener("click", () => showDetails($("note-more").hidden));
 $("note-dismiss").addEventListener("click", () => status());
@@ -192,10 +191,43 @@ function markCurrent(name) {
     if (b.dataset.name === name) b.scrollIntoView({ block: "nearest" });
   }
   shownName = frames.some((f) => f.name === name) ? name : null;
-  $("file-name").textContent = shownName ?? "";
+  $("file-name").textContent = shownName ?? "Frames";
   $("file-name").title = shownName ?? "";
   showCount();
 }
+
+// ---------- Layout ----------
+// The frames list opens and closes in every layout: a column beside the image in landscape, and
+// in place of the tools under it in portrait, so the frame being chosen shows above the list.
+// On a phone, the bar at the bottom picks which tools show, and closes the list. The column stays
+// as it was left; turning the device to portrait with a frame open shows the tools instead.
+const framesInPlaceOfTools = matchMedia("(max-width: 599px), (orientation: portrait)");
+let framesColumn = true;
+function showFrames(on) {
+  document.body.dataset.frames = on ? "open" : "closed";
+  $("frames-toggle").setAttribute("aria-expanded", String(on));
+  if (!framesInPlaceOfTools.matches) framesColumn = on;
+}
+$("frames-toggle").addEventListener("click", () => showFrames(document.body.dataset.frames !== "open"));
+framesInPlaceOfTools.addEventListener("change", () => showFrames(framesInPlaceOfTools.matches ? !shownName : framesColumn));
+$("crop-open").addEventListener("click", () => {
+  $("crop-open").setAttribute("aria-expanded", String($("crop-open").getAttribute("aria-expanded") !== "true"));
+});
+for (const button of document.querySelectorAll("#modes button")) {
+  button.addEventListener("click", () => {
+    document.body.dataset.mode = button.dataset.mode;
+    for (const other of document.querySelectorAll("#modes button")) other.setAttribute("aria-pressed", String(other === button));
+    showFrames(false);
+  });
+}
+
+// In portrait the histogram floats over the image, and tapping it folds it to an icon. In
+// landscape it has its own place and this button isn't shown.
+$("hist-fold").addEventListener("click", () => {
+  const folded = !$("hist").hasAttribute("data-folded");
+  $("hist").toggleAttribute("data-folded", folded);
+  $("hist-fold").setAttribute("aria-expanded", String(!folded));
+});
 
 // ---------- Remembering settings ----------
 // Each frame keeps its settings on disk from the first change, so frames can be saved together.
@@ -263,7 +295,7 @@ async function open(name) {
 function setBusy(busy) {
   $("reset").disabled = busy || !current;
   const empty = !current && !opening;
-  for (const part of ["frame-tools", "develop", "setup"]) $(part).inert = empty;
+  for (const part of ["frame-tools", "crop-tools", "develop", "setup"]) $(part).inert = empty;
   updateSaveButton();
   if (busy && !batch) $("export").disabled = true;
 }
@@ -832,6 +864,7 @@ async function measureNow(done, clearsWarning) {
 // Region tools show the whole scan (straightened, mirrored, rotated) with the areas drawn on it.
 function setTool(t) {
   tool = t;
+  document.body.dataset.tool = t ?? "";
   cropDraft = t === "crop" ? { ...cropToAdjust() } : null;
   cropDrag = null;
   // The crop frame shows once the entire scan is on screen.
@@ -1114,17 +1147,15 @@ function fit() {
   const img = $("photo");
   if (!img.naturalWidth) return;
   const stage = $("stage");
-  const pad = 56;
-  // An open tool's bar takes the top of the stage, so nothing on the image sits under it: not
-  // the crop frame's handles either, which reach out past the image's edge. A message that stays
-  // takes room too, leaving out its details so the image doesn't move as they open; one that
-  // fades just passes over. Bars grow on a touch screen, so this measures them. Twice, because
-  // the image stays centered.
-  const floats = $("floats"), note = $("note"), more = $("note-more");
+  // A phone's stage is narrow, so it keeps a smaller margin around the image.
+  const pad = stage.clientWidth < 600 ? 24 : 56;
+  // Bars and messages pass over the image, except while cropping: the crop frame's handles
+  // reach out past the image's edge and need to be free to drag, so the image keeps clear of
+  // the crop bar. The bar grows on a touch screen, so this measures it. Twice, because the
+  // image stays centered.
+  const bar = $("toolbar");
   const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--edge-hit")) / 2 : 0;
-  const held = !note.hidden && noteStays ? note.offsetTop + note.offsetHeight - (more.hidden ? 0 : more.offsetHeight + parseFloat(getComputedStyle(more).marginTop))
-    : tool ? $("toolbar").offsetTop + $("toolbar").offsetHeight : 0;
-  const padY = held ? Math.max(pad, 2 * (floats.offsetTop + held + Math.max(10, reach))) : pad;
+  const padY = tool === "crop" ? Math.max(pad, 2 * ($("floats").offsetTop + bar.offsetTop + bar.offsetHeight + Math.max(10, reach))) : pad;
   const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
   $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
   $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
@@ -1164,8 +1195,8 @@ function histogram(img, storedClipped) {
   });
   g.globalCompositeOperation = "source-over";
   const pct = (v) => `${(100 * v / n).toFixed(v / n < 0.01 ? 2 : 1)}%`;
-  $("clip-low").textContent = `Shadows ${pct(low)}`;
-  $("clip-high").textContent = `Highlights ${pct(high)}`;
+  $("clip-low").querySelector(".clip-pct").textContent = pct(low);
+  $("clip-high").querySelector(".clip-pct").textContent = pct(high);
   $("clip-low").classList.toggle("over", low / n > 0.005);
   $("clip-high").classList.toggle("over", high / n > 0.005);
   $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";

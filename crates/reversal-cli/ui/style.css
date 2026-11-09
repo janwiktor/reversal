@@ -22,6 +22,12 @@
   --accent: #1f6fd1;     /* ticks and the Save button; white on it holds 4.5:1 */
   --focus: #4a94f0;
   --warn: #ffb547;
+  /* What floats over the image: a light dim that leaves the image readable through it, a
+     hairline edge, and shadowed text that holds on bright pictures. */
+  --veil: rgb(0 0 0 / .28);
+  --veil-edge: inset 0 0 0 1px rgb(255 255 255 / .14);
+  --veil-text: 0 0 2px rgb(0 0 0 / .9), 0 1px 3px rgb(0 0 0 / .7);
+  --veil-outline: drop-shadow(0 0 1px rgb(0 0 0 / .8));
   /* Region overlays */
   --crop: #4fdc74;
   --area: #5ec8ff;
@@ -82,9 +88,11 @@
 }
 * { box-sizing: border-box; cursor: default; }
 html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+/* A double tap is two taps here, never a page zoom. */
+html { touch-action: manipulation; }
 body {
   background: var(--surround); color: var(--ink); font: 400 var(--text)/var(--leading) var(--font);
-  display: grid; grid-template: "bar bar bar" var(--bar-h) "roll stage dock" minmax(0, 1fr) / var(--left) minmax(0, 1fr) var(--right);
+  display: grid; grid-template: "bar bar bar" auto "roll stage hist" auto "roll stage dock" minmax(0, 1fr) / var(--left) minmax(0, 1fr) var(--right);
   font-variant-numeric: tabular-nums;
   -webkit-user-select: none; user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -205,21 +213,25 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 }
 
 /* Top bar, lined up with the columns below it. */
-#bar { grid-area: bar; display: grid; grid-template-columns: var(--left) minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
+#bar { grid-area: bar; display: grid; grid-template: calc(var(--bar-h) - 1px) / var(--left) auto minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
 /* Where the open frame lives: the folder gives way first, so the frame's name stays readable. */
+/* The open frame's name, which opens and closes the frames list. */
 #where { display: flex; align-items: center; min-width: 0; margin: 0 6px; }
-#choose-folder { flex: 0 1000 auto; min-width: 28px; display: flex; align-items: center; gap: 6px; padding: 0 4px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
-@media (hover: hover) { #choose-folder:not(:disabled):hover { background: var(--control); } }
-#choose-folder svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--ink-quiet); stroke-width: 1.25; stroke-linejoin: round; }
+#frames-toggle, #choose-folder { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
+@media (hover: hover) { :is(#frames-toggle, #choose-folder):not(:disabled):hover { background: var(--control); } }
+:is(#frames-toggle, #choose-folder) svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--ink-quiet); stroke-width: 1.25; stroke-linejoin: round; }
+#frames-toggle[aria-expanded="true"] svg { stroke: var(--ink); }
 #folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-#frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px; min-width: 0; }
-#frame-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
+#frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 0 0 10px; }
+#crop-open { display: none; }
+.icon[aria-expanded="true"] { background: var(--control-on); color: #fff; }
+#crop-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px 0 4px; min-width: 0; }
+#crop-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
 #crop-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); margin-right: 4px; }
 /* Straighten takes what the bar has left, for precision: 0.1° steps over ±10°. Its value,
    like −10.0°, is the widest, so its box is too. */
-#frame-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
-#file-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#file-name:not(:empty)::before { content: "›"; margin: 0 6px 0 2px; color: var(--ink-quiet); }
+#crop-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
+#file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #save { display: flex; justify-content: flex-end; padding: 0 10px; }
 .primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
 @media (hover: hover) { .primary:not(:disabled):hover { background: #2a7ae0; } }
@@ -230,6 +242,12 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 
 /* Frames */
 #roll { grid-area: roll; background: var(--panel); border-right: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
+#roll-folder { flex: none; display: flex; align-items: center; height: var(--head-h); padding: 0 4px; background: var(--strip); border-bottom: 1px solid var(--seam); }
+#choose-folder { width: 100%; }
+/* Hidden frames give the image their column. */
+body[data-frames="closed"] { grid-template-columns: 0 minmax(0, 1fr) var(--right); }
+body[data-frames="closed"] #roll { display: none; }
+#modes { display: none; }
 #roll-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 10px; background: var(--strip); border-bottom: 1px solid var(--seam); color: var(--ink-quiet); }
 #select-all { display: flex; align-items: center; gap: 8px; align-self: stretch; }
 #files { list-style: none; margin: 0; padding: 0; flex: 1 1 0; min-height: 96px; overflow-y: auto; }
@@ -295,10 +313,13 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 .crop-h.ne i, .crop-h.se i { right: var(--inset); border-right-width: var(--mark); }
 @media (any-pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
-/* What floats over the image: a tool's bar, then a message, in one look. Only the bars take
-   pointers, so the image stays draggable around them. */
+/* What floats over the image: a tool's bar, then a message, in one look. They're see-through
+   and pass over the image rather than pushing it aside. Only the bars take pointers, so the
+   image stays draggable around them. */
 #floats { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: min(560px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-.float { pointer-events: auto; max-width: 100%; display: grid; grid-template: "text actions" auto "more more" auto / minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 6px 6px 12px; background: var(--panel); border-radius: 6px; box-shadow: 0 0 0 1px var(--seam), 0 4px 14px rgb(0 0 0 / .4); }
+.float { pointer-events: auto; max-width: 100%; display: grid; grid-template: "text actions" auto "more more" auto / minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 6px 6px 12px; border-radius: 6px; }
+.float { background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
+.float .btn { text-shadow: none; }
 .float-text { grid-area: text; margin: 0; overflow-wrap: anywhere; }
 .float-actions { grid-area: actions; display: flex; gap: 6px; }
 #note { -webkit-user-select: text; user-select: text; }
@@ -306,13 +327,21 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 .btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
 @media (hover: hover) { .btn.strong:hover { background: #606060; } }
 
-/* Dock */
-#dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
-#hist { flex: none; position: relative; padding: 10px; }
-#stored { position: absolute; top: 14px; left: 30px; right: 30px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
+/* Histogram: in landscape, the top of the side panel. */
+#hist { grid-area: hist; position: relative; padding: 10px; background: var(--panel); border-left: 1px solid var(--seam); }
+#hist-body { position: relative; container-type: inline-size; }
+#stored { position: absolute; top: 4px; left: 20px; right: 20px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
 #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
 .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
+/* Too narrow for the names: the numbers alone, under the ends of the histogram they count. */
+@container (max-width: 200px) {
+  .clip-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+#hist-fold { display: none; }
+
+/* Dock: scrolls as one, under the histogram. */
+#dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 
 .panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 4px 0 10px; background: var(--strip); border-block: 1px solid var(--seam); font-weight: 600; }
 .head-btn { height: calc(var(--control-h) - 4px); padding: 0 8px; background: none; border: 0; border-radius: 3px; color: var(--ink-quiet); font-weight: 400; }
@@ -320,7 +349,6 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 .head-btn[aria-pressed="true"] { background: var(--control-on); color: #fff; }
 
 #setup { flex: none; padding: 6px 10px 8px; }
-#develop { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 #develop section { padding: 8px 10px; }
 #develop section + section { border-top: 1px solid var(--line); }
 section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-height: 20px; }
@@ -359,19 +387,86 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 
-/* A narrow window: drop what names itself, then stack. */
-@media (max-width: 1180px) {
-  #crop-label, #frame-tools .slider label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  #frame-tools .slider { grid-template-columns: minmax(60px, 1fr) calc(var(--value) * 1.25); }
-  #frame-tools .sep { margin: 0 4px; }
+/* A narrower window, and portrait from a small tablet up: rotate and mirror stay in the top bar,
+   and crop and straighten wait behind the crop button, in a bar of their own under it with
+   their names. The bar moves the image down rather than covering it, so the crop frame's
+   handles stay in reach while it's open. */
+@media (min-width: 600px) and (max-width: 1180px), (min-width: 600px) and (orientation: portrait) {
+  #bar { grid-template: "where tools save" calc(var(--bar-h) - 1px) "crop crop crop" auto / minmax(0, 1fr) auto auto; }
+  #where { grid-area: where; }
+  #frame-tools { grid-area: tools; padding: 0 4px; }
+  #save { grid-area: save; }
+  #crop-open { display: inline-grid; }
+  #crop-tools { grid-area: crop; display: none; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); }
+  #bar:has(#crop-open[aria-expanded="true"]) #crop-tools { display: flex; }
+  #crop-tools .sep:first-child { display: none; }
+  #crop-tools .slider { max-width: none; }
 }
-@media (max-width: 900px) {
-  html, body { height: auto; overflow: auto; }
-  body { grid-template: "bar" auto "roll" auto "stage" 55vh "dock" auto / minmax(0, 1fr); }
-  #bar { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 0; padding: 6px 0; }
-  #frame-tools { grid-row: 2; grid-column: 1 / -1; flex-wrap: wrap; }
-  #roll { border-right: 0; border-bottom: 1px solid var(--seam); }
-  #files { flex: none; max-height: 30vh; }
-  #dock { border-left: 0; }
-  #develop { overflow: visible; }
+/* Portrait, and a phone: the histogram floats over the image's top right corner. Tapping it
+   folds it to an icon, which brings it back; the icon turns amber while the DNG can't store
+   every pixel. It steps aside while a tool works on the image, and waits for a picture. */
+@media (max-width: 599px), (orientation: portrait) {
+  #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: 10px; padding: 6px; border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
+  #histogram { height: var(--hist-h, 72px); background: none; filter: var(--veil-outline); }
+  .clip { color: var(--ink); }
+  /* Clipping numbers show only when there's clipping to report. */
+  .clip:not(:has(.over)), .clip span:first-child { display: none; }
+  #stored { position: static; margin-top: 4px; padding: 0; background: none; }
+  #hist-fold { display: block; position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; background: none; border: 0; border-radius: 6px; }
+  #hist-fold svg { display: none; }
+  #hist[data-folded] { width: auto; padding: 0; }
+  #hist[data-folded] #hist-body { display: none; }
+  #hist[data-folded] #hist-fold { position: static; width: var(--hit); height: var(--hit); display: grid; place-items: center; }
+  #hist[data-folded] #hist-fold svg { display: block; width: 18px; height: 18px; fill: none; stroke: var(--ink); stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+  #hist:has(#stored:not([hidden])) #hist-fold svg { stroke: var(--warn); }
+  body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist { display: none; }
+}
+/* Portrait, from a small tablet up: the image takes the full width, and under it the tools
+   in two columns, or the frames list in their place. */
+@media (min-width: 600px) and (orientation: portrait) {
+  body { --panel-h: min(500px, 46vh); grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" var(--panel-h) / minmax(0, 1fr); }
+  body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr); }
+  #roll, #dock { grid-area: panel; border: 0; border-top: 1px solid var(--seam); }
+  body[data-frames="open"] #dock, body[data-frames="closed"] #roll { display: none; }
+  #dock { display: grid; grid-template: "devhead sethead" auto "tone setup" auto "tone color" 1fr / 1fr 1fr; align-content: start; overflow-y: auto; }
+  #develop { display: contents; }
+  #setup-head { grid-area: sethead; }
+  #setup { grid-area: setup; }
+  #develop-head { grid-area: devhead; }
+  #tone { grid-area: tone; }
+  #color { grid-area: color; }
+  #setup-head, #setup, #color { border-left: 1px solid var(--seam); }
+}
+/* A phone, held upright: the image, then one panel: the frames, or one group of tools
+   chosen from the bar at the bottom. A panel of tools takes only the height it needs, up to
+   about four rows, and scrolls past that, so the image keeps most of the screen. The frame tools leave the top bar for the Crop panel. */
+@media (max-width: 599px) {
+  body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
+  body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
+  #bar { display: contents; }
+  #where { grid-area: where; margin: 0; padding: 0 6px; background: var(--bar); border-bottom: 1px solid var(--seam); }
+  #save { grid-area: save; align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
+  #roll, #dock, #frame-tools { grid-area: panel; }
+  #crop-tools { grid-area: crop; }
+  #dock { max-height: var(--panel-max); }
+  #roll { height: var(--frames-h); }
+  #roll, #dock { border: 0; border-top: 1px solid var(--seam); }
+  body[data-frames="open"] :is(#dock, #frame-tools, #crop-tools), body[data-frames="closed"] #roll { display: none; }
+  body:not([data-mode="crop"]) :is(#frame-tools, #crop-tools), body[data-mode="crop"] #dock { display: none; }
+  #frame-tools { padding: 12px 12px 0; background: var(--panel); border-top: 1px solid var(--seam); }
+  #crop-tools { flex-wrap: wrap; gap: 12px 8px; padding: 12px; background: var(--panel); }
+  #crop-tools .sep { display: none; }
+  /* The bar at the bottom already says Crop. */
+  #crop-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #crop-tools .seg { flex: 1 1 100%; display: flex; }
+  #crop-tools .seg button { flex: 1; }
+  #crop-tools .slider { flex: 1 1 100%; max-width: none; }
+  body[data-mode="setup"] :is(#develop-head, #develop) { display: none; }
+  body[data-mode="tone"] :is(#setup-head, #setup, #color) { display: none; }
+  body[data-mode="color"] :is(#setup-head, #setup, #tone) { display: none; }
+  #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: env(safe-area-inset-bottom); }
+  #modes button { flex: 1; height: 49px; background: none; border: 0; color: var(--ink-quiet); }
+  body[data-frames="closed"] #modes button[aria-pressed="true"] { color: var(--ink); font-weight: 600; }
+  /* The bar names the panel. */
+  #develop section h2 { display: none; }
 }
