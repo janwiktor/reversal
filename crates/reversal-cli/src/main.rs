@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use reversal_core::image::Rgb32;
-use reversal_core::invert::{self, Adjust, Hints, Settings};
+use reversal_core::invert::{self, Adjust, Film, Hints, Settings};
 use reversal_core::render::Look;
 
 #[derive(Parser)]
@@ -64,7 +64,15 @@ enum CompressionArg {
 enum LookArg {
     Neutral,
     Flat,
-    Vivid,
+    #[value(alias = "vivid")]
+    Hard,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum FilmArg {
+    Auto,
+    Color,
+    Bw,
 }
 
 #[derive(clap::Args)]
@@ -94,10 +102,13 @@ struct ConvertArgs {
     /// Whites, −100 (recover clipped highlights) … +100 (clip sooner).
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     whites: f32,
+    /// Film type: detected from each scan, or color or black and white negative.
+    #[arg(long, value_enum, default_value_t = FilmArg::Auto)]
+    film: FilmArg,
     /// Profile the DNG opens with; the others stay selectable in a raw editor.
     #[arg(long, value_enum, default_value_t = LookArg::Neutral)]
     profile: LookArg,
-    /// Temperature, −100 (cooler) … +100 (warmer).
+    /// Temperature, −100 (cooler) … +100 (warmer). Color film only, like tint and saturation.
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     temperature: f32,
     /// Tint, −100 (greener) … +100 (more magenta).
@@ -161,7 +172,7 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         look: match args.profile {
             LookArg::Neutral => Look::Neutral,
             LookArg::Flat => Look::Flat,
-            LookArg::Vivid => Look::Vivid,
+            LookArg::Hard => Look::Hard,
         },
         temperature: args.temperature,
         tint: args.tint,
@@ -177,6 +188,11 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
     let outs = pipeline::output_paths(&args.inputs, args.output.as_deref())?;
     let area_hints = Hints {
+        film: match args.film {
+            FilmArg::Auto => None,
+            FilmArg::Color => Some(Film::Color),
+            FilmArg::Bw => Some(Film::Bw),
+        },
         area_percent: Some(args.area_percent),
         ..Hints::default()
     };
@@ -217,8 +233,12 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
             settings.adjust.crop = Some(settings.estimate.area);
         }
         let bytes = pipeline::export(input, &scan, &settings, compression, out)?;
+        let film = match settings.estimate.film {
+            Film::Color => "color",
+            Film::Bw => "black and white",
+        };
         println!(
-            "{} -> {} ({:.1} MB, {:.1} s)",
+            "{} -> {} ({film}, {:.1} MB, {:.1} s)",
             input.display(),
             out.display(),
             bytes as f64 / 1e6,

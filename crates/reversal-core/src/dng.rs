@@ -425,16 +425,21 @@ pub fn clipped_share(positive: &Rgb32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::invert::Film;
 
     #[test]
     fn profile_tags_carry_only_what_the_look_needs() {
         let tone = render::Tone::default();
-        for look in render::Look::ALL {
-            let tags = profile_tags(&render::profile(look, tone));
-            let has = |id: u16| tags.iter().any(|t| t.0 == id);
-            assert!(has(50940), "{look:?} has a tone curve");
-            assert!(!has(51109), "{look:?} needs no exposure offset");
-            assert_eq!(has(50982), look == render::Look::Vivid, "{look:?}");
+        for film in [Film::Color, Film::Bw] {
+            for look in render::Look::ALL {
+                let tags = profile_tags(&render::profile(look, tone, film));
+                let has = |id: u16| tags.iter().any(|t| t.0 == id);
+                assert!(has(50940), "{look:?} has a tone curve");
+                assert!(!has(51109), "{look:?} needs no exposure offset");
+                // A look table for Hard's saturation, and to hold black and white gray.
+                let table = film == Film::Bw || look == render::Look::Hard;
+                assert_eq!(has(50982), table, "{film:?} {look:?}");
+            }
         }
     }
 
@@ -442,7 +447,7 @@ mod tests {
     fn every_profile_turns_off_black_subtraction() {
         let tone = render::Tone::default();
         for look in render::Look::ALL {
-            let tags = profile_tags(&render::profile(look, tone));
+            let tags = profile_tags(&render::profile(look, tone, Film::Color));
             let tag = tags
                 .iter()
                 .find(|t| t.0 == 51110)
@@ -458,8 +463,8 @@ mod tests {
             &Rgb32::new(4, 4),
             &DngOptions {
                 compression: Compression::None,
-                profile: render::profile(render::Look::Neutral, tone),
-                extra_profiles: vec![render::profile(render::Look::Flat, tone)],
+                profile: render::profile(render::Look::Neutral, tone, Film::Color),
+                extra_profiles: vec![render::profile(render::Look::Flat, tone, Film::Color)],
                 xmp: None,
                 software: "t",
             },
@@ -489,7 +494,7 @@ mod tests {
                 &img,
                 &DngOptions {
                     compression: Compression::None,
-                    profile: render::profile(look, render::Tone::default()),
+                    profile: render::profile(look, render::Tone::default(), Film::Color),
                     extra_profiles: vec![],
                     xmp: None,
                     software: "t",
@@ -521,8 +526,12 @@ mod tests {
             .for_each(|(i, v)| *v = (i % 997) as f32 / 997.0);
         let opts = DngOptions {
             compression: Compression::LosslessJpeg,
-            profile: render::profile(render::Look::Neutral, render::Tone::default()),
-            extra_profiles: vec![render::profile(render::Look::Flat, render::Tone::default())],
+            profile: render::profile(render::Look::Neutral, render::Tone::default(), Film::Color),
+            extra_profiles: vec![render::profile(
+                render::Look::Flat,
+                render::Tone::default(),
+                Film::Color,
+            )],
             xmp: Some("<x/>"),
             software: "test",
         };
@@ -547,7 +556,7 @@ mod tests {
     fn preview_ifd_declares_no_chroma_subsampling() {
         let opts = DngOptions {
             compression: Compression::None,
-            profile: render::profile(render::Look::Neutral, render::Tone::default()),
+            profile: render::profile(render::Look::Neutral, render::Tone::default(), Film::Color),
             extra_profiles: vec![],
             xmp: None,
             software: "test",
@@ -610,7 +619,7 @@ mod tests {
         };
         let opts = DngOptions {
             compression: Compression::None,
-            profile: render::profile(render::Look::Neutral, render::Tone::default()),
+            profile: render::profile(render::Look::Neutral, render::Tone::default(), Film::Color),
             extra_profiles: vec![],
             xmp: None,
             software: "t",

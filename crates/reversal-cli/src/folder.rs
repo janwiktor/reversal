@@ -46,7 +46,7 @@ pub struct FrameState {
     pub saved: bool,
     /// The settings differ from that DNG's, or from the automatic ones if there is none.
     pub edited: bool,
-    /// The film base or measured area were set by hand.
+    /// The film type, film base or measured area were set by hand.
     pub manual_setup: bool,
 }
 
@@ -201,7 +201,8 @@ impl Folder {
         FrameState {
             saved,
             edited: now.hints != before.hints || now.adjust != before.adjust,
-            manual_setup: now.hints.base.is_some()
+            manual_setup: now.hints.film.is_some()
+                || now.hints.base.is_some()
                 || now.hints.analysis.is_some()
                 || now.hints.area_percent.is_some(),
         }
@@ -358,6 +359,12 @@ mod tests {
         folder.save_settings("a.NEF", &settings).unwrap();
         let state = folder.frame_state("a.NEF");
         assert!(state.saved && state.edited && state.manual_setup);
+
+        // A chosen film type is set up by hand too.
+        settings.hints.base = None;
+        settings.hints.film = Some(invert::Film::Bw);
+        folder.save_settings("a.NEF", &settings).unwrap();
+        assert!(folder.frame_state("a.NEF").manual_setup);
     }
 
     #[test]

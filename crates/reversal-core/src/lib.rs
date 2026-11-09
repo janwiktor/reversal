@@ -46,16 +46,17 @@ pub fn xmp_packet(source_name: &str, settings: &Settings) -> String {
     )
 }
 
-/// Profiles written into every positive, all under the same tone sliders: the chosen look
-/// is the main profile, the others are selectable in a raw editor.
-pub fn profiles(adjust: &invert::Adjust) -> (dng::Profile, Vec<dng::Profile>) {
+/// Profiles written into every positive, all under the same tone sliders and for the frame's
+/// film type: the chosen look is the main profile, the others are selectable in a raw editor.
+pub fn profiles(settings: &Settings) -> (dng::Profile, Vec<dng::Profile>) {
+    let (adjust, film) = (&settings.adjust, settings.estimate.film);
     let tone = adjust.tone();
     let others = render::Look::ALL
         .into_iter()
         .filter(|&look| look != adjust.look)
-        .map(|look| render::profile(look, tone))
+        .map(|look| render::profile(look, tone, film))
         .collect();
-    (render::profile(adjust.look, tone), others)
+    (render::profile(adjust.look, tone, film), others)
 }
 
 /// Convert a decoded scan and write the DNG; returns the file size in bytes.
@@ -68,7 +69,7 @@ pub fn write_positive(
     software: &str,
 ) -> io::Result<u64> {
     let positive = invert::convert(scan, settings);
-    let (profile, extra_profiles) = profiles(&settings.adjust);
+    let (profile, extra_profiles) = profiles(settings);
     let xmp = xmp_packet(source_name, settings);
     let opts = dng::DngOptions {
         compression,
@@ -128,16 +129,34 @@ mod tests {
         assert_eq!(xmp_packet("a.NEF", &kept), xmp_packet("a.NEF", &plain));
     }
 
-    #[test]
-    fn the_chosen_look_is_the_main_profile_and_the_others_stay_selectable() {
+    fn settings_for(film: invert::Film, look: render::Look) -> Settings {
+        let mut estimate = invert::estimate_on(&Rgb32::new(1, 1), &invert::Hints::default());
+        estimate.film = film;
         let adjust = invert::Adjust {
-            look: render::Look::Vivid,
+            look,
             ..invert::Adjust::default()
         };
-        let (main, others) = profiles(&adjust);
-        assert_eq!(main.name, "Reversal Vivid");
+        Settings::new(estimate, adjust)
+    }
+
+    #[test]
+    fn the_chosen_look_is_the_main_profile_and_the_others_stay_selectable() {
+        let (main, others) = profiles(&settings_for(invert::Film::Color, render::Look::Hard));
+        assert_eq!(main.name, "Reversal Hard");
         let names: Vec<_> = others.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Reversal Neutral", "Reversal Flat"]);
+    }
+
+    #[test]
+    fn black_and_white_gets_its_own_profiles_held_gray() {
+        let (main, others) = profiles(&settings_for(invert::Film::Bw, render::Look::Flat));
+        assert_eq!(main.name, "Reversal B&W Flat");
+        let names: Vec<_> = others.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Reversal B&W Neutral", "Reversal B&W Hard"]);
+        assert!([&main]
+            .into_iter()
+            .chain(&others)
+            .all(|p| p.saturation == 0.0));
     }
 
     #[test]

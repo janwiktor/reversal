@@ -143,6 +143,25 @@ Measured against 8 hand-finished scans of one film stock.
 | Linear saturation after inversion, against the same correction in density | Color error from 8.66 in density to 7.77 in linear. A calibrated 3×3 matrix is untested | Linear, after inversion |
 | Balancing to the film base before demosaic | Fine color noise down 6.9%, fine luminance detail down 3.2%. Crops looked practically identical | Don't adopt |
 
+### Black and white
+
+Black and white negatives carry one silver image, which blocks every color about equally, so the color model's gray curves, crosstalk and saturation have nothing to correct. The conversion keeps density above base per channel and averages the channels into one density, weighted by the light each gets through the base: shot noise in density falls as the signal grows, so this weighs each channel by the inverse of its noise. Toe, exposure anchor and γ are shared with color. There are no black and white reference scans, so the conversion was checked by eye on 6 frames from 6 rolls and two cameras, including Ilford HP5 Plus and FP4 Plus. In Apple's raw engine, the DNG opened gray and matched the app's preview.
+
+Film type detection was tested on 220 scans: 160 black and white and 60 color, from a Nikon D5100 and a Fujifilm camera. Color includes several stocks, CineStill 400D, and a misprocessed roll with weak color. Every frame's type was confirmed by eye where the base color didn't settle it. The scores below are on the measured area, as density above base.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Base color, red against blue | On one light, black and white 0.62–0.72 and color 1.14–2.16. It depends on the light and white balance, and misread a color frame whose base detection landed on bare light | Reject |
+| Spread around the frame's own gray curve, per analysis pixel (90th percentile) | Black and white reached 0.027 from grain and noise, color started at 0.025 | Reject: they overlap |
+| The same on cells of 4 by 4 analysis pixels | Black and white 0.004–0.011, color 0.0197–0.18. The lowest color frames are near-gray scenes | Keep, below 0.02 |
+| Slope of red against green density along that curve | Black and white 1.000–1.024 on both cameras, color 0.67–0.93, also on the near-gray scenes | Keep, within 0.05 of 1 |
+| Both together | All 220 frames right. Spread alone would have taken a near-gray color frame, at 0.0197, for black and white | Adopt |
+| Density bins from the base up, as for the gray curves | A black and white frame filling the scan, with no clear film, had its base guessed from the picture, so half its cells sat below it, and too few bins remained to tell | Bins reach 1.0 below the base: on black and white a guessed base moves every channel alike |
+
+A frame needs 6 filled density bins, or it stays color. Both limits were chosen on these frames, and no frames were held out to check them.
+
+The color conversion is unchanged: DNG pixels stayed byte-identical on two files, one from each camera.
+
 ## Technical solutions
 
 ### Raw decoding
@@ -169,6 +188,7 @@ Building LibRaw without OpenMP, lcms and libjpeg kept DNGs byte-identical on thr
 | Where the look lives | Baked in, profile tone curve, left to the user | Profile tone curve: Apple Photos applies only the main profile, so it must be the chosen look |
 | Compression | Lossless JPEG, [JPEG XL](https://forum.dxo.com/t/compressed-dng-brought-to-pl9-but-with-a-bug/54494/38) | Lossless JPEG, read everywhere; JPEG XL is well supported mainly for LinearRaw and isn't built |
 | Writer | Adobe DNG SDK, rawler, our own | Our own minimal writer: it needs only LinearRaw and a few tags |
+| Black and white | Three equal channels, one channel | Three equal channels in linear Rec.2020, the file every editor already opens. One channel would be about a third of the size, and editors would treat it as a monochrome camera's, but it's untested in Photos and Lightroom. Apple's engine renders the three-channel file gray under the black and white profiles |
 | Original in the file | Embedded, left out | Left out: [embedding it is why Denoise DNGs reach about 4× a raw](https://community.adobe.com/t5/lightroom-classic-discussions/why-are-dng-files-produced-bt-denoise-ai-6-times-larger-than-the-orignal/m-p/13748097), against [2–3× for linear DNGs generally](https://lifeafterphotoshop.com/lightroom-now-supports-apple-iphone-13-proraw-dngs-directly/) |
 
 ProRAW is [a linear DNG, demosaiced before Lightroom sees it](https://lifeafterphotoshop.com/lightroom-now-supports-apple-iphone-13-proraw-dngs-directly/), which is the precedent for this file type.
@@ -183,7 +203,7 @@ Hand-made positive DNGs from D5100 samples settled the format. Capture One and d
 | Float16 with Deflate | Works in Adobe apps, fails in Photos and Finder | Reject |
 | Several embedded profiles | Lightroom Classic and mobile list all three; in Classic, only the Profile browser shows them. Photos shows no choice but applies the main profile's curve | Embed all three, with the chosen one as main |
 | What the headroom keeps | Display clipping is recoverable up to the stored limit, and real loss was 0–0.7% of the picture. On one frame cropped to the image, Whites −100 took display clipping from 3.0% to 0% | Tone shaping stays in the profile curve |
-| A profile with no tone curve | Looked blown out | Every profile has a curve, which led to Flat and Vivid |
+| A profile with no tone curve | Looked blown out | Every profile has a curve, which led to Flat and Vivid, now Hard |
 | Initial white balance in Lightroom Classic | None shown until As Shot was reselected | Write `crs:WhiteBalance="As Shot"` in the XMP |
 | A shoulder in the profile's own curve, with a −2 EV offset, in Camera Raw | Looks the same as the standard DNG, so Camera Raw follows the curve and adds no compression of its own | Flat can roll off in its curve |
 | Flat as the main profile, in Apple Photos | With a −2 EV offset on the main profile it opened too bright: average 188 out of 255, against 147 if the offset were honored and 227 if ignored. Lowering BaselineExposure itself, with +2 EV on the other profiles, fixed it and looks the same in Camera Raw and Finder previews | No exposure offset on the main profile. Since then, no look needs one (below) |

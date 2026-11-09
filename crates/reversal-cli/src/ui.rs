@@ -8,8 +8,9 @@
 //! GET  /api/version                        version and the commit it was built from
 //! GET  /api/license                        the license text
 //! GET  /api/files                          raw files in the folder
-//! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning
-//! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual areas
+//! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning,
+//!                                          and the film type the frame reads as
+//! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual choices
 //! POST /api/holder   {file, base_rgb, straighten}   where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
@@ -298,10 +299,12 @@ impl State {
                 let loaded = self.ensure_loaded(&job.file)?;
                 // Areas are on the straightened scan, so that's what gets measured.
                 let small = loaded.small.straighten(job.straighten);
+                let estimate = invert::estimate_on(&small, &job.hints);
                 Ok(json_resp(
                     200,
                     &json!({
-                        "estimate": invert::estimate_on(&small, &job.hints),
+                        "filmDetected": film_detected(&small, &job.hints, &estimate),
+                        "estimate": estimate,
                         "baseFound": invert::detect_base(&small).found,
                     }),
                 ))
@@ -408,9 +411,11 @@ impl State {
         };
         let straight = loaded.small.straighten(current.adjust.straighten);
         let base_found = invert::detect_base(&straight).found;
+        let film_detected = invert::detect_film(&straight, &current.hints);
         Ok(json_resp(
             200,
             &json!({
+                "filmDetected": film_detected,
                 "auto": auto,
                 "settings": current,
                 "warning": warning,
@@ -426,7 +431,7 @@ impl State {
         let img = invert::convert_with(&loaded.small, &job.settings, full);
         let clipped =
             dng::clipped_share(&invert::picture_for_clipping(&loaded.small, &job.settings));
-        let (profile, _) = reversal_core::profiles(&job.settings.adjust);
+        let (profile, _) = reversal_core::profiles(&job.settings);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
         Ok(Response::from_data(jpeg)
             .with_header(header("Content-Type", "image/jpeg"))
@@ -535,6 +540,14 @@ impl State {
             )
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
+    }
+}
+
+/// The film type a frame reads as, so the page can tell a choice from what was detected.
+fn film_detected(small: &Rgb32, hints: &Hints, estimate: &invert::Estimate) -> invert::Film {
+    match hints.film {
+        None => estimate.film,
+        Some(_) => invert::detect_film(small, hints),
     }
 }
 

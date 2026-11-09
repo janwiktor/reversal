@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "saturation"];
 const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
-const LOOKS = ["neutral", "flat", "vivid"];
+const LOOKS = ["neutral", "flat", "hard"];
 const TOOL_TEXT = {
   crop: "Adjust area for the final DNG export.",
   area: "Drag over the exposed image only, avoiding film base, film holder or sprocket holes. This area drives negative conversion, and doesn't affect final crop.",
@@ -207,9 +207,13 @@ function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
   $("frames-toggle").setAttribute("aria-expanded", String(on));
   if (!framesInPlaceOfTools.matches) framesColumn = on;
-  // On a phone the list takes the tools' place, so no group of tools reads as shown.
+  pressModes();
+}
+// On a phone the list takes the tools' place, so no group of tools reads as shown.
+function pressModes() {
+  const listShown = document.body.dataset.frames === "open";
   for (const button of document.querySelectorAll("#modes button")) {
-    button.setAttribute("aria-pressed", String(!on && button.dataset.mode === document.body.dataset.mode));
+    button.setAttribute("aria-pressed", String(!listShown && button.dataset.mode === document.body.dataset.mode));
   }
 }
 $("frames-toggle").addEventListener("click", () => showFrames(document.body.dataset.frames !== "open"));
@@ -279,7 +283,7 @@ async function open(name) {
   try {
     const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
     if (opening !== name) return;  // another frame was chosen meanwhile
-    current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent, warning: data.warning, baseFound: data.baseFound };
+    current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent, warning: data.warning, baseFound: data.baseFound, filmDetected: data.filmDetected };
     current.settings.hints ??= {};
     current.remembered = JSON.stringify(current.settings);
     syncControls();
@@ -336,6 +340,15 @@ function showSetupNote() {
 
 function syncControls() {
   const a = adj();
+  // Black and white has only Tone to develop. On a phone, its Color panel gives way to Tone.
+  const film = current.settings.estimate.film;
+  document.body.dataset.film = film;
+  $("film-color").setAttribute("aria-pressed", String(film === "color"));
+  $("film-bw").setAttribute("aria-pressed", String(film === "bw"));
+  if (film === "bw" && document.body.dataset.mode === "color") {
+    document.body.dataset.mode = "tone";
+    pressModes();
+  }
   for (const id of [...SLIDERS, "straighten"]) showValue(id, a[id]);
   for (const look of LOOKS) $(`look-${look}`).setAttribute("aria-pressed", String(a.look === look));
   const percent = hints().area_percent ?? current.defaultAreaPercent;
@@ -503,6 +516,7 @@ $("base-auto").addEventListener("click", () => {
   if (current && (hints().base || hints().base_rgb)) setHint("base", null);
 });
 $("base-roll").addEventListener("click", openRollFlow);
+for (const film of ["color", "bw"]) $(`film-${film}`).addEventListener("click", () => setFilm(film));
 $("tool-cancel").addEventListener("click", () => setTool(null));
 $("tool-done").addEventListener("click", () => { if (tool === "crop") applyCrop(); else setTool(null); });
 document.addEventListener("keydown", (e) => {
@@ -549,7 +563,7 @@ $("reset").addEventListener("click", () => {
   for (const id of SLIDERS) adj()[id] = 0;
   adj().look = "neutral";
   changed(0);
-  status("Tone and color reset.");
+  status(current.settings.estimate.film === "bw" ? "Tone reset." : "Tone and color reset.");
 });
 
 $("export").addEventListener("click", async () => {
@@ -833,6 +847,14 @@ async function setHint(key, rect) {
                          : (rect ? "Custom measured area set." : "Measuring the center of the scan."), true);
 }
 
+// The detected type is no choice at all, so choosing it again goes back to detecting.
+function setFilm(film) {
+  if (!current || current.settings.estimate.film === film) return;
+  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done."); return; }
+  hints().film = film === current.filmDetected ? null : film;
+  measure(film === "bw" ? "Converting as black and white." : "Converting as color.");
+}
+
 // Measures the frame as it's set now. A later call replaces an earlier one still on its way.
 let latestMeasure = 0, lastMeasure = null;
 function measure(done, clearsWarning = false) {
@@ -845,10 +867,11 @@ async function measureNow(done, clearsWarning) {
   const areaBefore = current.settings.estimate.area;
   status("Measuring…");
   try {
-    const { estimate, baseFound } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
+    const { estimate, baseFound, filmDetected } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
     if (current?.file !== file || id !== latestMeasure) return true;
     current.settings.estimate = estimate;
     current.baseFound = baseFound;
+    current.filmDetected = filmDetected;
     if (clearsWarning) current.warning = null;
     // A crop on the measured area follows it, checked now because the crop may have changed meanwhile.
     if (adj().crop && sameRect(adj().crop, areaBefore)) adj().crop = { ...estimate.area };

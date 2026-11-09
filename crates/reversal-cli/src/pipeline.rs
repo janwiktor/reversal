@@ -134,6 +134,7 @@ mod tests {
             profile: reversal_core::render::profile(
                 reversal_core::render::Look::Neutral,
                 reversal_core::render::Tone::default(),
+                reversal_core::invert::Film::Color,
             ),
             extra_profiles: vec![],
             xmp: None,

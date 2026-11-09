@@ -15,7 +15,7 @@ It is for photographers who scan negatives with a camera and edit in a raw edito
 | Automatic first | An untouched frame gets a full conversion; every control starts at 0 |
 | Non-destructive | Source scans are never overwritten |
 
-It ships as three surfaces over one engine: a self-hosted CLI, a local web UI and a Mac app. Editor plugins and extensions are out of scope. Color negative is the only film type today.
+It ships as three surfaces over one engine: a self-hosted CLI, a local web UI and a Mac app. Editor plugins and extensions are out of scope. It converts color and black and white negatives; slide film isn't supported.
 
 ## Input
 
@@ -44,7 +44,7 @@ The output is a 16-bit, scene-linear LinearRaw DNG in linear Rec.2020, with loss
 | Camera model | "Reversal Positive", with embedded profiles | No external profile needed |
 | Highlight headroom | Frame white stored about 2.3 stops under full scale, with every profile curve lifting it back and rolling off the rest | Raw tools can recover highlights above frame white |
 | White balance | AsShotNeutral 1, 1, 1; `crs:WhiteBalance="As Shot"` | The white balance slider starts neutral |
-| Profiles | Reversal Neutral, Flat and Vivid; the chosen one is the main profile | Editors can switch, and Apple Photos applies only the main profile |
+| Profiles | Reversal Neutral, Flat and Hard, or their B&W versions; the chosen one is the main profile | Editors can switch, and Apple Photos applies only the main profile |
 | Black point | DefaultBlackRender set to None | Renderers subtract no black level of their own, so the curve decides |
 | Compression | Lossless JPEG, tiled at 256 px; uncompressed as an option | Read everywhere |
 | Geometry | Applied to the pixels; orientation tag stays normal | Nothing depends on a reader honoring crops or rotation |
@@ -74,7 +74,7 @@ Raising Exposure or curves in Apple Photos clips bright highlights sooner than i
 
 ## Conversion science
 
-Conversion happens in density and writes a scene-linear positive. Film records log exposure as optical density, and density is additive: the orange mask is a constant per-channel offset, so it subtracts exactly. In plain RGB the same operation is a multiplication, which is why curve-based inversion fights color balance.
+Conversion happens in density and writes a scene-linear positive. Film records log exposure as optical density, and density is additive: the orange mask is a constant per-channel offset, so it subtracts exactly. In plain RGB the same operation is a multiplication, which is why curve-based inversion fights color balance. Black and white follows the same principle with one silver image in place of three dye layers.
 
 ### Pipeline
 
@@ -96,10 +96,21 @@ L_c = 10^{\,(E'_c - A)/\gamma \,+\, o_c \log_{10} 2}, \qquad E'_c = \mathrm{toe}
 
 Here T is the signal, T\_base the film base, g\_c the frame's gray curve (identity for green), A the exposure anchor, γ = 0.7 and o\_c the sliders in stops.
 
+### Black and white
+
+Silver blocks every color about equally, so a black and white negative needs no gray curves, crosstalk or saturation. Density above base still comes per channel, which takes out the base's tint, fog and the scan's white balance. The three densities then become one, each weighted by the light it gets through the base, since a brighter channel is less noisy:
+
+```latex
+E = \sum_c w_c D_c, \qquad w_c = \frac{T_{\mathrm{base},c}}{\sum_k T_{\mathrm{base},k}}
+```
+
+Toe, exposure anchor and γ are the same as for color, so Exposure behaves the same. The positive is that one value in all three channels of linear Rec.2020, and only Exposure acts on the pixels.
+
 ### Automatic measurement
 
 | Value | How it's measured | Override |
 | --- | --- | --- |
+| Film type | Measured on cells of 4 by 4 analysis pixels in the measured area, as density above base, so white balance can't sway it. Black and white when 90% of cells lie within 0.02 density of the frame's own gray curve, and red density rises with green at a slope within 0.05 of 1. Color film fails the first wherever the scene has color, and the second even on a gray scene, because its dye layers rise at different rates. A frame spanning too little density to tell is color, the conversion that loses nothing | Color or B&W |
 | Film base | The largest even patch of the brightest film, trying the film's edges first, then a strip across the scan such as the gap between frames. Holes, markings and picture detail break a patch's evenness, and the holder is darker. Saying detection failed is preferred to marking an unwanted area: when no patch looks like clear film, the app warns, keeps a best guess for the conversion, and asks for a custom film base or a roll base | Custom, or shared across a roll |
 | Measured area | The centered 85% of each side, leaving out the film holder: cells far denser than film (green density above 1.2) connected to the scan's edge, plus a small margin for the holder's soft edge. Dense cells that reach the middle of the scan are picture, and nothing is left out on that frame, so a custom area is the fix when dense picture joins the holder. This only affects measuring, not how the holder renders | Size from 50 to 100%, or drawn by hand. A drawn area is measured exactly as drawn, holder included |
 | Gray curves | Fitted to the frame's own near-neutral pixels, with no reference. The band narrows from ±0.15 to ±0.04 density, bins count equally, and the fit is pulled lightly toward an average across rolls | None; there are no RGB or CMY controls |
@@ -124,7 +135,7 @@ The layout follows the window, and in each one the frames list and the tools tak
 - **Wide landscape:** the three columns above. The frames column hides from the open frame's name, giving the image its width, and stays as it was left. The side panel scrolls as one under the histogram, which stays in place.
 - **Narrower landscape, and portrait from 600 px wide:** rotate and mirror stay in the top bar, and crop and straighten wait behind a crop button there. It opens them in a bar of their own under the top bar, with their names, which moves the image down rather than covering it, so the crop frame's handles stay in reach.
 - **Portrait from 600 px wide:** the image takes the full width, and under it the tools sit in two columns, or the frames list in their place. Turning the device to portrait with a frame open shows the tools; turning back brings the frames column back as it was.
-- **A phone held upright:** the image, then one panel, chosen from a bar at the bottom: Crop, Setup, Tone or Color. Crop holds rotate, mirror, the crop choices and Straighten. The frame's name opens the frames list in the panel's place. A panel takes only the height it needs, up to about four rows, and scrolls past that, so the image keeps most of the screen and barely changes size between panels.
+- **A phone held upright:** the image, then one panel, chosen from a bar at the bottom: Crop, Setup, Tone or Color. A black and white frame has no Color, so Tone takes its place. Crop holds rotate, mirror, the crop choices and Straighten. The frame's name opens the frames list in the panel's place. A panel takes only the height it needs, up to about four rows, and scrolls past that, so the image keeps most of the screen and barely changes size between panels.
 - **Histogram, in portrait and on a phone:** it floats over the image's top right corner and shows the clipping numbers only when something clips. Tapping it folds it to an icon, which brings it back and turns amber while the DNG can't store every pixel. It steps aside while a tool works on the image. With no tool open, messages sit at the foot of the image instead of the top, so they never cover it. Where it's too narrow for the names, the clipping numbers show alone, under the ends of the histogram they count.
 
 ### Writing
@@ -137,11 +148,12 @@ Setup decides how the scan is read. It stays pinned above the development contro
 
 | Control | Choices |
 | --- | --- |
+| Film | Color or B&W, showing what was detected. Choosing the other converts the frame as that, and choosing the detected one again goes back to detecting. B&W leaves only Tone under Develop |
 | Film base | Detect, or Custom to drag over clear film by hand. Match film base… shares one across frames |
 | Measured | Center (size 50–100%, default 85%, without the holder), or Custom to drag over the picture by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
 | Show areas | Draws the film base, measured area and crop on the entire scan, each in the color of its label. With Center, the detected holder is hatched in magenta and labeled Film holder (detected) under Measured. A custom area leaves nothing out, so neither the hatching nor the label shows |
 
-Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Cancel or Escape does too. A dot in the frame list marks a custom film base or measured area.
+Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Cancel or Escape does too. A dot in the frame list marks a chosen film type, or a custom film base or measured area.
 
 ### Development
 
@@ -152,8 +164,8 @@ Each group shows one choice: the one in use, or Custom while its drag tool is op
 | Highlights, Shadows | ±100 | Profile curve |
 | Whites | −100 rolls off the whole stored range, +100 clips sooner | Profile curve |
 | Blacks | −100 crushes the black point, +100 lifts it, except at the very bottom of the stored range, where the curve has to start at 0 | Profile curve |
-| Profile | Neutral, Flat, Vivid | Which profile the file opens with |
-| Temperature | Red and blue in opposite directions, ±0.6 EV | Pixels |
+| Profile | Neutral, Flat, Hard | Which profile the file opens with |
+| Temperature | Red and blue in opposite directions, ±0.6 EV. Color film only, like Tint and Saturation | Pixels |
 | Tint | Green against red and blue | Pixels |
 | Saturation | −100 is black and white | Pixels |
 | Rotate 90°, Mirror | Quarter turns, left-right flip; both act on the image as shown | Pixels |
@@ -183,9 +195,9 @@ Reset, in the Develop header, returns the tone and color controls to 0 and the p
 | --- | --- |
 | Reversal Neutral | The standard S-curve, with a short roll-off above frame white |
 | Reversal Flat | Low contrast, with the whole stored range rolled off below white |
-| Reversal Vivid | More contrast, plus 1.15 saturation in a look table |
+| Reversal Hard | More contrast, plus 1.15 saturation in a look table. It was called Vivid, and settings that say so still open |
 
-All three share the tone sliders. The DNG carries all three.
+All three share the tone sliders. The DNG carries all three. A black and white frame gets Reversal B&W Neutral, Flat and Hard instead: the same curves, with a look table holding saturation at 0. White balance or saturation moves in an editor then can't tint the picture, and toning applied after the profile, such as color grading, still works.
 
 ### Feedback
 
@@ -248,7 +260,7 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 
 ## Known limits
 
-- **Film:** color negative only; black and white and slide film need their own pipelines.
+- **Film:** slide film needs its own pipeline. Film type detection was tested on two cameras and one light source each; black and white was checked by eye, with no reference scans. Chromogenic black and white film is untested.
 - **Cameras:** tested only with Nikon D5100 scans. Others LibRaw reads should open, but the crosstalk correction was fitted to this camera and one light source.
 - **Full strips:** the centered area doesn't suit them, so set a custom measured area and crop there.
 - **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Set a custom film base, or match it across the roll.

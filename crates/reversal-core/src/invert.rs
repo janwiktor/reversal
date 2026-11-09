@@ -12,6 +12,10 @@
 //! average density; `offsets` hold the exposure and color balance sliders. A small
 //! saturation step follows.
 //!
+//! Black and white film has one silver image, which blocks every color about equally, so it
+//! needs no gray curves or crosstalk: the three densities above base are averaged into one
+//! `E`, and the positive is that one value in all three channels.
+//!
 //! Geometry: scan → straighten → crop → invert → mirror → quarter turns.
 //! Regions (crop, analysis area, base sample) are normalized scan coordinates.
 
@@ -96,6 +100,25 @@ const BASE_MIN_GAP_SHARE: f32 = 0.5;
 /// of a roll scanned alike stayed within 2%, unless something was misread.
 const ROLL_BASE_TOLERANCE: f32 = 0.06;
 
+/// Film type detection works on cells of this many analysis pixels a side: grain and lens color
+/// fringes average out, scene color doesn't.
+const FILM_CELL: usize = 4;
+/// Density bins of the detection's median gray curve, from `FILM_MIN_DENSITY` up, and the cells a
+/// bin needs to count. They reach below the base: when no clear film shows, the base is a guess
+/// from the picture, and on black and white that moves every channel alike.
+const FILM_MIN_DENSITY: f32 = -1.0;
+const FILM_BIN_WIDTH: f32 = 0.05;
+const FILM_BIN_COUNT: usize = 60;
+const FILM_MIN_BIN_CELLS: usize = 40;
+/// Bins a frame must fill to show how its channels rise together: a few flat patches can't.
+const FILM_MIN_BINS: usize = 6;
+/// Black and white when 90% of cells lie this close to the frame's own gray curve, in density.
+/// On 220 scans from two cameras, black and white reached 0.011 and color started at 0.0197.
+const FILM_BW_SPREAD: f32 = 0.02;
+/// ...and red density rises with green at a slope this close to 1: silver blocks every color
+/// about equally. Black and white read 1.000–1.024, color 0.67–0.93, also on near-gray scenes.
+const FILM_BW_RED_SLOPE: f32 = 0.05;
+
 /// Exposure anchor = mean of the 99th percentile and the average of E_g, plus this.
 const ANCHOR_OFFSET: f32 = 0.1027;
 /// Shared film toe, expanded near the base: E' = E - amount · exp(-max(E, floor) / scale).
@@ -103,10 +126,23 @@ const TOE_AMOUNT: f32 = 0.3;
 const TOE_SCALE: f32 = 0.35;
 const TOE_FLOOR: f32 = -0.3;
 
+/// Which kind of negative a frame is, and so which conversion it gets.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Film {
+    /// Color negative: three dye layers under an orange mask.
+    #[default]
+    Color,
+    /// Black and white negative: one silver image.
+    Bw,
+}
+
 /// Manual overrides for the automatic analysis. `None` = the automatic choice.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Hints {
+    /// Film type; `None` detects it.
+    pub film: Option<Film>,
     /// Image area used to measure density range and balance.
     pub analysis: Option<NRect>,
     /// Size of the centered image area when `analysis` isn't drawn, in percent of each side.
@@ -159,13 +195,17 @@ impl GrayCurve {
 /// Automatic estimate for one frame.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Estimate {
+    /// Which conversion the frame gets: the detected film type, or the one chosen. Settings from
+    /// before black and white were all color.
+    #[serde(default)]
+    pub film: Film,
     /// Linear camera RGB of the unexposed film base.
     pub base_rgb: [f32; 3],
     /// Where the base was read from.
     pub base_area: NRect,
     /// Part of the scan the gray curves and exposure were measured on.
     pub area: NRect,
-    /// Gray curves of the red and blue layers.
+    /// Gray curves of the red and blue layers. Black and white doesn't use them.
     #[serde(alias = "grey")]
     pub gray: [GrayCurve; 2],
     /// Density of `E'` that maps to linear 1.0.
@@ -185,7 +225,7 @@ pub struct Adjust {
     pub whites: f32,
     /// Profile the DNG opens with.
     pub look: Look,
-    /// + warmer (yellow), − cooler (blue).
+    /// + warmer (yellow), − cooler (blue). Color film only, like `tint` and `saturation`.
     pub temperature: f32,
     /// + magenta, − green.
     pub tint: f32,
@@ -223,9 +263,14 @@ impl Default for Adjust {
 }
 
 impl Adjust {
+    /// Exposure as a log2 gain.
+    fn exposure_ev(&self) -> f32 {
+        self.exposure / 100.0 * EXPOSURE_EV_RANGE
+    }
+
     /// Per-channel log2 gains from exposure, temperature and tint.
     fn gains_ev(&self) -> [f32; 3] {
-        let e = self.exposure / 100.0 * EXPOSURE_EV_RANGE;
+        let e = self.exposure_ev();
         let t = self.temperature / 100.0 * BALANCE_EV_RANGE;
         let g = self.tint / 100.0 * BALANCE_EV_RANGE;
         [e + t + g / 2.0, e - g, e - t + g / 2.0]
@@ -705,24 +750,73 @@ fn equivalent_density(d: [f32; 3], gray: &[GrayCurve; 2]) -> [f32; 3] {
 /// Exposure from the highlights and the scene average together: highlights alone misjudge
 /// frames with small bright lights, the average alone misjudges low-key frames.
 fn fit_anchor(density: &[[f32; 3]], gray: &[GrayCurve; 2]) -> f32 {
-    let mut e_g: Vec<f32> = density
-        .iter()
-        .map(|&d| equivalent_density(d, gray)[1])
-        .collect();
+    anchor_of(
+        density
+            .iter()
+            .map(|&d| (equivalent_density(d, gray)[1], d[1])),
+    )
+}
+
+/// The anchor from each pixel's `E` and its density above base.
+fn anchor_of(levels: impl Iterator<Item = (f32, f32)>) -> f32 {
+    let mut e = Vec::new();
     // Bare film says nothing about the scene.
     let (mut sum, mut n) = (0.0f64, 0usize);
-    for (e, d) in e_g.iter().zip(density) {
-        if d[1] > 0.03 {
-            sum += *e as f64;
+    for (level, above_base) in levels {
+        e.push(level);
+        if above_base > 0.03 {
+            sum += level as f64;
             n += 1;
         }
     }
     let mean = if n > 0 { (sum / n as f64) as f32 } else { 0.0 };
-    0.5 * (percentile(&mut e_g, 99.0) + mean) + ANCHOR_OFFSET
+    0.5 * (percentile(&mut e, 99.0) + mean) + ANCHOR_OFFSET
 }
 
-/// [`estimate`] on an image from [`analysis_image`].
-pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
+/// Gray curves of a black and white frame, which has none: every channel is itself.
+const SILVER_GRAY: [GrayCurve; 2] = [GrayCurve {
+    bend: 0.0,
+    slope: 1.0,
+    top: 1.0,
+}; 2];
+
+/// How much each channel counts in a black and white density: in proportion to the light it
+/// gets through the base. Shot noise in density falls as the signal grows, so this weighs each
+/// channel by the inverse of its noise variance.
+fn silver_weights(base_rgb: [f32; 3]) -> [f32; 3] {
+    let base = base_rgb.map(|b| b.max(1e-6));
+    let sum: f32 = base.iter().sum();
+    base.map(|b| b / sum)
+}
+
+/// Silver density of a pixel: its three densities above base, weighted. Dividing by the base
+/// has already taken out the base's tint, fog and the scan's white balance.
+#[inline]
+fn silver_density(d: [f32; 3], weights: [f32; 3]) -> f32 {
+    weights[0] * d[0] + weights[1] * d[1] + weights[2] * d[2]
+}
+
+fn fit_anchor_silver(density: &[[f32; 3]], base_rgb: [f32; 3]) -> f32 {
+    let weights = silver_weights(base_rgb);
+    anchor_of(density.iter().map(|&d| {
+        let silver = silver_density(d, weights);
+        (silver, silver)
+    }))
+}
+
+/// Where a frame's measurements start: its film base, and density above it on the measured area.
+struct Measured {
+    base_rgb: [f32; 3],
+    base_area: NRect,
+    area: NRect,
+    /// Each measured pixel.
+    density: Vec<[f32; 3]>,
+    /// Each measured cell of `FILM_CELL` pixels a side, from its mean light. Cells cut by the
+    /// holder, clipped light or the area's edge are left out.
+    cells: Vec<[f32; 3]>,
+}
+
+fn measure(small: &Rgb32, hints: &Hints) -> Measured {
     let (w, h) = (small.width, small.height);
 
     let (base_rgb, base_area) = match hints.base {
@@ -742,20 +836,122 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         None => holder_pixels(small, base_rgb),
     };
     let r = area.to_pixels(w, h);
-    let density: Vec<[f32; 3]> = (r.top..r.bottom)
+    let film = |x: usize, y: usize| -> Option<[f32; 3]> {
+        let p = small.get(x, y);
+        let held = holder.as_ref().is_some_and(|mask| mask[y * w + x]);
+        (!held && p[0].max(p[1]).max(p[2]) < CLIPPED).then_some(p)
+    };
+    let above_base = |p: [f32; 3]| [0, 1, 2].map(|c| density_above_base(p[c], base_rgb[c]));
+    let density = (r.top..r.bottom)
         .flat_map(|y| (r.left..r.right).map(move |x| (x, y)))
-        .filter(|&(x, y)| holder.as_ref().is_none_or(|mask| !mask[y * w + x]))
-        .map(|(x, y)| small.get(x, y))
-        .filter(|p| p[0].max(p[1]).max(p[2]) < CLIPPED)
-        .map(|p| [0, 1, 2].map(|c| density_above_base(p[c], base_rgb[c])))
+        .filter_map(|(x, y)| film(x, y))
+        .map(above_base)
         .collect();
-    let gray = fit_gray(&density);
-    Estimate {
+    let mut cells = Vec::new();
+    for top in (r.top..r.bottom.saturating_sub(FILM_CELL - 1)).step_by(FILM_CELL) {
+        for left in (r.left..r.right.saturating_sub(FILM_CELL - 1)).step_by(FILM_CELL) {
+            let pixels = (top..top + FILM_CELL)
+                .flat_map(|y| (left..left + FILM_CELL).map(move |x| film(x, y)))
+                .collect::<Option<Vec<_>>>();
+            if let Some(pixels) = pixels {
+                let n = pixels.len() as f32;
+                let mean = [0, 1, 2].map(|c| pixels.iter().map(|p| p[c]).sum::<f32>() / n);
+                cells.push(above_base(mean));
+            }
+        }
+    }
+    Measured {
         base_rgb,
         base_area,
         area,
+        density,
+        cells,
+    }
+}
+
+/// How far a frame strays from black and white, from cells of density above base: how far they
+/// lie from the frame's own gray curve (90th percentile, in density), and the slope of red
+/// against green density along that curve. The curve runs straight between the median cells of
+/// each density bin. `None` when the frame spans too little density to tell.
+fn film_reading(cells: &[[f32; 3]]) -> Option<(f32, f32)> {
+    let mut bins = vec![Vec::new(); FILM_BIN_COUNT];
+    for cell in cells {
+        let bin = ((cell[1] - FILM_MIN_DENSITY) / FILM_BIN_WIDTH).floor();
+        if bin >= 0.0 && (bin as usize) < FILM_BIN_COUNT {
+            bins[bin as usize].push(*cell);
+        }
+    }
+    let knots: Vec<[f32; 3]> = bins
+        .iter()
+        .filter(|b| b.len() >= FILM_MIN_BIN_CELLS)
+        .map(|b| [0, 1, 2].map(|c| median(&mut b.iter().map(|p| p[c]).collect::<Vec<_>>())))
+        .collect();
+    if knots.len() < FILM_MIN_BINS {
+        return None;
+    }
+    // Least squares through the base: red = slope · green.
+    let (rg, gg) = knots.iter().fold((0.0, 0.0), |(rg, gg), k| {
+        (rg + k[0] * k[1], gg + k[1] * k[1])
+    });
+    let on_curve = |g: f32| {
+        let i = knots
+            .partition_point(|k| k[1] < g)
+            .clamp(1, knots.len() - 1);
+        let (a, b) = (knots[i - 1], knots[i]);
+        let t = (g - a[1]) / (b[1] - a[1]).max(1e-6);
+        [a[0] + (b[0] - a[0]) * t, a[2] + (b[2] - a[2]) * t]
+    };
+    let (lowest, highest) = (knots[0][1], knots[knots.len() - 1][1]);
+    let mut off: Vec<f32> = cells
+        .iter()
+        .filter(|c| (lowest..=highest).contains(&c[1]))
+        .map(|c| {
+            let [red, blue] = on_curve(c[1]);
+            (c[0] - red).hypot(c[2] - blue)
+        })
+        .collect();
+    Some((percentile(&mut off, 90.0), rg / gg))
+}
+
+/// Film type from measured cells. Density above base makes it independent of the scan's white
+/// balance. A color negative strays from its gray curve wherever the scene has color, and its
+/// dye layers rise at different rates even where it hasn't; black and white does neither. A frame
+/// that can't tell is color, the conversion that loses nothing.
+fn film_of(cells: &[[f32; 3]]) -> Film {
+    match film_reading(cells) {
+        Some((spread, red_slope))
+            if spread < FILM_BW_SPREAD && (red_slope - 1.0).abs() < FILM_BW_RED_SLOPE =>
+        {
+            Film::Bw
+        }
+        _ => Film::Color,
+    }
+}
+
+/// The film type a frame reads as on an image from [`analysis_image`], whatever `hints.film`
+/// says.
+pub fn detect_film(small: &Rgb32, hints: &Hints) -> Film {
+    film_of(&measure(small, hints).cells)
+}
+
+/// [`estimate`] on an image from [`analysis_image`].
+pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
+    let m = measure(small, hints);
+    let film = hints.film.unwrap_or_else(|| film_of(&m.cells));
+    let (gray, anchor) = match film {
+        Film::Color => {
+            let gray = fit_gray(&m.density);
+            (gray, fit_anchor(&m.density, &gray))
+        }
+        Film::Bw => (SILVER_GRAY, fit_anchor_silver(&m.density, m.base_rgb)),
+    };
+    Estimate {
+        film,
+        base_rgb: m.base_rgb,
+        base_area: m.base_area,
+        area: m.area,
         gray,
-        anchor: fit_anchor(&density, &gray),
+        anchor,
     }
 }
 
@@ -771,16 +967,26 @@ pub fn differs_from_roll(frame_base: [f32; 3], roll: [f32; 3]) -> bool {
     (0..3).any(|c| (frame_base[c] / roll[c].max(1e-6) - 1.0).abs() > ROLL_BASE_TOLERANCE)
 }
 
-/// Scene-linear positive for one pixel of linear camera RGB, before saturation.
+/// Scene-linear positive for one pixel of linear camera RGB, before saturation. Black and white
+/// comes out the same in all three channels, with only exposure applied.
 #[inline]
 pub fn positive(rgb: [f32; 3], e: &Estimate, a: &Adjust) -> [f32; 3] {
-    let gains = a.gains_ev();
     let d = [0, 1, 2].map(|c| density_above_base(rgb[c], e.base_rgb[c]));
-    let eq = equivalent_density(d, &e.gray);
-    [0, 1, 2].map(|c| {
-        let toe = TOE_AMOUNT * (-eq[c].max(TOE_FLOOR) / TOE_SCALE).exp();
-        10f32.powf((eq[c] - toe - e.anchor) / GAMMA_REF + gains[c] * LOG10_2)
-    })
+    let linear = |level: f32, gain_ev: f32| {
+        let toe = TOE_AMOUNT * (-level.max(TOE_FLOOR) / TOE_SCALE).exp();
+        10f32.powf((level - toe - e.anchor) / GAMMA_REF + gain_ev * LOG10_2)
+    };
+    match e.film {
+        Film::Color => {
+            let gains = a.gains_ev();
+            let eq = equivalent_density(d, &e.gray);
+            [0, 1, 2].map(|c| linear(eq[c], gains[c]))
+        }
+        Film::Bw => {
+            let silver = silver_density(d, silver_weights(e.base_rgb));
+            [linear(silver, a.exposure_ev()); 3]
+        }
+    }
 }
 
 /// Linear saturation around Rec.2020 luminance; negative results are clipped to 0.
@@ -856,6 +1062,7 @@ mod tests {
 
     fn est() -> Estimate {
         Estimate {
+            film: Film::Color,
             base_rgb: BASE,
             base_area: NRect::FULL,
             area: NRect::FULL,
@@ -1425,6 +1632,165 @@ mod tests {
             },
         );
         assert_eq!((rotated.width, rotated.height), (300, 400));
+    }
+
+    /// Pseudo-random in −1…1, the same on every run.
+    fn noise(x: usize, y: usize, c: usize) -> f32 {
+        let n = (x * 73_856_093) ^ (y * 19_349_663) ^ (c * 83_492_791);
+        (n % 2001) as f32 / 1000.0 - 1.0
+    }
+
+    /// 400x300: clear film around a frame whose density is `scene` at (x, y), each channel then
+    /// scaled by `gains`, as a scan's white balance would. Sensor noise differs per channel.
+    fn scan_of(scene: impl Fn(usize, usize) -> [f32; 3], gains: [f32; 3]) -> Rgb32 {
+        let (w, h) = (400, 300);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let inside = (40..360).contains(&x) && (30..270).contains(&y);
+                let d = if inside { scene(x, y) } else { [0.0; 3] };
+                let d = [0, 1, 2].map(|c| d[c] + 0.01 * noise(x, y, c));
+                let px = pixel(d);
+                let i = (y * w + x) * 3;
+                for c in 0..3 {
+                    scan.data[i + c] = px[c] * gains[c];
+                }
+            }
+        }
+        scan
+    }
+
+    /// Silver density across the frame, slightly warmer in blue than red as silver can be.
+    fn silver(x: usize, y: usize) -> [f32; 3] {
+        let d = 0.15 + 0.95 * (x - 40) as f32 / 320.0 + 0.08 * (y as f32 / 9.0).sin();
+        [0.99 * d, d, 1.02 * d]
+    }
+
+    const SCAN_GAINS: [[f32; 3]; 3] = [[1.0; 3], [2.1, 1.0, 0.55], [0.6, 1.0, 1.8]];
+
+    #[test]
+    fn black_and_white_is_detected_whatever_the_white_balance() {
+        for gains in SCAN_GAINS {
+            let scan = scan_of(silver, gains);
+            let e = estimate_on(&scan, &Hints::default());
+            assert_eq!(e.film, Film::Bw, "{gains:?}");
+            assert_eq!(detect_film(&scan, &Hints::default()), Film::Bw);
+        }
+    }
+
+    #[test]
+    fn color_film_stays_color_even_on_a_gray_scene() {
+        // Only grays, but on color film's gray curves: its dye layers rise at different rates.
+        for gains in SCAN_GAINS {
+            let gray_scene = scan_of(
+                |x, _| neutral(0.2 + 0.8 * (x - 40) as f32 / 320.0, &CURVES),
+                gains,
+            );
+            assert_eq!(
+                estimate_on(&gray_scene, &Hints::default()).film,
+                Film::Color,
+                "{gains:?}"
+            );
+        }
+        // Colored stripes across a neutral scene.
+        let colorful = scan_of(
+            |x, y| {
+                let d = neutral(0.2 + 0.8 * (x - 40) as f32 / 320.0, &CURVES);
+                if y % 40 < 14 {
+                    [d[0] + 0.2, d[1], d[2] - 0.2]
+                } else {
+                    d
+                }
+            },
+            [1.0; 3],
+        );
+        assert_eq!(estimate_on(&colorful, &Hints::default()).film, Film::Color);
+    }
+
+    #[test]
+    fn a_frame_that_cant_tell_stays_color() {
+        let blank = scan_of(|_, _| [0.5; 3], [1.0; 3]);
+        assert_eq!(estimate_on(&blank, &Hints::default()).film, Film::Color);
+    }
+
+    #[test]
+    fn a_chosen_film_type_overrides_detection() {
+        let bw = scan_of(silver, [1.0; 3]);
+        let as_color = Hints {
+            film: Some(Film::Color),
+            ..Hints::default()
+        };
+        assert_eq!(estimate_on(&bw, &as_color).film, Film::Color);
+        assert_eq!(detect_film(&bw, &as_color), Film::Bw);
+        let as_bw = Hints {
+            film: Some(Film::Bw),
+            ..Hints::default()
+        };
+        assert_eq!(estimate_on(&synthetic_scan(), &as_bw).film, Film::Bw);
+    }
+
+    #[test]
+    fn black_and_white_is_gray_and_takes_only_exposure() {
+        for gains in SCAN_GAINS {
+            let scan = scan_of(silver, gains);
+            let s = Settings::new(estimate_on(&scan, &Hints::default()), Adjust::default());
+            let out = convert(&scan, &s);
+            assert!(out.pixels().all(|p| p[0] == p[1] && p[1] == p[2]));
+            // Denser film is a brighter positive.
+            let at = |x: usize| out.get(x, 150)[1];
+            assert!(at(330) > at(200) && at(200) > at(70));
+
+            let colored = Adjust {
+                temperature: 100.0,
+                tint: -60.0,
+                saturation: 80.0,
+                ..Adjust::default()
+            };
+            let px = scan.get(200, 150);
+            assert_eq!(
+                positive(px, &s.estimate, &colored),
+                positive(px, &s.estimate, &s.adjust)
+            );
+            let brighter = Adjust {
+                exposure: 100.0 / EXPOSURE_EV_RANGE,
+                ..Adjust::default()
+            };
+            let ratio =
+                positive(px, &s.estimate, &brighter)[0] / positive(px, &s.estimate, &s.adjust)[0];
+            assert!((ratio - 2.0).abs() < 1e-3, "{ratio}");
+        }
+    }
+
+    #[test]
+    fn black_and_white_doesnt_depend_on_the_scans_white_balance() {
+        let convert_with_gains = |gains| {
+            let scan = scan_of(silver, gains);
+            let s = Settings::new(estimate_on(&scan, &Hints::default()), Adjust::default());
+            convert(&scan, &s)
+        };
+        // Each channel's noise counts a little differently, so compare the frame as a whole.
+        let mean = |img: &Rgb32| img.data.iter().sum::<f32>() / img.data.len() as f32;
+        let plain = mean(&convert_with_gains([1.0; 3]));
+        for gains in SCAN_GAINS {
+            let other = mean(&convert_with_gains(gains));
+            assert!(
+                (other / plain - 1.0).abs() < 0.01,
+                "{gains:?}: {plain} {other}"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_from_before_black_and_white_read_as_color() {
+        let mut json = serde_json::to_value(Settings::new(est(), Adjust::default())).unwrap();
+        json["estimate"].as_object_mut().unwrap().remove("film");
+        json["hints"].as_object_mut().unwrap().remove("film");
+        json["adjust"]["look"] = "vivid".into();
+        let old: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(old.estimate.film, Film::Color);
+        assert_eq!(old.hints.film, None);
+        assert_eq!(old.adjust.look, Look::Hard);
+        assert_eq!(serde_json::to_value(Film::Bw).unwrap(), "bw");
     }
 
     #[test]
