@@ -1,6 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Local web UI: a small HTTP server on 127.0.0.1 serving one page and a JSON API.
+//! Local web UI: one page and a JSON API, served by a small HTTP server on 127.0.0.1, or by
+//! an [`Engine`] that an app holds in its own process and passes its web view's requests to.
 //! Requests from other sites are refused, see [`request_allowed`], and the page runs under a
 //! content security policy that allows only its own files, see [`CONTENT_SECURITY_POLICY`].
 //!
@@ -28,7 +29,7 @@
 //!                                          written unless all of them can be read
 
 use std::collections::HashMap;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -40,7 +41,7 @@ use reversal_core::invert::{self, Adjust, Hints, Settings};
 use reversal_core::render;
 use serde::Deserialize;
 use serde_json::json;
-use tiny_http::{Header, Method, Request, Response, Server};
+use tiny_http::{Header, Server};
 
 use crate::batch::{lock, Batch, Done};
 use crate::folder::RollReading;
@@ -58,8 +59,70 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; st
     img-src 'self' blob: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; \
     form-action 'none'";
 
-type Resp = Response<Cursor<Vec<u8>>>;
-type Handled = Result<Resp, (u16, String)>;
+/// The page's origin when an app serves it to its own web view, without a server. The app
+/// registers this scheme there and passes each request to [`Engine::respond`].
+pub const APP_ORIGIN: &str = "reversal://app";
+
+/// Bodies are settings and lists of file names. Anything larger isn't from the page.
+const MAX_BODY_BYTES: usize = 4 << 20;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    Get,
+    Post,
+    Other,
+}
+
+/// A request from the page, whether it came over HTTP or from an app's own web view.
+pub struct Request {
+    pub method: Method,
+    /// The path and query.
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Request {
+    fn header(&self, name: &str) -> Option<String> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.clone())
+    }
+}
+
+pub struct Response {
+    pub status: u16,
+    pub headers: Vec<(&'static str, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Response {
+    fn new(content_type: &str, body: Vec<u8>) -> Self {
+        Response {
+            status: 200,
+            headers: vec![("Content-Type", content_type.to_string())],
+            body,
+        }
+    }
+
+    fn with_header(mut self, name: &'static str, value: &str) -> Self {
+        self.headers.push((name, value.to_string()));
+        self
+    }
+}
+
+type Handled = Result<Response, (u16, String)>;
+
+/// How the page is served, which decides where its requests have to come from.
+#[derive(Clone, Copy)]
+enum Served {
+    Http {
+        port: u16,
+    },
+    /// By an app, to its own web view, as [`APP_ORIGIN`].
+    App,
+}
 
 struct Loaded {
     /// Downsampled scan: used for previews and (re-)estimation.
@@ -68,7 +131,7 @@ struct Loaded {
 }
 
 struct State {
-    port: u16,
+    served: Served,
     folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
     batch: Batch,
@@ -138,7 +201,7 @@ pub fn serve(
     port: u16,
     exit_with_stdin: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (server, mut state) = bind(dir, port)?;
+    let (server, mut state, port) = bind(dir, port)?;
     if exit_with_stdin {
         std::thread::spawn(|| {
             let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
@@ -146,8 +209,7 @@ pub fn serve(
         });
     }
     println!(
-        "Reversal UI: http://127.0.0.1:{}  (folder: {})",
-        state.port,
+        "Reversal UI: http://127.0.0.1:{port}  (folder: {})",
         state.folder.dir.display()
     );
     state.run(&server);
@@ -163,8 +225,8 @@ pub struct InProcess {
 
 impl InProcess {
     pub fn start(dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let (server, mut state) = bind(dir, 0)?;
-        let (port, server) = (state.port, Arc::new(server));
+        let (server, mut state, port) = bind(dir, 0)?;
+        let server = Arc::new(server);
         let serving = server.clone();
         std::thread::spawn(move || state.run(&serving));
         Ok(InProcess { port, server })
@@ -177,7 +239,27 @@ impl Drop for InProcess {
     }
 }
 
-fn bind(dir: PathBuf, port: u16) -> Result<(Server, State), Box<dyn std::error::Error>> {
+/// The engine for an app that holds it in its own process and passes it the requests of its web
+/// view, where an app can't start another process and has no reason to open a port. The page is
+/// the one the server serves, at [`APP_ORIGIN`].
+pub struct Engine {
+    state: State,
+}
+
+impl Engine {
+    pub fn open(dir: PathBuf) -> std::io::Result<Self> {
+        let state = State::new(dir.canonicalize()?, Served::App);
+        Ok(Engine { state })
+    }
+
+    /// Answers one request. A save it started keeps running in the background, also after the
+    /// engine is dropped.
+    pub fn respond(&mut self, request: &Request) -> Response {
+        self.state.respond(request)
+    }
+}
+
+fn bind(dir: PathBuf, port: u16) -> Result<(Server, State, u16), Box<dyn std::error::Error>> {
     let dir = dir.canonicalize()?;
     let server = Server::http(("127.0.0.1", port))
         .map_err(|e| format!("could not use port {port}: {e}. Choose another with --port."))?;
@@ -185,28 +267,61 @@ fn bind(dir: PathBuf, port: u16) -> Result<(Server, State), Box<dyn std::error::
         .server_addr()
         .to_ip()
         .map_or(port, |address| address.port());
-    let state = State {
-        port,
-        folder: Arc::new(Folder::new(dir)),
-        cache: HashMap::new(),
-        batch: Batch::default(),
-        roll_readings: Arc::default(),
-    };
-    Ok((server, state))
+    Ok((server, State::new(dir, Served::Http { port }), port))
 }
 
-fn header(name: &str, value: &str) -> Header {
-    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header")
+/// The request as the engine takes it, or the answer if it can't be read.
+fn read_http(req: &mut tiny_http::Request) -> Result<Request, Response> {
+    let method = match req.method() {
+        tiny_http::Method::Get => Method::Get,
+        tiny_http::Method::Post => Method::Post,
+        _ => Method::Other,
+    };
+    let headers = req
+        .headers()
+        .iter()
+        .map(|h| (h.field.as_str().to_string(), h.value.to_string()))
+        .collect();
+    let mut body = Vec::new();
+    if method == Method::Post {
+        let limit = MAX_BODY_BYTES as u64 + 1;
+        let read = req.as_reader().take(limit).read_to_end(&mut body);
+        if read.is_err() || body.len() > MAX_BODY_BYTES {
+            return Err(json_resp(413, &json!({ "error": "request too large" })));
+        }
+    }
+    Ok(Request {
+        method,
+        url: req.url().to_string(),
+        headers,
+        body,
+    })
+}
+
+fn to_http(response: Response) -> tiny_http::Response<Cursor<Vec<u8>>> {
+    let mut http = tiny_http::Response::from_data(response.body).with_status_code(response.status);
+    for (name, value) in response.headers {
+        if let Ok(header) = Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+            http = http.with_header(header);
+        }
+    }
+    http
+}
+
+/// Browsers must take each response for what it says it is.
+fn finish(response: Response) -> Response {
+    response.with_header("X-Content-Type-Options", "nosniff")
 }
 
 fn version_info() -> serde_json::Value {
     serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "commit": env!("REVERSAL_COMMIT") })
 }
 
-fn json_resp(code: u16, v: &serde_json::Value) -> Resp {
-    Response::from_data(v.to_string().into_bytes())
-        .with_status_code(code)
-        .with_header(header("Content-Type", "application/json"))
+fn json_resp(code: u16, v: &serde_json::Value) -> Response {
+    Response {
+        status: code,
+        ..Response::new("application/json", v.to_string().into_bytes())
+    }
 }
 
 fn query_param(url: &str, key: &str) -> Option<String> {
@@ -242,26 +357,29 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn request_header(req: &Request, name: &str) -> Option<String> {
-    req.headers()
-        .iter()
-        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case(name))
-        .map(|h| h.value.to_string())
-}
-
 /// Binding to loopback doesn't stop a web page in the user's browser from reaching this
 /// server. The Host check defeats DNS rebinding, the Origin check other sites, and
 /// requiring JSON forces a CORS preflight, which this server never grants. The Sec-Fetch
 /// headers, where a browser sends them, also refuse what another site loads without a
 /// preflight, such as an image; a link from another site may still open the page itself.
+///
+/// An app's web view reaches the engine without a network, so there is no host to check. The
+/// origin still has to be the page's, should that view ever show anything else.
 fn request_allowed(
-    port: u16,
+    served: Served,
     is_post: bool,
     is_page: bool,
     header: impl Fn(&str) -> Option<String>,
 ) -> bool {
-    let local = |authority: &str| {
-        authority == format!("127.0.0.1:{port}") || authority == format!("localhost:{port}")
+    let from_page = match served {
+        Served::Http { port } => {
+            let local = |authority: &str| {
+                authority == format!("127.0.0.1:{port}") || authority == format!("localhost:{port}")
+            };
+            header("Host").is_some_and(|h| local(&h))
+                && header("Origin").is_none_or(|o| o.strip_prefix("http://").is_some_and(local))
+        }
+        Served::App => header("Origin").is_none_or(|o| o == APP_ORIGIN),
     };
     let is_json = |c: &str| {
         let media_type = c.split(';').next().unwrap_or("").trim();
@@ -271,65 +389,78 @@ fn request_allowed(
     let navigation = is_page
         && header("Sec-Fetch-Mode").as_deref() == Some("navigate")
         && header("Sec-Fetch-Dest").as_deref() == Some("document");
-    header("Host").is_some_and(|h| local(&h))
-        && header("Origin").is_none_or(|o| o.strip_prefix("http://").is_some_and(local))
+    from_page
         && (!is_post || header("Content-Type").is_some_and(|c| is_json(&c)))
         && (own_fetch || navigation)
 }
 
-fn page(body: &str, content_type: &str) -> Resp {
-    Response::from_data(body.as_bytes().to_vec())
-        .with_header(header("Content-Type", content_type))
-        .with_header(header("Content-Security-Policy", CONTENT_SECURITY_POLICY))
-        .with_header(header("Referrer-Policy", "no-referrer"))
+fn page(body: &str, content_type: &str) -> Response {
+    Response::new(content_type, body.as_bytes().to_vec())
+        .with_header("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        .with_header("Referrer-Policy", "no-referrer")
         // The files change with the binary, not with time, so never keep an old one.
-        .with_header(header("Cache-Control", "no-store"))
+        .with_header("Cache-Control", "no-store")
 }
 
-fn read_body<T: for<'de> Deserialize<'de>>(req: &mut Request) -> Result<T, (u16, String)> {
-    serde_json::from_reader(req.as_reader()).map_err(|e| (400, format!("bad request body: {e}")))
+fn read_body<T: for<'de> Deserialize<'de>>(req: &Request) -> Result<T, (u16, String)> {
+    serde_json::from_slice(&req.body).map_err(|e| (400, format!("bad request body: {e}")))
 }
 
 impl State {
-    fn run(&mut self, server: &Server) {
-        for mut req in server.incoming_requests() {
-            // A failing request mustn't take the server down: the Mac app would close with it.
-            let handled = catch_unwind(AssertUnwindSafe(|| self.handle(&mut req)));
-            let resp = match handled {
-                Ok(Ok(resp)) => resp,
-                Ok(Err((code, msg))) => json_resp(code, &json!({ "error": msg })),
-                Err(_) => {
-                    eprintln!("{} {} failed unexpectedly", req.method(), req.url());
-                    json_resp(500, &json!({ "error": "the request failed unexpectedly" }))
-                }
-            };
-            // Browsers must take each response for what it says it is.
-            let _ = req.respond(resp.with_header(header("X-Content-Type-Options", "nosniff")));
+    /// `dir` as `canonicalize` gives it.
+    fn new(dir: PathBuf, served: Served) -> Self {
+        State {
+            served,
+            folder: Arc::new(Folder::new(dir)),
+            cache: HashMap::new(),
+            batch: Batch::default(),
+            roll_readings: Arc::default(),
         }
     }
 
-    fn handle(&mut self, req: &mut Request) -> Handled {
-        let url = req.url().to_string();
+    fn run(&mut self, server: &Server) {
+        for mut req in server.incoming_requests() {
+            let response = match read_http(&mut req) {
+                Ok(request) => self.respond(&request),
+                Err(refused) => finish(refused),
+            };
+            let _ = req.respond(to_http(response));
+        }
+    }
+
+    fn respond(&mut self, req: &Request) -> Response {
+        // A failing request mustn't take the engine down: the app would close with it.
+        let handled = catch_unwind(AssertUnwindSafe(|| self.handle(req)));
+        finish(match handled {
+            Ok(Ok(response)) => response,
+            Ok(Err((code, msg))) => json_resp(code, &json!({ "error": msg })),
+            Err(_) => {
+                eprintln!("{:?} {} failed unexpectedly", req.method, req.url);
+                json_resp(500, &json!({ "error": "the request failed unexpectedly" }))
+            }
+        })
+    }
+
+    fn handle(&mut self, req: &Request) -> Handled {
+        let url = req.url.as_str();
         let path = url.split('?').next().unwrap_or("");
         let is_page = matches!(path, "/" | "/app.js" | "/style.css");
-        let allowed = request_allowed(self.port, *req.method() == Method::Post, is_page, |name| {
-            request_header(req, name)
-        });
-        if !allowed {
+        let is_post = req.method == Method::Post;
+        if !request_allowed(self.served, is_post, is_page, |name| req.header(name)) {
             return Err((403, "request refused".to_string()));
         }
-        match (req.method(), path) {
+        match (req.method, path) {
             (Method::Get, "/") => Ok(page(INDEX_HTML, "text/html; charset=utf-8")),
             (Method::Get, "/app.js") => Ok(page(APP_JS, "text/javascript; charset=utf-8")),
             (Method::Get, "/style.css") => Ok(page(STYLE_CSS, "text/css; charset=utf-8")),
             (Method::Get, "/api/version") => Ok(json_resp(200, &version_info())),
-            (Method::Get, "/api/license") => {
-                Ok(Response::from_data(LICENSE_TEXT.as_bytes().to_vec())
-                    .with_header(header("Content-Type", "text/plain; charset=utf-8")))
-            }
+            (Method::Get, "/api/license") => Ok(Response::new(
+                "text/plain; charset=utf-8",
+                LICENSE_TEXT.as_bytes().to_vec(),
+            )),
             (Method::Get, "/api/files") => self.files(),
             (Method::Get, "/api/load") => {
-                let file = query_param(&url, "file").ok_or((400, "missing file".to_string()))?;
+                let file = query_param(url, "file").ok_or((400, "missing file".to_string()))?;
                 self.load(&file)
             }
             (Method::Post, "/api/estimate") => {
@@ -470,10 +601,9 @@ impl State {
             dng::clipped_share(&invert::picture_for_clipping(&loaded.small, &job.settings));
         let (profile, _) = reversal_core::profiles(&job.settings);
         let jpeg = render::preview_jpeg(&img, &profile, 88);
-        Ok(Response::from_data(jpeg)
-            .with_header(header("Content-Type", "image/jpeg"))
-            .with_header(header("Cache-Control", "no-store"))
-            .with_header(header("X-Clipped", &format!("{clipped:.6}"))))
+        Ok(Response::new("image/jpeg", jpeg)
+            .with_header("Cache-Control", "no-store")
+            .with_header("X-Clipped", &format!("{clipped:.6}")))
     }
 
     fn save_settings(&self, job: &SaveSettings) -> Handled {
@@ -604,7 +734,7 @@ mod tests {
 
     /// A request for an API path with these headers.
     fn with_headers(is_post: bool, headers: &[(&str, &str)]) -> bool {
-        request_allowed(8787, is_post, false, |name| {
+        request_allowed(Served::Http { port: 8787 }, is_post, false, |name| {
             headers
                 .iter()
                 .find(|(n, _)| n.eq_ignore_ascii_case(name))
@@ -693,7 +823,74 @@ mod tests {
                 .find(|(n, _)| n.eq_ignore_ascii_case(name))
                 .map(|(_, v)| v.to_string())
         };
-        assert!(request_allowed(8787, false, true, find));
+        assert!(request_allowed(
+            Served::Http { port: 8787 },
+            false,
+            true,
+            find
+        ));
+    }
+
+    fn request(method: Method, url: &str, headers: &[(&str, &str)], body: &str) -> Request {
+        Request {
+            method,
+            url: url.to_string(),
+            headers: headers
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect(),
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    fn header_of<'a>(response: &'a Response, name: &str) -> Option<&'a str> {
+        let found = response.headers.iter().find(|(n, _)| *n == name);
+        found.map(|(_, value)| value.as_str())
+    }
+
+    #[test]
+    fn an_app_gets_the_page_and_the_api_without_a_server() {
+        let dir = std::env::temp_dir().join(format!("reversal-engine-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut engine = Engine::open(dir.clone()).unwrap();
+
+        let page = engine.respond(&request(Method::Get, "/", &[], ""));
+        assert_eq!(page.status, 200);
+        assert_eq!(page.body, INDEX_HTML.as_bytes());
+        assert_eq!(
+            header_of(&page, "Content-Security-Policy"),
+            Some(CONTENT_SECURITY_POLICY)
+        );
+        assert_eq!(header_of(&page, "X-Content-Type-Options"), Some("nosniff"));
+
+        let files = engine.respond(&request(Method::Get, "/api/files", &[], ""));
+        let listed: serde_json::Value = serde_json::from_slice(&files.body).unwrap();
+        assert_eq!(listed["files"], json!([]));
+
+        // The page's own calls carry its origin, and a POST is JSON.
+        let json = ("Content-Type", "application/json");
+        let vote = r#"{"bases":[[0.5,0.4,0.3]],"readings":[[0.5,0.4,0.3]]}"#;
+        let own = [json, ("Origin", APP_ORIGIN)];
+        let voted = engine.respond(&request(Method::Post, "/api/roll/vote", &own, vote));
+        assert_eq!(voted.status, 200);
+        let other = [json, ("Origin", "https://evil.example")];
+        let refused = engine.respond(&request(Method::Post, "/api/roll/vote", &other, vote));
+        assert_eq!(refused.status, 403);
+        let form = engine.respond(&request(Method::Post, "/api/roll/vote", &[], vote));
+        assert_eq!(form.status, 403);
+
+        // Mistakes come back as JSON, not as a panic: a bad body, a path or a method unknown.
+        let bad = engine.respond(&request(Method::Post, "/api/roll/vote", &own, "{"));
+        assert_eq!(bad.status, 400);
+        let missing = engine.respond(&request(Method::Get, "/api/nothing", &[], ""));
+        assert_eq!(missing.status, 404);
+        assert_eq!(
+            header_of(&missing, "Content-Type"),
+            Some("application/json")
+        );
+        let put = engine.respond(&request(Method::Other, "/api/files", &[], ""));
+        assert_eq!(put.status, 404);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
