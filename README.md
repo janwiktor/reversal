@@ -17,7 +17,7 @@ Open it in a RAW editor of your choice, on desktop or mobile, with no plugin or 
 Reversal is pre-alpha, so expect rough edges and changes. Submit feedback via [GitHub issues](https://github.com/janwiktor/reversal/issues).
 
 - **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI.
-- **Film:** color and black and white negatives, detected per frame. Slide film isn't handled yet.
+- **Film:** color and black and white negatives, detected per frame. Slide film is out of scope.
 - **Cameras:** limited testing, on files from a single DSLR (Nikon D5100 NEF) and one light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
 - **Editors:** DNG rendering is benchmarked against Adobe Camera Raw only. Other tools may show the same file differently.
 
@@ -41,7 +41,7 @@ The right amount of software to do the job, with minimal but quality UI. Process
 
 1. **Reads the RAW scan** through LibRaw, as linear camera data with no color rendering applied.
 2. **Inverts in density.** It reads the film base from the unexposed edge of the film, then finds how gray runs through the dye layers in each frame, so neutrals stay neutral from shadows to highlights. Color and exposure are measured on the center of the scan, 85% of each side by default, to stay clear of the holder and rebate. You can change the size or draw the area yourself.
-3. **Tells black and white from color** by how the three channels move together, whatever the scan's white balance. Black and white becomes one silver density, written gray, with black and white profiles. Setup shows the result and lets you choose the other.
+3. **Detects color and black and white stocks** by how color channels move together. Black and white becomes one silver density, written gray, with black and white profiles. Setup shows the result and lets you choose the other.
 4. **Writes a scene-linear positive:** a 16-bit LinearRaw DNG in linear Rec.2020, with spare highlight range that a RAW editor can recover.
 
 Your source files are never changed. Each DNG stores its conversion settings in its metadata, and the web UI also saves them in a settings file next to the DNG, so a frame reopens as you left it.

@@ -15,7 +15,7 @@ It is for photographers who scan negatives with a camera and edit in a raw edito
 | Automatic first | An untouched frame gets a full conversion; every control starts at 0 |
 | Non-destructive | Source scans are never overwritten |
 
-It ships as three surfaces over one engine: a self-hosted CLI, a local web UI and a Mac app. Editor plugins and extensions are out of scope. It converts color and black and white negatives; slide film isn't supported.
+It ships as three surfaces over one engine: a self-hosted CLI, a local web UI and a Mac app. It converts color and black and white negatives. Editor plugins, extensions and slide film are out of scope.
 
 ## Input
 
@@ -260,7 +260,7 @@ The Mac app shows the same web page as the browser, so there is one UI to mainta
 
 ## Known limits
 
-- **Film:** slide film needs its own pipeline. Film type detection was tested on two cameras and one light source each; black and white was checked by eye, with no reference scans. Chromogenic black and white film is untested.
+- **Film:** slide film is out of scope. Film type detection was tested on two cameras and one light source each; black and white was checked by eye, with no reference scans. Chromogenic black and white film is untested.
 - **Cameras:** tested only with Nikon D5100 scans. Others LibRaw reads should open, but the crosstalk correction was fitted to this camera and one light source.
 - **Full strips:** the centered area doesn't suit them, so set a custom measured area and crop there.
 - **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Set a custom film base, or match it across the roll.
