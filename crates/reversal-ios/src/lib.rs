@@ -54,6 +54,14 @@ pub extern "C" fn reversal_engine_close() {
     *lock(&ENGINE) = None;
 }
 
+/// Let go of the frames the engine keeps ready to show, when the system is short of memory.
+#[no_mangle]
+pub extern "C" fn reversal_engine_trim() {
+    if let Some(engine) = lock(&ENGINE).as_mut() {
+        engine.trim();
+    }
+}
+
 /// Answer one request from the page: `method` is GET or POST, `url` the path and query, and
 /// `headers` one `Name: value` per line. It waits for a request that's being answered, since the
 /// engine takes one at a time. Never returns null.
@@ -207,6 +215,10 @@ mod tests {
         assert!(String::from_utf8(body).unwrap().contains("base_rgb"));
         assert_eq!(ask("POST", "/api/roll/vote", "", vote).0, 403);
         assert_eq!(ask("DELETE", "/api/files", "", b"").0, 404);
+
+        // Trimming keeps the folder open, and answers go on.
+        reversal_engine_trim();
+        assert_eq!(ask("GET", "/api/version", "", b"").0, 200);
 
         // A folder that can't be opened leaves none open.
         let missing = CString::new("/no/such/folder").unwrap();

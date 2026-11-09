@@ -20,6 +20,8 @@ typedef struct {
 bool reversal_engine_open(const char *folder);
 /// Closes the folder. Frames being saved finish; the rest of a save doesn't start.
 void reversal_engine_close(void);
+/// Lets go of the frames the engine keeps ready to show, when the system is short of memory.
+void reversal_engine_trim(void);
 /// Answers one request from the page: `method` is GET or POST, `url` the path and query, and
 /// `headers` one "Name: value" per line. Waits for a request that's being answered. Never null.
 ReversalResponse *reversal_engine_request(

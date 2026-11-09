@@ -23,17 +23,12 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     /// The folder outside the app that we hold access to.
     private var scoped: URL?
     private var pick: Pick?
-    private var backgroundWork = UIBackgroundTaskIdentifier.invalid
+    private lazy var backgroundWork = BackgroundWork(engine: engine)
     /// The page says when it has work running in the engine.
     private var busy = false {
         didSet {
             guard busy != oldValue else { return }
-            UIApplication.shared.isIdleTimerDisabled = busy
-            if busy {
-                backgroundWork = UIApplication.shared.beginBackgroundTask { [weak self] in self?.endBackgroundWork() }
-            } else {
-                endBackgroundWork()
-            }
+            busy ? backgroundWork.begin() : backgroundWork.end()
         }
     }
 
@@ -71,11 +66,42 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     }
 
     private var started = false
+    private var heat: NSObjectProtocol?
+
+    /// Stops the engine's work for now. The frames in progress finish, and the page or the
+    /// next visit to this folder offers the rest.
+    private func stopForNow(then proceed: @escaping () -> Void = {}) {
+        engine.request(
+            "POST", "/api/export/cancel", headers: Engine.json, body: Data(#"{"later":true}"#.utf8)
+        ) { _ in proceed() }
+    }
+
+    /// A device at its hottest slows everything down and may shut the app. A save is the one
+    /// thing here that keeps it hot, so it rests, and the rest of it waits.
+    private func watchHeat() {
+        heat = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.busy, ProcessInfo.processInfo.thermalState == .critical else { return }
+            self.stopForNow()
+            let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+            self.top.present(
+                self.alert("Saving paused", "This \(device) is too hot to go on. Save the rest when it has cooled."),
+                animated: true)
+        }
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        engine.trim()
+    }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         guard !started else { return }
         started = true
+        watchHeat()
+        backgroundWork.onExpired = { [weak self] in self?.stopForNow() }
         // A card that's gone by now is no news: just ask what to open.
         guard let last = Library.lastFolder() else { return showHome() }
         show(folder: last) { [weak self] opened in
@@ -143,7 +169,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         guard busy else { return rememberEdits(then: proceed) }
         let warning = UIAlertController(
             title: "Reversal is still working",
-            message: "Stopping now finishes the frames in progress and leaves the rest.", preferredStyle: .alert)
+            message: "Stopping now finishes the frames in progress. The rest are offered when you open this folder again.", preferredStyle: .alert)
         warning.addAction(UIAlertAction(title: "Keep Working", style: .cancel))
         warning.addAction(UIAlertAction(title: "Stop", style: .destructive) { [weak self] _ in
             self?.stopWork { self?.rememberEdits(then: proceed) }
@@ -156,7 +182,8 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     private func stopWork(then proceed: @escaping () -> Void) {
         let stopping = UIAlertController(title: "Stopping…", message: "Finishing the frames in progress", preferredStyle: .alert)
         top.present(stopping, animated: true) { [weak self] in
-            self?.engine.request("POST", "/api/export/cancel", headers: Engine.json, body: Data("{}".utf8)) { _ in
+            // For now: the rest is offered when this folder is next open.
+            self?.stopForNow {
                 self?.whenIdle { stopping.dismiss(animated: true, completion: proceed) }
             }
         }
@@ -167,12 +194,6 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             guard let self, response.json?["running"] as? Bool == true else { return proceed() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.whenIdle(proceed) }
         }
-    }
-
-    private func endBackgroundWork() {
-        guard backgroundWork != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(backgroundWork)
-        backgroundWork = .invalid
     }
 
     // MARK: The page's requests

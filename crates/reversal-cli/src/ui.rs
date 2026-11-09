@@ -8,7 +8,8 @@
 //! GET  /, /app.js, /style.css             the page
 //! GET  /api/version                        version and the commit it was built from
 //! GET  /api/license                        the license text
-//! GET  /api/files                          raw files in the folder
+//! GET  /api/files                          raw files in the folder, and the frames a save was
+//!                                          cut short before
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning,
 //!                                          and the film type the frame reads as
 //! POST /api/estimate {file, hints, straighten, film}   re-run the analysis with manual choices,
@@ -19,7 +20,9 @@
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
-//! POST /api/export/cancel                  frames not started yet don't start
+//! POST /api/export/cancel {later}          frames not started yet don't start; with `later`
+//!                                          they stay listed, to be offered again
+//! POST /api/export/forget                  stop offering the frames a save was cut short before
 //! POST /api/roll     {files}               read each frame's film base, changing nothing; runs
 //!                                          like an export, with the same progress
 //! GET  /api/roll/readings                  what that read
@@ -130,6 +133,21 @@ struct Loaded {
     auto: Settings,
 }
 
+impl Loaded {
+    fn bytes(&self) -> usize {
+        std::mem::size_of_val(self.small.data.as_slice())
+    }
+}
+
+/// What the frames kept ready to show may take together. A 61-megapixel frame keeps 46 MB.
+fn cache_budget() -> usize {
+    if cfg!(target_os = "ios") {
+        128 << 20
+    } else {
+        512 << 20
+    }
+}
+
 struct State {
     served: Served,
     folder: Arc<Folder>,
@@ -158,6 +176,13 @@ struct SaveSettings {
 #[derive(Deserialize)]
 struct ExportJob {
     files: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CancelJob {
+    /// The device needs a rest, or the app is leaving: keep the frames to offer them again.
+    #[serde(default)]
+    later: bool,
 }
 
 #[derive(Deserialize)]
@@ -232,6 +257,12 @@ impl Engine {
     /// Answers one request. A save it started runs in the background.
     pub fn respond(&mut self, request: &Request) -> Response {
         self.state.respond(request)
+    }
+
+    /// Lets go of the frames kept ready to show, when the system is short of memory. They are
+    /// decoded again when opened.
+    pub fn trim(&mut self) {
+        self.state.cache = HashMap::new();
     }
 }
 
@@ -508,8 +539,16 @@ impl State {
             }
             (Method::Get, "/api/export/status") => Ok(json_resp(200, &self.batch.status())),
             (Method::Post, "/api/export/cancel") => {
+                let job: CancelJob = read_body(req)?;
                 self.batch.cancel();
+                if !job.later {
+                    self.folder.saving_forgotten();
+                }
                 Ok(json_resp(200, &self.batch.status()))
+            }
+            (Method::Post, "/api/export/forget") => {
+                self.folder.saving_forgotten();
+                Ok(json_resp(200, &json!({})))
             }
             _ => Err((404, format!("not found: {path}"))),
         }
@@ -531,7 +570,16 @@ impl State {
             })
             .collect();
         let folder = self.folder.dir.display().to_string();
-        Ok(json_resp(200, &json!({ "folder": folder, "files": files })))
+        // While a save runs, its frames aren't left over: they're its progress.
+        let unfinished = if self.batch.is_running() {
+            Vec::new()
+        } else {
+            self.folder.unfinished_save()
+        };
+        Ok(json_resp(
+            200,
+            &json!({ "folder": folder, "files": files, "unfinished": unfinished }),
+        ))
     }
 
     fn ensure_loaded(&mut self, file: &str) -> Result<&Loaded, (u16, String)> {
@@ -545,7 +593,8 @@ impl State {
                 Adjust::default(),
             );
             println!("loaded {file} in {:.1} s", t.elapsed().as_secs_f64());
-            if self.cache.len() > 16 {
+            let held: usize = self.cache.values().map(Loaded::bytes).sum();
+            if self.cache.len() > 16 || held > cache_budget() {
                 self.cache.clear();
             }
             self.cache.insert(file.to_string(), Loaded { small, auto });
@@ -609,11 +658,17 @@ impl State {
         for file in &files {
             self.folder.resolve(file)?;
         }
+        if self.batch.is_running() {
+            return Err((409, "another task is still running".to_string()));
+        }
+        self.folder.saving_starts(&files);
         let folder = self.folder.clone();
         self.batch
             .start(files, export_workers(), move |file| {
                 let t = Instant::now();
-                let (out, bytes, warning) = folder.export_frame(file)?;
+                let exported = folder.export_frame(file);
+                folder.saving_reached(file);
+                let (out, bytes, warning) = exported?;
                 println!(
                     "exported {} ({:.1} MB, {:.1} s)",
                     out.display(),

@@ -33,7 +33,14 @@ pub struct Folder {
     out_dir: PathBuf,
     /// Held while changing a sidecar: the page and background work both do.
     sidecars: Mutex<()>,
+    /// Held while changing the list of frames still to save.
+    saving: Mutex<()>,
 }
+
+/// The frames of a save that are still to be written, kept next to the DNGs while it runs. A
+/// save that was cut short, by the app being closed or the device needing a rest, leaves it
+/// behind, and the page offers to finish.
+const SAVING_LIST: &str = ".reversal-saving.json";
 
 /// Where a frame stands, as the frame list shows it.
 pub struct RollFrame {
@@ -139,7 +146,55 @@ impl Folder {
             out_dir: dir.join("positives"),
             dir,
             sidecars: Mutex::new(()),
+            saving: Mutex::new(()),
         }
+    }
+
+    fn read_saving(&self) -> Vec<String> {
+        let list = std::fs::read(self.out_dir.join(SAVING_LIST)).ok();
+        list.and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Best effort: a save still works where the list can't be written.
+    fn write_saving(&self, files: &[String]) {
+        let list = self.out_dir.join(SAVING_LIST);
+        if files.is_empty() {
+            let _ = std::fs::remove_file(list);
+            return;
+        }
+        let _ = std::fs::create_dir_all(&self.out_dir);
+        let json = serde_json::to_vec(files).expect("names serialize");
+        let _ = reversal_core::write_atomic(&list, &json);
+    }
+
+    /// A save of `files` starts.
+    pub fn saving_starts(&self, files: &[String]) {
+        let _changing = self.saving.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_saving(files);
+    }
+
+    /// The save is through with `file`, saved or failed.
+    pub fn saving_reached(&self, file: &str) {
+        let _changing = self.saving.lock().unwrap_or_else(|e| e.into_inner());
+        let mut left = self.read_saving();
+        if left.iter().any(|f| f == file) {
+            left.retain(|f| f != file);
+            self.write_saving(&left);
+        }
+    }
+
+    /// Nothing is left to offer: the user stopped the save, or was asked about the rest.
+    pub fn saving_forgotten(&self) {
+        let _changing = self.saving.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_saving(&[]);
+    }
+
+    /// Frames a save was cut short before, that are still in the folder.
+    pub fn unfinished_save(&self) -> Vec<String> {
+        let listed = self.raw_files();
+        let left = self.read_saving();
+        left.into_iter().filter(|f| listed.contains(f)).collect()
     }
 
     pub fn raw_files(&self) -> Vec<String> {
@@ -351,6 +406,32 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0.dir);
         }
+    }
+
+    #[test]
+    fn a_save_cut_short_leaves_its_frames_to_offer_again() {
+        let temp = TempFolder::new("saving");
+        let folder = &temp.0;
+        std::fs::write(folder.dir.join("b.NEF"), b"raw").unwrap();
+        assert!(folder.unfinished_save().is_empty());
+        let files = [
+            "a.NEF".to_string(),
+            "b.NEF".to_string(),
+            "gone.NEF".to_string(),
+        ];
+        folder.saving_starts(&files);
+        // A frame that left the folder since isn't offered.
+        assert_eq!(folder.unfinished_save(), ["a.NEF", "b.NEF"]);
+        folder.saving_reached("a.NEF");
+        assert_eq!(folder.unfinished_save(), ["b.NEF"]);
+        // A new folder object reads what the last one left, as after the app was closed.
+        assert_eq!(Folder::new(folder.dir.clone()).unfinished_save(), ["b.NEF"]);
+        folder.saving_reached("b.NEF");
+        folder.saving_reached("gone.NEF");
+        assert!(!folder.out_dir.join(SAVING_LIST).exists());
+        folder.saving_starts(&files);
+        folder.saving_forgotten();
+        assert!(folder.unfinished_save().is_empty());
     }
 
     #[test]

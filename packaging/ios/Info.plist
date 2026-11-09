@@ -30,6 +30,9 @@
   <!-- Imported rolls and their DNGs show up in Files, under On My iPad. -->
   <key>UIFileSharingEnabled</key><true/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+  <!-- A save goes on while the app is off screen, see BackgroundWork.swift. -->
+  <key>BGTaskSchedulerPermittedIdentifiers</key>
+  <array><string>$(PRODUCT_BUNDLE_IDENTIFIER).work</string></array>
   <key>NSPhotoLibraryAddUsageDescription</key><string>Reversal saves the DNGs you choose to your photo library.</string>
 </dict>
 </plist>

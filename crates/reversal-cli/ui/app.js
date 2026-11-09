@@ -23,6 +23,7 @@ const selected = new Set();
 let lastChecked = null;   // for shift-click
 let batch = null;         // the running export's progress
 let lastPath = null;
+let unfinished = [];      // frames a save was cut short before, as the folder lists them
 let folderPath = "";      // the open folder, to name what's saved in it from there
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
@@ -149,7 +150,9 @@ const READ_MS = 3500, READ_MS_PER_CHAR = 40, READ_FREE_CHARS = 40, READ_MAX_MS =
 // A click starts a dismissal that a second click, selecting a word, takes back.
 const DOUBLE_CLICK_MS = 400;
 let noteTimer = 0, noteStays = false, dismissTimer = 0;
-function status(text = "", { stay = false, reveal = false } = {}) {
+let noteAction = null;  // what the message's own button does
+// `action` is { label, run }: one thing to do about the message, which closes it.
+function status(text = "", { stay = false, reveal = false, action = null } = {}) {
   const [head, ...rest] = text.split("\n");
   clearTimeout(noteTimer);
   clearTimeout(dismissTimer);
@@ -164,8 +167,11 @@ function status(text = "", { stay = false, reveal = false } = {}) {
     showDetails(false);
     $("note-details").hidden = !rest.length;
     $("reveal").hidden = !reveal;
+    noteAction = action?.run ?? null;
+    $("note-action").hidden = !action;
+    $("note-action").textContent = action?.label ?? "";
     // Without buttons, a message is its words alone.
-    $("note").toggleAttribute("data-bare", !rest.length && !reveal);
+    $("note").toggleAttribute("data-bare", !rest.length && !reveal && !action);
   });
   if (!noteStays) fadeLater(Math.min(READ_MAX_MS, READ_MS + READ_MS_PER_CHAR * Math.max(0, head.length - READ_FREE_CHARS)));
 }
@@ -223,12 +229,18 @@ $("note").addEventListener("click", (e) => {
 });
 // For the keyboard and screen readers, which can't click the box.
 $("note-dismiss").addEventListener("click", () => status());
+$("note-action").addEventListener("click", () => {
+  const run = noteAction;
+  status();
+  run?.();
+});
 
 
 // ---------- Files ----------
 async function loadFiles() {
   const data = await (await api("/api/files")).json();
   folderPath = data.folder;
+  unfinished = data.unfinished ?? [];
   $("folder").textContent = data.folder.split("/").filter(Boolean).pop() ?? data.folder;
   $("choose-folder").title = shell ? `${data.folder}\nOpen another folder…` : data.folder;
   frames = data.files;
@@ -847,7 +859,11 @@ $("export").addEventListener("click", async () => {
   }
   applyOpenCrop();
   const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
-  if (!files.length) return;
+  if (files.length) save(files);
+});
+
+async function save(files) {
+  if (batch) return;
   try {
     await measureSettled();
     await rememberSettings();
@@ -857,7 +873,17 @@ $("export").addEventListener("click", async () => {
   } catch (e) {
     status(`Could not save: ${e.message}`, { stay: true });
   }
-});
+}
+
+// A save that was cut short, by the app being closed or the device needing a rest, left frames
+// unsaved. They're offered once: asked and not taken up, the user has moved on.
+function restOfSave(label) {
+  const files = unfinished;
+  if (!files.length) return null;
+  unfinished = [];
+  api("/api/export/forget", {}).catch(() => {});
+  return { label: label ?? (files.length > 1 ? "Save them" : "Save it"), run: () => save(files) };
+}
 
 // ---------- Matching the film base across a roll ----------
 // Three steps, because this reaches past the frame on screen: say what will happen, read every
@@ -1080,8 +1106,10 @@ async function followBatch() {
   updateSaveButton();
   for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
   lastPath = finished.last_path;
-  // Like any message, a save's result fades unless it has problems to read.
-  status(batchSummary(finished), { reveal: !!(shell && lastPath) });
+  // Stopped for now, not by the user: the rest is still wanted.
+  const rest = finished.canceled ? restOfSave("Save the rest") : null;
+  // Like any message, a save's result fades unless it has problems to read or a rest to save.
+  status(batchSummary(finished), { reveal: !!(shell && lastPath), stay: !!rest, action: rest });
 }
 
 // The open frame's base and measurements changed on disk: read them back, and keep the slider
@@ -1561,7 +1589,10 @@ setBusy(false);
 showHistRows(false, false, { now: true });
 $("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
-loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
+loadFiles().then(() => {
+  const left = unfinished.length, rest = restOfSave();
+  if (rest) status(`Saving stopped with ${left} frame${left > 1 ? "s" : ""} left`, { stay: true, action: rest });
+}).catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
 // Reloaded while saving: pick the progress back up.
 api("/api/export/status").then((r) => r.json()).then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
 addEventListener("pagehide", () => { rememberSettings(true).catch(() => {}); });
