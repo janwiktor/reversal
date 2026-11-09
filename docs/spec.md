@@ -140,7 +140,7 @@ The layout follows the window, and in each one the frames list and the tools tak
 
 ### Writing
 
-UI text uses simple, declarative language, explains briefly, and uses established UI terms where they exist. A message says what happened and what to do. One term means one thing everywhere: a frame is one file in the list, and a scan is its whole image. Custom means set by the user, measure covers everything Reversal reads from a scan, and film terms the audience knows stay, such as film base and clear film.
+UI text uses simple, declarative language, explains briefly, and uses established UI terms where they exist. A message says what happened and what to do. One term means one thing everywhere: a frame is one file in the list, and a scan is its whole image. Custom means set by the user, measure covers everything Reversal reads from a scan, and film terms the audience knows stay, such as film base and clear film. Clipped means clipped in the preview, which the DNG keeps; beyond DNG range means brighter than the DNG can store, and gone for good. Messages over the image and warnings in a panel end without a period; dialogs and tooltips keep full punctuation.
 
 ### Setup
 

@@ -537,7 +537,7 @@ impl State {
                 move || {
                     let frames = std::mem::take(&mut *lock(&prepared));
                     if frames.len() < total {
-                        return Some("Could not read every frame, so nothing changed.".to_string());
+                        return Some("Could not read every frame, so nothing changed".to_string());
                     }
                     apply_folder.apply_roll_base(&frames, base_rgb).err()
                 },

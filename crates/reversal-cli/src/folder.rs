@@ -81,7 +81,7 @@ pub fn saved_settings(
     small: &Rgb32,
 ) -> (Settings, Option<String>) {
     let unreadable = || {
-        let warning = "Could not read saved settings on this frame. Using default settings.";
+        let warning = "Could not read this frame's saved settings, so it starts from the defaults";
         (auto.clone(), Some(warning.to_string()))
     };
     let choices: SavedChoices = match serde_json::from_slice(sidecar) {
@@ -103,7 +103,7 @@ pub fn saved_settings(
     settings.hints = choices.hints;
     settings.custom_crop = choices.custom_crop;
     let warning = "These settings are from an older version, so colors were measured again. \
-                   Check your adjustments.";
+                   Check your adjustments";
     (settings, Some(warning.to_string()))
 }
 
