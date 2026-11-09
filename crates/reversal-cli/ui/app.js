@@ -23,6 +23,7 @@ const selected = new Set();
 let lastChecked = null;   // for shift-click
 let batch = null;         // the running export's progress
 let lastPath = null;
+let folderPath = "";      // the open folder, to name what's saved in it from there
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
 
@@ -218,6 +219,7 @@ $("note-dismiss").addEventListener("click", () => status());
 // ---------- Files ----------
 async function loadFiles() {
   const data = await (await api("/api/files")).json();
+  folderPath = data.folder;
   $("folder").textContent = data.folder.split("/").filter(Boolean).pop() ?? data.folder;
   $("choose-folder").title = shell ? `${data.folder}\nOpen another folder…` : data.folder;
   frames = data.files;
@@ -1094,9 +1096,16 @@ function rollSummary({ done, total, issues, canceled }) {
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
 
+// A file in the open folder goes by its path from there: the folder is named on screen, and an
+// app's own folder has a path that tells nobody anything.
+function inFolder(path) {
+  return folderPath && path.startsWith(`${folderPath}/`) ? path.slice(folderPath.length + 1) : path;
+}
+
 function batchSummary({ done, total, issues, canceled, last_path }) {
-  const where = last_path ? ` to ${last_path.slice(0, last_path.lastIndexOf("/"))}` : "";
-  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
+  const saved = last_path && inFolder(last_path);
+  const where = saved ? ` to ${saved.slice(0, saved.lastIndexOf("/"))}` : "";
+  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${saved}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
   return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
 }
 

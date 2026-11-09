@@ -209,7 +209,7 @@ The preview uses a quarter-size scan and the chosen profile's curve in ProPhoto,
 
 - **Settings:** each frame remembers its settings from the first change.
 - **State:** the list shows `saved` or `edited`. A frame counts as edited when its settings or film type differ from its DNG's, or from the automatic ones if it has no DNG, so going back clears the label.
-- **Saving:** select frames to save them together in the background, each with its own settings. Untouched frames get the automatic conversion, and Stop saving lets the frames in progress finish and starts no more.
+- **Saving:** select frames to save them together in the background, each with its own settings. Untouched frames get the automatic conversion, and Stop saving lets the frames in progress finish and starts no more. The result names the DNG by its path from the open folder, such as `positives/<name>-positive.dng`: the folder is named on screen, and its full path is long and says nothing inside an app's own storage.
 - **Roll:** Match film base… shares one film base across selected frames or the whole folder, in three steps. It says what will happen, measures each frame without changing anything, then shows every result so the user selects which frames to use. The base is the median of the selected results. Frames with no clear film start deselected, and results over 6% from the roll's in any channel are flagged. It can be stopped, and no frame changes unless every frame could be prepared. It is opt-in because a shared base can add a color cast on some rolls. Gray curves stay per frame, a custom film base on a frame stays, and Detect goes back to the frame's own.
 
 ### CLI
