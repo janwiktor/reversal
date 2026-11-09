@@ -2,7 +2,8 @@
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 # The last step of building the app. Gives it its version from the workspace and a build number from
-# git, as the Mac app, and the licenses that engine.sh gathered.
+# git, as the Mac app, and the licenses that engine.sh gathered. The build phase names Info.plist as
+# its input, so that Xcode writes the file first and not over this.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
