@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "saturation"];
+const COLOR_SLIDERS = ["temperature", "tint", "saturation"];
 const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "hard"];
 const TOOL_TEXT = {
@@ -39,6 +40,8 @@ async function api(path, body) {
 
 const adj = () => current.settings.adjust;
 const hints = () => current.settings.hints;
+// The film type the frame converts as, or the one just chosen while it's measured for it.
+const filmNow = () => current.pendingFilm ?? current.settings.estimate.film;
 // Everything the app has to say floats at the top of the image, under an open tool's bar, one
 // message at a time. A message that needs reading or doing stays until dismissed or replaced; a
 // confirmation fades. Anything longer than a line opens from Details.
@@ -124,7 +127,7 @@ function showFrameState(f, state) {
   const saving = batch?.task === "save" && batch.active.includes(f.name);
   state.textContent = saving ? "saving" : f.edited ? "edited" : f.saved ? "saved" : "";
   state.className = `state${f.edited && !saving ? " edited" : ""}${f.manualSetup ? " manual" : ""}`;
-  state.title = f.manualSetup ? "Custom film base or measured area" : f.edited ? "Changes not saved to a DNG yet" : "";
+  state.title = f.manualSetup ? "Film type chosen, or custom film base or measured area" : f.edited ? "Changes not saved to a DNG yet" : "";
 }
 
 function showFrameStates() {
@@ -341,10 +344,16 @@ function showSetupNote() {
 function syncControls() {
   const a = adj();
   // Black and white has only Tone to develop. On a phone, its Color panel gives way to Tone.
-  const film = current.settings.estimate.film;
+  const film = filmNow();
   document.body.dataset.film = film;
   $("film-color").setAttribute("aria-pressed", String(film === "color"));
   $("film-bw").setAttribute("aria-pressed", String(film === "bw"));
+  const chosen = !!hints().film;
+  const reads = current.filmDetected === "bw" ? "black and white" : "color";
+  $("l-film").classList.toggle("chosen", chosen);
+  $("film-seg").title = chosen
+    ? `Chosen for this frame. The scan reads as ${reads}; choose that to go back to detecting.`
+    : "Detected from the scan. Choose the other type to convert this frame as that instead.";
   if (film === "bw" && document.body.dataset.mode === "color") {
     document.body.dataset.mode = "tone";
     pressModes();
@@ -560,10 +569,12 @@ if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.match
 
 $("reset").addEventListener("click", () => {
   if (!current) return;
-  for (const id of SLIDERS) adj()[id] = 0;
+  // Black and white keeps its hidden color settings, for if it's switched back to color.
+  const bw = filmNow() === "bw";
+  for (const id of SLIDERS) if (!(bw && COLOR_SLIDERS.includes(id))) adj()[id] = 0;
   adj().look = "neutral";
   changed(0);
-  status(current.settings.estimate.film === "bw" ? "Tone reset." : "Tone and color reset.");
+  status(bw ? "Tone reset." : "Tone and color reset.");
 });
 
 $("export").addEventListener("click", async () => {
@@ -848,10 +859,13 @@ async function setHint(key, rect) {
 }
 
 // The detected type is no choice at all, so choosing it again goes back to detecting.
+// A choice shows at once and holds while it's measured, so a second click compares with it.
 function setFilm(film) {
-  if (!current || current.settings.estimate.film === film) return;
+  if (!current || filmNow() === film) return;
   if (batch?.task === "roll") { status("Matching the film base. Try again when it's done."); return; }
   hints().film = film === current.filmDetected ? null : film;
+  current.pendingFilm = film;
+  syncControls();
   measure(film === "bw" ? "Converting as black and white." : "Converting as color.");
 }
 
@@ -867,11 +881,14 @@ async function measureNow(done, clearsWarning) {
   const areaBefore = current.settings.estimate.area;
   status("Measuring…");
   try {
-    const { estimate, baseFound, filmDetected } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten })).json();
+    // Measuring again keeps the film type, so moving an area can't switch the conversion.
+    const film = filmNow();
+    const { estimate, baseFound, filmDetected } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten, film })).json();
     if (current?.file !== file || id !== latestMeasure) return true;
     current.settings.estimate = estimate;
     current.baseFound = baseFound;
     current.filmDetected = filmDetected;
+    current.pendingFilm = null;
     if (clearsWarning) current.warning = null;
     // A crop on the measured area follows it, checked now because the crop may have changed meanwhile.
     if (adj().crop && sameRect(adj().crop, areaBefore)) adj().crop = { ...estimate.area };
@@ -879,6 +896,9 @@ async function measureNow(done, clearsWarning) {
     status(done);
   } catch (e) {
     if (current?.file !== file || id !== latestMeasure) return true;
+    // The frame still converts as it did, so show that.
+    current.pendingFilm = null;
+    syncControls();
     status(`Could not measure: ${e.message}`, { stay: true });
     return false;
   }

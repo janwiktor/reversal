@@ -10,7 +10,8 @@
 //! GET  /api/files                          raw files in the folder
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning,
 //!                                          and the film type the frame reads as
-//! POST /api/estimate {file, hints, straighten}   re-run the analysis with manual choices
+//! POST /api/estimate {file, hints, straighten, film}   re-run the analysis with manual choices,
+//!                                          converting as `film` unless the hints choose
 //! POST /api/holder   {file, base_rgb, straighten}   where the analysis ignores the film holder
 //! POST /api/preview  {file, settings, full} JPEG of the positive; `full` ignores the crop.
 //!                                          Header X-Clipped: share of pixels the DNG can't hold
@@ -124,6 +125,10 @@ struct EstimateJob {
     hints: Hints,
     #[serde(default)]
     straighten: f32,
+    /// The film type the frame converts as now, which measuring again keeps unless the hints
+    /// choose one. Without it, the detected type.
+    #[serde(default)]
+    film: Option<invert::Film>,
 }
 
 /// Serve `dir` on `port`, or on a free port if it's 0. With `exit_with_stdin` the process ends
@@ -299,13 +304,13 @@ impl State {
                 let loaded = self.ensure_loaded(&job.file)?;
                 // Areas are on the straightened scan, so that's what gets measured.
                 let small = loaded.small.straighten(job.straighten);
-                let estimate = invert::estimate_on(&small, &job.hints);
+                let (estimate, reading) = invert::measure_frame(&small, &job.hints, job.film);
                 Ok(json_resp(
                     200,
                     &json!({
-                        "filmDetected": film_detected(&small, &job.hints, &estimate),
                         "estimate": estimate,
-                        "baseFound": invert::detect_base(&small).found,
+                        "filmDetected": reading.film,
+                        "baseFound": reading.base_found,
                     }),
                 ))
             }
@@ -410,17 +415,16 @@ impl State {
             Err(_) => (auto.clone(), None),
         };
         let straight = loaded.small.straighten(current.adjust.straighten);
-        let base_found = invert::detect_base(&straight).found;
-        let film_detected = invert::detect_film(&straight, &current.hints);
+        let reading = invert::read_frame(&straight, &current.hints);
         Ok(json_resp(
             200,
             &json!({
-                "filmDetected": film_detected,
+                "filmDetected": reading.film,
                 "auto": auto,
                 "settings": current,
                 "warning": warning,
                 "defaultAreaPercent": invert::DEFAULT_AREA_PERCENT,
-                "baseFound": base_found,
+                "baseFound": reading.base_found,
             }),
         ))
     }
@@ -540,14 +544,6 @@ impl State {
             )
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
-    }
-}
-
-/// The film type a frame reads as, so the page can tell a choice from what was detected.
-fn film_detected(small: &Rgb32, hints: &Hints, estimate: &invert::Estimate) -> invert::Film {
-    match hints.film {
-        None => estimate.film,
-        Some(_) => invert::detect_film(small, hints),
     }
 }
 

@@ -110,7 +110,7 @@ Toe, exposure anchor and γ are the same as for color, so Exposure behaves the s
 
 | Value | How it's measured | Override |
 | --- | --- | --- |
-| Film type | Measured on cells of 4 by 4 analysis pixels in the measured area, as density above base, so white balance can't sway it. Black and white when 90% of cells lie within 0.02 density of the frame's own gray curve, and red density rises with green at a slope within 0.05 of 1. Color film fails the first wherever the scene has color, and the second even on a gray scene, because its dye layers rise at different rates. A frame spanning too little density to tell is color, the conversion that loses nothing | Color or B&W |
+| Film type | Measured on cells of 4 by 4 analysis pixels in the measured area, as density above base, so white balance can't sway it. Black and white when 90% of cells lie within 0.02 density of the frame's own gray curve, and red density rises with green at a slope within 0.05 of 1. Color film fails the first wherever the scene has color, and the second even on a gray scene, because its dye layers rise at different rates. A frame spanning too little density to tell is color, the conversion that loses nothing. Detection sets the type when a frame is first measured; measuring again for a new area, base or angle keeps it | Color or B&W |
 | Film base | The largest even patch of the brightest film, trying the film's edges first, then a strip across the scan such as the gap between frames. Holes, markings and picture detail break a patch's evenness, and the holder is darker. Saying detection failed is preferred to marking an unwanted area: when no patch looks like clear film, the app warns, keeps a best guess for the conversion, and asks for a custom film base or a roll base | Custom, or shared across a roll |
 | Measured area | The centered 85% of each side, leaving out the film holder: cells far denser than film (green density above 1.2) connected to the scan's edge, plus a small margin for the holder's soft edge. Dense cells that reach the middle of the scan are picture, and nothing is left out on that frame, so a custom area is the fix when dense picture joins the holder. This only affects measuring, not how the holder renders | Size from 50 to 100%, or drawn by hand. A drawn area is measured exactly as drawn, holder included |
 | Gray curves | Fitted to the frame's own near-neutral pixels, with no reference. The band narrows from ±0.15 to ±0.04 density, bins count equally, and the fit is pulled lightly toward an average across rolls | None; there are no RGB or CMY controls |
@@ -148,7 +148,7 @@ Setup decides how the scan is read. It stays pinned above the development contro
 
 | Control | Choices |
 | --- | --- |
-| Film | Color or B&W, showing what was detected. Choosing the other converts the frame as that, and choosing the detected one again goes back to detecting. B&W leaves only Tone under Develop |
+| Film | Color or B&W, showing what the frame converts as. Choosing the type it doesn't read as marks Film with a dot, and choosing the detected one again goes back to detecting; the tooltip says which. B&W leaves only Tone under Develop |
 | Film base | Detect, or Custom to drag over clear film by hand. Match film base… shares one across frames |
 | Measured | Center (size 50–100%, default 85%, without the holder), or Custom to drag over the picture by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
 | Show areas | Draws the film base, measured area and crop on the entire scan, each in the color of its label. With Center, the detected holder is hatched in magenta and labeled Film holder (detected) under Measured. A custom area leaves nothing out, so neither the hatching nor the label shows |
@@ -187,7 +187,7 @@ Custom crop shows the entire scan and dims what's outside a frame. The frame ope
 
 Straighten, Rotate and Mirror keep the frame open, and it holds its place on the scan. Its corner and edge markers sit outside the frame, so they never cover a pixel the DNG keeps.
 
-Reset, in the Develop header, returns the tone and color controls to 0 and the profile to Neutral. It leaves geometry, crop and Setup alone.
+Reset, in the Develop header, returns the tone and color controls to 0 and the profile to Neutral. It leaves geometry, crop and Setup alone. On a black and white frame it leaves the hidden color controls too, so they're back as they were if the frame turns to color.
 
 ### Profiles
 
@@ -206,7 +206,7 @@ The preview uses a quarter-size scan and the chosen profile's curve in ProPhoto,
 ### Frames and saving
 
 - **Settings:** each frame remembers its settings from the first change.
-- **State:** the list shows `saved` or `edited`. A frame counts as edited when its settings differ from its DNG's, or from the automatic ones if it has no DNG, so going back clears the label.
+- **State:** the list shows `saved` or `edited`. A frame counts as edited when its settings or film type differ from its DNG's, or from the automatic ones if it has no DNG, so going back clears the label.
 - **Saving:** select frames to save them together in the background, each with its own settings. Untouched frames get the automatic conversion, and Stop saving lets the frames in progress finish and starts no more.
 - **Roll:** Match film base… shares one film base across selected frames or the whole folder, in three steps. It says what will happen, measures each frame without changing anything, then shows every result so the user selects which frames to use. The base is the median of the selected results. Frames with no clear film start deselected, and results over 6% from the roll's in any channel are flagged. It can be stopped, and no frame changes unless every frame could be prepared. It is opt-in because a shared base can add a color cast on some rolls. Gray curves stay per frame, a custom film base on a frame stays, and Detect goes back to the frame's own.
 

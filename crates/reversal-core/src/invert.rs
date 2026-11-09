@@ -808,6 +808,8 @@ fn fit_anchor_silver(density: &[[f32; 3]], base_rgb: [f32; 3]) -> f32 {
 struct Measured {
     base_rgb: [f32; 3],
     base_area: NRect,
+    /// The base detection, when no base was picked.
+    detected_base: Option<BaseReading>,
     area: NRect,
     /// Each measured pixel.
     density: Vec<[f32; 3]>,
@@ -819,11 +821,19 @@ struct Measured {
 fn measure(small: &Rgb32, hints: &Hints) -> Measured {
     let (w, h) = (small.width, small.height);
 
-    let (base_rgb, base_area) = match hints.base {
-        Some(area) => (channel_medians(&small.crop(area.to_pixels(w, h))), area),
+    let (base_rgb, base_area, detected_base) = match hints.base {
+        Some(area) => (
+            channel_medians(&small.crop(area.to_pixels(w, h))),
+            area,
+            None,
+        ),
         None => {
             let detected = detect_base(small);
-            (hints.base_rgb.unwrap_or(detected.rgb), detected.area)
+            (
+                hints.base_rgb.unwrap_or(detected.rgb),
+                detected.area,
+                Some(detected),
+            )
         }
     };
     let area = hints.analysis.unwrap_or_else(|| {
@@ -836,33 +846,46 @@ fn measure(small: &Rgb32, hints: &Hints) -> Measured {
         None => holder_pixels(small, base_rgb),
     };
     let r = area.to_pixels(w, h);
-    let film = |x: usize, y: usize| -> Option<[f32; 3]> {
-        let p = small.get(x, y);
-        let held = holder.as_ref().is_some_and(|mask| mask[y * w + x]);
-        (!held && p[0].max(p[1]).max(p[2]) < CLIPPED).then_some(p)
-    };
+    let row = r.right - r.left;
+    // Which pixels of the area are film: not holder, not light through holes.
+    let film: Vec<bool> = (r.top..r.bottom)
+        .flat_map(|y| (r.left..r.right).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            let p = small.get(x, y);
+            let held = holder.as_ref().is_some_and(|mask| mask[y * w + x]);
+            !held && p[0].max(p[1]).max(p[2]) < CLIPPED
+        })
+        .collect();
+    let is_film = |x: usize, y: usize| film[(y - r.top) * row + (x - r.left)];
     let above_base = |p: [f32; 3]| [0, 1, 2].map(|c| density_above_base(p[c], base_rgb[c]));
     let density = (r.top..r.bottom)
         .flat_map(|y| (r.left..r.right).map(move |x| (x, y)))
-        .filter_map(|(x, y)| film(x, y))
-        .map(above_base)
+        .filter(|&(x, y)| is_film(x, y))
+        .map(|(x, y)| above_base(small.get(x, y)))
         .collect();
     let mut cells = Vec::new();
     for top in (r.top..r.bottom.saturating_sub(FILM_CELL - 1)).step_by(FILM_CELL) {
-        for left in (r.left..r.right.saturating_sub(FILM_CELL - 1)).step_by(FILM_CELL) {
-            let pixels = (top..top + FILM_CELL)
-                .flat_map(|y| (left..left + FILM_CELL).map(move |x| film(x, y)))
-                .collect::<Option<Vec<_>>>();
-            if let Some(pixels) = pixels {
-                let n = pixels.len() as f32;
-                let mean = [0, 1, 2].map(|c| pixels.iter().map(|p| p[c]).sum::<f32>() / n);
-                cells.push(above_base(mean));
+        'cell: for left in (r.left..r.right.saturating_sub(FILM_CELL - 1)).step_by(FILM_CELL) {
+            let mut sum = [0.0f32; 3];
+            for y in top..top + FILM_CELL {
+                for x in left..left + FILM_CELL {
+                    if !is_film(x, y) {
+                        continue 'cell;
+                    }
+                    let p = small.get(x, y);
+                    for c in 0..3 {
+                        sum[c] += p[c];
+                    }
+                }
             }
+            let n = (FILM_CELL * FILM_CELL) as f32;
+            cells.push(above_base(sum.map(|v| v / n)));
         }
     }
     Measured {
         base_rgb,
         base_area,
+        detected_base,
         area,
         density,
         cells,
@@ -928,16 +951,39 @@ fn film_of(cells: &[[f32; 3]]) -> Film {
     }
 }
 
-/// The film type a frame reads as on an image from [`analysis_image`], whatever `hints.film`
-/// says.
-pub fn detect_film(small: &Rgb32, hints: &Hints) -> Film {
-    film_of(&measure(small, hints).cells)
+/// What a frame reads as, whatever its settings choose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameReading {
+    /// The detected film type.
+    pub film: Film,
+    /// Whether the scan shows clear film for the base.
+    pub base_found: bool,
 }
 
-/// [`estimate`] on an image from [`analysis_image`].
-pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
+impl Measured {
+    fn reading(&self, small: &Rgb32) -> FrameReading {
+        FrameReading {
+            film: film_of(&self.cells),
+            base_found: self
+                .detected_base
+                .map_or_else(|| detect_base(small).found, |b| b.found),
+        }
+    }
+}
+
+/// What a frame on an image from [`analysis_image`] reads as, without fitting an estimate.
+pub fn read_frame(small: &Rgb32, hints: &Hints) -> FrameReading {
+    measure(small, hints).reading(small)
+}
+
+/// [`estimate_on`], with what the frame reads as, in one pass. `keep` is the film type to convert
+/// as when `hints` doesn't choose one: a frame measured again keeps its type, so changing an area
+/// or the angle can't switch its conversion. `None` takes the detected type, as a frame's first
+/// measurement does.
+pub fn measure_frame(small: &Rgb32, hints: &Hints, keep: Option<Film>) -> (Estimate, FrameReading) {
     let m = measure(small, hints);
-    let film = hints.film.unwrap_or_else(|| film_of(&m.cells));
+    let reading = m.reading(small);
+    let film = hints.film.or(keep).unwrap_or(reading.film);
     let (gray, anchor) = match film {
         Film::Color => {
             let gray = fit_gray(&m.density);
@@ -945,14 +991,21 @@ pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
         }
         Film::Bw => (SILVER_GRAY, fit_anchor_silver(&m.density, m.base_rgb)),
     };
-    Estimate {
+    let estimate = Estimate {
         film,
         base_rgb: m.base_rgb,
         base_area: m.base_area,
         area: m.area,
         gray,
         anchor,
-    }
+    };
+    (estimate, reading)
+}
+
+/// [`estimate`] on an image from [`analysis_image`], detecting the film type unless `hints`
+/// chooses it.
+pub fn estimate_on(small: &Rgb32, hints: &Hints) -> Estimate {
+    measure_frame(small, hints, None).0
 }
 
 /// One film base for a roll from its frames' bases: stock and processing don't change from
@@ -971,6 +1024,21 @@ pub fn differs_from_roll(frame_base: [f32; 3], roll: [f32; 3]) -> bool {
 /// comes out the same in all three channels, with only exposure applied.
 #[inline]
 pub fn positive(rgb: [f32; 3], e: &Estimate, a: &Adjust) -> [f32; 3] {
+    positive_with(rgb, e, gains_ev(e.film, a), silver_weights(e.base_rgb))
+}
+
+/// Per-channel gains in stops from the sliders, as a film type takes them: black and white takes
+/// exposure only.
+fn gains_ev(film: Film, a: &Adjust) -> [f32; 3] {
+    match film {
+        Film::Color => a.gains_ev(),
+        Film::Bw => [a.exposure_ev(); 3],
+    }
+}
+
+/// [`positive`] with its per-frame constants already worked out, for converting whole images.
+#[inline]
+fn positive_with(rgb: [f32; 3], e: &Estimate, gains_ev: [f32; 3], weights: [f32; 3]) -> [f32; 3] {
     let d = [0, 1, 2].map(|c| density_above_base(rgb[c], e.base_rgb[c]));
     let linear = |level: f32, gain_ev: f32| {
         let toe = TOE_AMOUNT * (-level.max(TOE_FLOOR) / TOE_SCALE).exp();
@@ -978,14 +1046,10 @@ pub fn positive(rgb: [f32; 3], e: &Estimate, a: &Adjust) -> [f32; 3] {
     };
     match e.film {
         Film::Color => {
-            let gains = a.gains_ev();
             let eq = equivalent_density(d, &e.gray);
-            [0, 1, 2].map(|c| linear(eq[c], gains[c]))
+            [0, 1, 2].map(|c| linear(eq[c], gains_ev[c]))
         }
-        Film::Bw => {
-            let silver = silver_density(d, silver_weights(e.base_rgb));
-            [linear(silver, a.exposure_ev()); 3]
-        }
+        Film::Bw => [linear(silver_density(d, weights), gains_ev[1]); 3],
     }
 }
 
@@ -1027,9 +1091,13 @@ pub fn convert_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) ->
     let crop = crop_override.or(a.crop).unwrap_or(NRect::FULL);
     let mut img = straight.crop(crop.to_pixels(straight.width, straight.height));
     let gain = a.saturation_gain();
+    let (gains, weights) = (
+        gains_ev(s.estimate.film, a),
+        silver_weights(s.estimate.base_rgb),
+    );
     for_each_part(&mut img.data, 3, |_, part| {
         for px in part.as_chunks_mut::<3>().0 {
-            *px = saturate(positive(*px, &s.estimate, a), gain);
+            *px = saturate(positive_with(*px, &s.estimate, gains, weights), gain);
         }
     });
     if a.flip_h {
@@ -1674,7 +1742,7 @@ mod tests {
             let scan = scan_of(silver, gains);
             let e = estimate_on(&scan, &Hints::default());
             assert_eq!(e.film, Film::Bw, "{gains:?}");
-            assert_eq!(detect_film(&scan, &Hints::default()), Film::Bw);
+            assert_eq!(read_frame(&scan, &Hints::default()).film, Film::Bw);
         }
     }
 
@@ -1721,12 +1789,41 @@ mod tests {
             ..Hints::default()
         };
         assert_eq!(estimate_on(&bw, &as_color).film, Film::Color);
-        assert_eq!(detect_film(&bw, &as_color), Film::Bw);
+        assert_eq!(read_frame(&bw, &as_color).film, Film::Bw);
         let as_bw = Hints {
             film: Some(Film::Bw),
             ..Hints::default()
         };
         assert_eq!(estimate_on(&synthetic_scan(), &as_bw).film, Film::Bw);
+    }
+
+    #[test]
+    fn measuring_again_keeps_the_film_type_unless_the_hints_choose() {
+        let bw = scan_of(silver, [1.0; 3]);
+        // Measured before as color, say with another area: it stays color, and says what it reads as.
+        let (e, reading) = measure_frame(&bw, &Hints::default(), Some(Film::Color));
+        assert_eq!((e.film, reading.film), (Film::Color, Film::Bw));
+        assert!(reading.base_found);
+        assert_eq!(
+            e,
+            estimate_on(
+                &bw,
+                &Hints {
+                    film: Some(Film::Color),
+                    ..Hints::default()
+                }
+            )
+        );
+        let as_bw = Hints {
+            film: Some(Film::Bw),
+            ..Hints::default()
+        };
+        assert_eq!(
+            measure_frame(&bw, &as_bw, Some(Film::Color)).0.film,
+            Film::Bw
+        );
+        assert_eq!(measure_frame(&bw, &Hints::default(), None).0.film, Film::Bw);
+        assert_eq!(read_frame(&bw, &as_bw), reading);
     }
 
     #[test]
