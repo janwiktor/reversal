@@ -42,29 +42,74 @@ const adj = () => current.settings.adjust;
 const hints = () => current.settings.hints;
 // The film type the frame converts as, or the one just chosen while it's measured for it.
 const filmNow = () => current.pendingFilm ?? current.settings.estimate.film;
-// Everything the app has to say floats at the top of the image, under an open tool's bar, one
-// message at a time. A message that needs reading or doing stays until dismissed or replaced; a
-// confirmation fades. Anything longer than a line opens from Details.
+// Everything the app has to say floats at the foot of the image, one message at a time. A message
+// that needs reading stays until dismissed or replaced; anything else fades. A click or tap on it
+// dismisses it, and anything longer than a line opens from Details.
 let noteTimer = 0, noteStays = false;
 function status(text = "", { stay = false, reveal = false } = {}) {
-  const note = $("note"), [head, ...rest] = text.split("\n");
+  const [head, ...rest] = text.split("\n");
   clearTimeout(noteTimer);
   noteStays = !!text && (stay || rest.length > 0);
-  // A message that stays needs reading, so it interrupts; a confirmation waits its turn.
-  note.setAttribute("role", noteStays ? "alert" : "status");
-  $("note-text").textContent = head;
-  $("note-more").textContent = rest.join("\n");
-  showDetails(false);
-  $("note-details").hidden = !rest.length;
-  $("reveal").hidden = !reveal;
-  note.hidden = !text;
-  if (text && !noteStays) fadeLater();
+  // No message hides the last one, which keeps its words while it fades.
+  if (!text) { hideNote(); return; }
+  showNote(() => {
+    // A message that stays needs reading, so it interrupts; a confirmation waits its turn.
+    $("note").setAttribute("role", noteStays ? "alert" : "status");
+    $("note-text").textContent = head;
+    $("note-more").textContent = rest.join("\n");
+    showDetails(false);
+    $("note-details").hidden = !rest.length;
+    $("reveal").hidden = !reveal;
+  });
+  if (!noteStays) fadeLater();
+}
+// A message fades in, and one that follows it while it shows keeps the box, which eases to the
+// new words' size; the words change at once.
+let noteFade = null, noteResize = null;
+const motion = (name) => ({ duration: cssTime(name), easing: getComputedStyle(document.documentElement).getPropertyValue("--ease").trim() });
+function showNote(write) {
+  const note = $("note");
+  const showing = !note.hidden && !note.dataset.leaving;
+  if (!showing || stillMotion.matches) {
+    noteFade?.cancel();
+    delete note.dataset.leaving;
+    write();
+    note.hidden = false;
+    if (!stillMotion.matches && !showing) noteFade = note.animate({ opacity: [0, 1] }, motion("--fade"));
+    return;
+  }
+  const from = note.getBoundingClientRect();
+  noteResize?.cancel();
+  write();
+  const to = note.getBoundingClientRect();
+  if (Math.abs(from.width - to.width) < 1 && Math.abs(from.height - to.height) < 1) return;
+  // The words keep their final layout, which the box uncovers, rather than rewrapping as it grows.
+  const words = $("note-text");
+  words.style.width = `${words.getBoundingClientRect().width}px`;
+  note.dataset.resizing = "";
+  noteResize = note.animate({ width: [`${from.width}px`, `${to.width}px`], height: [`${from.height}px`, `${to.height}px`] }, motion("--slide"));
+  noteResize.onfinish = noteResize.oncancel = () => {
+    delete note.dataset.resizing;
+    words.style.width = "";
+  };
+}
+function hideNote() {
+  const note = $("note");
+  if (note.hidden || note.dataset.leaving) return;
+  if (stillMotion.matches) { note.hidden = true; return; }
+  note.dataset.leaving = "true";
+  noteFade?.cancel();
+  noteFade = note.animate({ opacity: 0 }, motion("--fade"));
+  noteFade.onfinish = () => {
+    note.hidden = true;
+    delete note.dataset.leaving;
+  };
 }
 function fadeLater() {
   noteTimer = setTimeout(() => {
     if ($("note").matches(":hover, :focus-within")) fadeLater();
     else status();
-  }, 5000);
+  }, 3500);
 }
 function showDetails(on) {
   $("note-more").hidden = !on;
@@ -73,7 +118,10 @@ function showDetails(on) {
   if (on) { clearTimeout(noteTimer); noteStays = true; }
 }
 $("note-details").addEventListener("click", () => showDetails($("note-more").hidden));
-$("note-dismiss").addEventListener("click", () => status());
+// Anywhere but its buttons, and not while its words are being selected.
+$("note").addEventListener("click", (e) => {
+  if (!e.target.closest("button") && getSelection().isCollapsed) status();
+});
 
 
 // ---------- Files ----------
@@ -199,6 +247,44 @@ function markCurrent(name) {
   showCount();
 }
 
+// ---------- Motion ----------
+// A panel that changes height slides there rather than jumping. The edge it shares with the image
+// eases to its new place and the panel's contents ride that edge, so the image resizes smoothly
+// with it. What a panel shows changes at once: only the edge moves.
+const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const phoneLayout = matchMedia("not all and (min-width: 600px)");
+const cssTime = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+function slidePanels(change) {
+  // On a phone the panels sit under the image in the page's grid. Elsewhere only the crop bar,
+  // under the top bar's row, changes height; the frames column slides by itself.
+  const grid = phoneLayout.matches ? document.body : $("bar");
+  endSlide(grid);
+  const rows = () => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
+  const from = rows();
+  change();
+  const to = rows();
+  const n = to.length;
+  if (stillMotion.matches || from.length !== n || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
+  // The page's rows are the bar, the image, the panel rows and the tool bar. Only the image's row
+  // moves: the panel rows under it fill from the top at their new heights and the last takes what's
+  // left, so the panel's contents ride its top edge and the tool bar covers what doesn't fit yet.
+  // The crop bar's two rows both move, and its contents ride their bottom edge.
+  const template = grid === document.body
+    ? (image) => to.map((h, i) => (i === 1 ? `${image}px` : i === n - 2 ? "minmax(0, 1fr)" : i > 1 && i < n - 1 ? `minmax(0, ${h}px)` : `${h}px`)).join(" ")
+    : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
+  grid.dataset.sliding = "";
+  grid.style.gridTemplateRows = grid === document.body ? template(from[1]) : template(false);
+  void grid.offsetHeight;  // so the slide starts from there
+  grid.style.transition = "grid-template-rows var(--slide) var(--ease)";
+  grid.style.gridTemplateRows = grid === document.body ? template(to[1]) : template(true);
+  grid.slideEnd = setTimeout(() => endSlide(grid), cssTime("--slide") + 30);
+}
+function endSlide(grid) {
+  clearTimeout(grid.slideEnd);
+  delete grid.dataset.sliding;
+  grid.style.transition = grid.style.gridTemplateRows = "";
+}
+
 // ---------- Layout ----------
 // The frames list opens and closes in every layout: a column beside the image in landscape, and
 // in place of the tools under it in portrait, so the frame being chosen shows above the list.
@@ -219,25 +305,70 @@ function pressModes() {
     button.setAttribute("aria-pressed", String(!listShown && button.dataset.mode === document.body.dataset.mode));
   }
 }
-$("frames-toggle").addEventListener("click", () => showFrames(document.body.dataset.frames !== "open"));
+$("frames-toggle").addEventListener("click", () => slidePanels(() => showFrames(document.body.dataset.frames !== "open")));
 framesInPlaceOfTools.addEventListener("change", () => showFrames(framesInPlaceOfTools.matches ? !shownName : framesColumn));
-$("crop-open").addEventListener("click", () => {
+$("crop-open").addEventListener("click", () => slidePanels(() => {
   $("crop-open").setAttribute("aria-expanded", String($("crop-open").getAttribute("aria-expanded") !== "true"));
-});
+}));
 for (const button of document.querySelectorAll("#modes button")) {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", () => slidePanels(() => {
     document.body.dataset.mode = button.dataset.mode;
     showFrames(false);
-  });
+  }));
 }
 
 // In portrait the histogram floats over the image, and tapping it folds it to an icon. In
 // landscape it has its own place and this button isn't shown.
+// Opening, the box grows from the icon's corner in one motion that reveals a part at a time: left
+// and down to the histogram, then down to the clipping numbers, then to the range warning when
+// there is one. Folding runs the same way back. The parts keep their open size and the box's
+// edges clip them.
+let histResize = null;
 $("hist-fold").addEventListener("click", () => {
-  const folded = !$("hist").hasAttribute("data-folded");
-  $("hist").toggleAttribute("data-folded", folded);
+  const hist = $("hist"), body = $("hist-body");
+  const folded = !hist.hasAttribute("data-folded");
+  const box = (r) => ({ width: r.width, height: r.height });
+  const from = box(hist.getBoundingClientRect());
+  histResize?.cancel();
+  // The stops are measured open: before folding, or once opened.
+  if (!folded) hist.toggleAttribute("data-folded", false);
+  const { bodyWidth, stops } = histStops();
+  if (folded) hist.toggleAttribute("data-folded", true);
+  const icon = box(hist.getBoundingClientRect());
   $("hist-fold").setAttribute("aria-expanded", String(!folded));
+  if (stillMotion.matches) return;
+  // From where the box is now, through the stops still ahead of it.
+  const path = folded
+    ? [from, ...[...stops].reverse().filter((s) => s.height < from.height - 0.5), icon]
+    : [from, ...stops.filter((s, i) => s.height > from.height + 0.5 || (i === 0 && s.width > from.width + 0.5))];
+  // The motion spends its time in proportion to how far each step moves the edges, and enough on
+  // a short step that it reads as one.
+  const steps = path.slice(1).map((s, i) => Math.max(40, Math.hypot(s.width - path[i].width, s.height - path[i].height)));
+  const total = steps.reduce((a, b) => a + b, 0);
+  if (total < 1) return;
+  let travelled = 0;
+  const frames = path.map((s, i) => {
+    if (i > 0) travelled += steps[i - 1];
+    return { width: `${s.width}px`, height: `${s.height}px`, offset: travelled / total };
+  });
+  body.style.width = `${bodyWidth}px`;
+  hist.dataset.resizing = "";
+  histResize = hist.animate(frames, { duration: cssTime("--slide") * 1.25, easing: getComputedStyle(hist).getPropertyValue("--ease").trim() });
+  histResize.onfinish = histResize.oncancel = () => {
+    delete hist.dataset.resizing;
+    body.style.width = "";
+  };
 });
+// The open box's size at each part's foot, measured on the open layout.
+function histStops() {
+  const hist = $("hist"), body = $("hist-body");
+  const pad = parseFloat(getComputedStyle(hist).paddingTop) || 6;
+  const bodyWidth = body.offsetWidth, width = bodyWidth + 2 * pad;
+  const top = body.getBoundingClientRect().top;
+  const parts = [$("histogram"), body.querySelector(".clip"), $("stored")].filter((el) => el.getClientRects().length);
+  const stops = parts.map((el) => ({ width, height: el.getBoundingClientRect().bottom - top + 2 * pad }));
+  return { bodyWidth, stops: stops.filter((s, i) => i === 0 || s.height > stops[i - 1].height + 0.5) };
+}
 
 // ---------- Remembering settings ----------
 // Each frame keeps its settings on disk from the first change, so frames can be saved together.
@@ -821,7 +952,8 @@ async function followBatch() {
   updateSaveButton();
   for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
   lastPath = finished.last_path;
-  status(batchSummary(finished), { stay: true, reveal: !!(shell && lastPath) });
+  // Like any message, a save's result fades unless it has problems to read.
+  status(batchSummary(finished), { reveal: !!(shell && lastPath) });
 }
 
 // The open frame's base and measurements changed on disk: read them back, and keep the slider
@@ -922,11 +1054,15 @@ function setTool(t) {
   $("crop-layer").style.cursor = "";
   $("overlay").toggleAttribute("hidden", !t || t === "crop"); // SVG elements don't reflect .hidden
   $("toolbar").hidden = !t;
-  $("tool-text").textContent = TOOL_TEXT[t] ?? "";
-  $("tool-cancel").hidden = t === "show";
-  $("tool-done").hidden = t === "area" || t === "base";
-  $("tool-done").title = t === "crop" ? "Enter" : "Esc";
-  $("tool-done").setAttribute("aria-keyshortcuts", t === "crop" ? "Enter" : "Escape");
+  // A closing bar keeps its words while it fades.
+  if (t) {
+    $("tool-text").textContent = TOOL_TEXT[t] ?? "";
+    $("tool-cancel").hidden = t === "show";
+    $("tool-done").hidden = t === "area" || t === "base";
+    $("tool-done").title = t === "crop" ? "Enter" : "Esc";
+    $("tool-done").setAttribute("aria-keyshortcuts", t === "crop" ? "Enter" : "Escape");
+  }
+  fit();
   if (current) changed(0);
 }
 
@@ -1202,21 +1338,29 @@ async function refresh() {
   }
 }
 
+// The stage's padding is the room around the image. An open tool's bar gets room of its own
+// above the image, which eases smaller into the rest, so the bar never covers it. While cropping,
+// the frame's handles reach out past the image's edge and need room to be dragged; both grow on a
+// touch screen, so this measures them. Messages pass over the image and take no room.
+function stageRoom() {
+  const stage = $("stage"), bar = $("toolbar");
+  // A phone's stage is narrow, so it keeps a smaller margin.
+  const edge = stage.clientWidth < 600 ? 12 : 28;
+  const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--corner-hit")) / 2 : 0;
+  const side = Math.max(edge, reach);
+  const top = tool ? $("floats").offsetTop + bar.offsetTop + bar.offsetHeight + Math.max(10, reach) : edge;
+  return `${top}px ${side}px ${side}px`;
+}
 function fit() {
+  const stage = $("stage"), room = stageRoom();
+  if (stage.style.padding !== room) stage.style.padding = room;
   const img = $("photo");
   if (!img.naturalWidth) return;
-  const stage = $("stage");
-  // A phone's stage is narrow, so it keeps a smaller margin around the image.
-  const pad = stage.clientWidth < 600 ? 24 : 56;
-  // Bars and messages pass over the image, except while cropping: the crop frame's handles
-  // reach out past the image's edge and need to be free to drag, so the image keeps that far
-  // from the stage's sides and clear of the crop bar. Both grow on a touch screen, so this
-  // measures them. Twice, because the image stays centered.
-  const bar = $("toolbar");
-  const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--corner-hit")) / 2 : 0;
-  const padX = Math.max(pad, 2 * reach);
-  const padY = tool === "crop" ? Math.max(pad, 2 * ($("floats").offsetTop + bar.offsetTop + bar.offsetHeight + Math.max(10, reach))) : pad;
-  const scale = Math.min((stage.clientWidth - padX) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
+  // While the padding eases, this follows it: the stage's size changes, so this runs every frame.
+  const s = getComputedStyle(stage);
+  const width = stage.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+  const height = stage.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom);
+  const scale = Math.max(0, Math.min(width / img.naturalWidth, height / img.naturalHeight));
   $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
   $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
 }
