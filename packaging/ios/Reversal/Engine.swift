@@ -33,7 +33,9 @@ final class Engine {
     /// `done` runs on the main queue.
     func open(_ folder: URL, done: @escaping (Bool) -> Void) {
         queue.async {
-            let opened = folder.path.withCString { reversal_engine_open($0) }
+            // The licenses of what's built in, which the page shows in About.
+            let notices = Bundle.main.url(forResource: "Licenses", withExtension: nil)?.path
+            let opened = reversal_engine_open(folder.path, notices)
             DispatchQueue.main.async { done(opened) }
         }
     }

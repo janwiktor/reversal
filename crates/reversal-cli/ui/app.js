@@ -1596,7 +1596,28 @@ api("/api/version").then((r) => r.json()).then(({ version, commit }) => {
   $("about-open").textContent = label;
   $("about-title").textContent = `Reversal ${label}`;
 }).catch(() => {});
-$("about-open").addEventListener("click", () => $("about").showModal());
+$("about-open").addEventListener("click", () => { $("about").showModal(); showNotices(); });
+// An app carries the notices of what's built into it, and this is where they can be read.
+// Each is fetched when it's opened.
+let noticesShown = false;
+async function showNotices() {
+  if (noticesShown) return;
+  noticesShown = true;
+  try {
+    const { notices } = await (await api("/api/notices")).json();
+    $("about-notices").replaceChildren(...notices.map((name) => {
+      const notice = document.createElement("details"), title = document.createElement("summary"), text = document.createElement("pre");
+      title.textContent = name.replace(/\.txt$/, "");
+      notice.append(title, text);
+      notice.addEventListener("toggle", () => {
+        if (!text.textContent) api(`/api/notice?name=${encodeURIComponent(name)}`).then((r) => r.text()).then((t) => { text.textContent = t; }).catch(() => {});
+      });
+      return notice;
+    }));
+  } catch {
+    noticesShown = false;
+  }
+}
 $("about-close").addEventListener("click", () => $("about").close());
 $("about-details").addEventListener("toggle", () => {
   if ($("about-license").textContent) return;

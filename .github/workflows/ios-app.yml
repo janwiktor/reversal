@@ -75,7 +75,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist")" = "$version"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$plist")" = "$(git rev-list --count HEAD)"
           test -f "$app/Licenses/Reversal MPL-2.0.txt"
-          test -f "$app/Licenses/LICENSE.CDDL"
+          test -f "$app/Licenses/LibRaw CDDL-1.0.txt"
           test -s "$app/Licenses/Rust crates.txt"
           # The engine is linked in: anything outside iOS would be missing on a device.
           nm "$app/Reversal" | grep -q reversal_engine_request

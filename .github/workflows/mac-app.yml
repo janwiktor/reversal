@@ -77,7 +77,7 @@ jobs:
           "$app/Contents/MacOS/reversal-engine" --version | head -1 | grep -F "reversal $version ($(git rev-parse --short=7 HEAD))"
           test -f dist/Reversal-"$version"-arm64.dmg
           test -f "$app/Contents/Resources/Licenses/Reversal MPL-2.0.txt"
-          test -f "$app/Contents/Resources/Licenses/LICENSE.CDDL"
+          test -f "$app/Contents/Resources/Licenses/LibRaw CDDL-1.0.txt"
           # Anything outside the system would be missing on other Macs.
           for binary in "$app/Contents/MacOS/Reversal" "$app/Contents/MacOS/reversal-engine"; do
             otool -L "$binary"

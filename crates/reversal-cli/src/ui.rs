@@ -8,6 +8,9 @@
 //! GET  /, /app.js, /style.css             the page
 //! GET  /api/version                        version and the commit it was built from
 //! GET  /api/license                        the license text
+//! GET  /api/notices                        names of the notices an app carries for what's
+//!                                          built into it, where it has them to show
+//! GET  /api/notice?name=NAME               one of them, as text
 //! GET  /api/files                          raw files in the folder, and the frames a save was
 //!                                          cut short before
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning,
@@ -152,6 +155,8 @@ fn cache_budget() -> usize {
 
 struct State {
     served: Served,
+    /// A folder of license and copyright notices for what an app has built in, to show in About.
+    notices: Option<PathBuf>,
     folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
     batch: Batch,
@@ -227,8 +232,10 @@ pub fn serve(
     dir: PathBuf,
     port: u16,
     exit_with_stdin: bool,
+    notices: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (server, mut state, port) = bind(dir, port)?;
+    state.notices = notices;
     if exit_with_stdin {
         std::thread::spawn(|| {
             let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
@@ -251,8 +258,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn open(dir: PathBuf) -> std::io::Result<Self> {
-        let state = State::new(dir.canonicalize()?, Served::App);
+    /// `notices` is a folder of license and copyright notices for what the app has built in.
+    pub fn open(dir: PathBuf, notices: Option<PathBuf>) -> std::io::Result<Self> {
+        let mut state = State::new(dir.canonicalize()?, Served::App);
+        state.notices = notices;
         Ok(Engine { state })
     }
 
@@ -428,6 +437,7 @@ impl State {
     fn new(dir: PathBuf, served: Served) -> Self {
         State {
             served,
+            notices: None,
             folder: Arc::new(Folder::new(dir)),
             cache: HashMap::new(),
             batch: Batch::default(),
@@ -475,6 +485,20 @@ impl State {
                 "text/plain; charset=utf-8",
                 LICENSE_TEXT.as_bytes().to_vec(),
             )),
+            (Method::Get, "/api/notices") => {
+                Ok(json_resp(200, &json!({ "notices": self.notice_names() })))
+            }
+            (Method::Get, "/api/notice") => {
+                let name = query_param(url, "name").ok_or((400, "missing name".to_string()))?;
+                // Only what the list names, so a name can't lead out of the folder.
+                let dir = self
+                    .notices
+                    .as_ref()
+                    .filter(|_| self.notice_names().contains(&name));
+                let text = dir.and_then(|dir| std::fs::read(dir.join(&name)).ok());
+                let text = text.ok_or((404, format!("no such notice: {name}")))?;
+                Ok(Response::new("text/plain; charset=utf-8", text))
+            }
             (Method::Get, "/api/files") => self.files(),
             (Method::Get, "/api/load") => {
                 let file = query_param(url, "file").ok_or((400, "missing file".to_string()))?;
@@ -566,6 +590,24 @@ impl State {
             }
             _ => Err((404, format!("not found: {path}"))),
         }
+    }
+
+    /// The files in the notices folder, by name.
+    fn notice_names(&self) -> Vec<String> {
+        let entries = self
+            .notices
+            .as_ref()
+            .and_then(|dir| std::fs::read_dir(dir).ok());
+        let mut names: Vec<String> = entries
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_file())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| !name.starts_with('.'))
+            .collect();
+        names.sort();
+        names
     }
 
     fn files(&self) -> Handled {
@@ -905,7 +947,27 @@ mod tests {
     fn an_app_gets_the_page_and_the_api_without_a_server() {
         let dir = std::env::temp_dir().join(format!("reversal-engine-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut engine = Engine::open(dir.clone()).unwrap();
+        let notices = dir.join("notices");
+        std::fs::create_dir_all(notices.join("inner")).unwrap();
+        std::fs::write(notices.join("Rust crates.txt"), "serde, MIT").unwrap();
+        std::fs::write(dir.join("secret.txt"), "not a notice").unwrap();
+        let mut engine = Engine::open(dir.clone(), Some(notices)).unwrap();
+
+        // An app's notices are listed and read by name, and nothing else is.
+        let listed = engine.respond(&request(Method::Get, "/api/notices", &[], ""));
+        let listed: serde_json::Value = serde_json::from_slice(&listed.body).unwrap();
+        assert_eq!(listed["notices"], json!(["Rust crates.txt"]));
+        let get = |engine: &mut Engine, name: &str| {
+            engine.respond(&request(
+                Method::Get,
+                &format!("/api/notice?name={name}"),
+                &[],
+                "",
+            ))
+        };
+        assert_eq!(get(&mut engine, "Rust%20crates.txt").body, b"serde, MIT");
+        assert_eq!(get(&mut engine, "..%2Fsecret.txt").status, 404);
+        assert_eq!(get(&mut engine, "inner").status, 404);
 
         let page = engine.respond(&request(Method::Get, "/", &[], ""));
         assert_eq!(page.status, 200);

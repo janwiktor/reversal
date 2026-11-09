@@ -25,18 +25,25 @@ pub struct ReversalResponse {
 }
 
 /// Open `folder` in place of the one that was open. Returns whether that worked; if not, no
-/// folder is open.
+/// folder is open. `notices` is the folder of license notices the app carries, for the page to
+/// show, or null.
 ///
 /// # Safety
-/// `folder` must be a NUL-terminated string.
+/// `folder` must be a NUL-terminated string, and `notices` one or null.
 #[no_mangle]
-pub unsafe extern "C" fn reversal_engine_open(folder: *const c_char) -> bool {
+pub unsafe extern "C" fn reversal_engine_open(
+    folder: *const c_char,
+    notices: *const c_char,
+) -> bool {
     let mut engine = lock(&ENGINE);
     *engine = None;
     let Ok(folder) = CStr::from_ptr(folder).to_str() else {
         return false;
     };
-    match Engine::open(PathBuf::from(folder)) {
+    let notices = (!notices.is_null())
+        .then(|| CStr::from_ptr(notices).to_string_lossy().into_owned())
+        .map(PathBuf::from);
+    match Engine::open(PathBuf::from(folder), notices) {
         Ok(opened) => {
             *engine = Some(opened);
             true
@@ -198,7 +205,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("reversal-ios-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let folder = CString::new(dir.to_str().unwrap()).unwrap();
-        assert!(unsafe { reversal_engine_open(folder.as_ptr()) });
+        assert!(unsafe { reversal_engine_open(folder.as_ptr(), std::ptr::null()) });
 
         let (status, headers, body) = ask("GET", "/api/version", "", b"");
         assert_eq!(status, 200);
@@ -222,7 +229,7 @@ mod tests {
 
         // A folder that can't be opened leaves none open.
         let missing = CString::new("/no/such/folder").unwrap();
-        assert!(!unsafe { reversal_engine_open(missing.as_ptr()) });
+        assert!(!unsafe { reversal_engine_open(missing.as_ptr(), folder.as_ptr()) });
         assert_eq!(ask("GET", "/api/version", "", b"").0, 503);
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -457,7 +457,7 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
 #roll-result { margin-bottom: 12px; color: var(--ink-quiet); }
 #about { -webkit-user-select: text; user-select: text; }
 #about summary { margin-bottom: 8px; cursor: pointer; }
-#about-license { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: 11px; white-space: pre-wrap; color: var(--ink-quiet); }
+#about pre { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: 11px; white-space: pre-wrap; color: var(--ink-quiet); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Landscape from a small tablet up. */
