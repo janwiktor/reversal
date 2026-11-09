@@ -55,6 +55,8 @@ enum Library {
             at: documents, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         return folders
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            // Not the system's own: its inbox for files other apps send, and what Files hides.
+            .filter { !$0.lastPathComponent.hasPrefix(".") && !isSystemFolder($0.lastPathComponent) }
             .map { folder in
                 let names = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
                 var bytes: Int64 = 0
@@ -81,10 +83,27 @@ enum Library {
         return try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale)
     }
 
+    /// Where iOS puts copies of files that other apps send. The app may read and delete there.
+    static var inbox: URL { documents.appendingPathComponent("Inbox", isDirectory: true) }
+
+    static func isSystemFolder(_ name: String) -> Bool {
+        name.caseInsensitiveCompare("Inbox") == .orderedSame
+    }
+
+    static func isInInbox(_ url: URL) -> Bool {
+        url.resolvingSymlinksInPath().path.hasPrefix(inbox.resolvingSymlinksInPath().path + "/")
+    }
+
+    /// The day here, not in Greenwich, to name a roll of things that came without a folder.
+    static func today() -> String {
+        Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+    }
+
     /// A name a roll can take: one folder's worth, and not another roll's.
     static func canRename(_ roll: Roll, to name: String) -> Bool {
         let name = name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name != roll.name, !name.contains("/"), !name.hasPrefix(".") else { return false }
+        guard !name.isEmpty, name != roll.name, !name.contains("/"), !name.hasPrefix("."), !isSystemFolder(name)
+        else { return false }
         return !FileManager.default.fileExists(atPath: documents.appendingPathComponent(name).path)
     }
 
@@ -141,6 +160,8 @@ final class Importer {
                 for (index, file) in files.enumerated() where !self.isCanceled {
                     do {
                         try Self.copy(file, into: roll) ? (copied += 1) : (skipped += 1)
+                        // A copy another app sent is ours to clear away once it's in a roll.
+                        if Library.isInInbox(file) { try? FileManager.default.removeItem(at: file) }
                     } catch {
                         failed.append("\(file.lastPathComponent): \(error.localizedDescription)")
                     }
@@ -160,7 +181,8 @@ final class Importer {
     private static func scans(in source: URL) -> [URL] {
         let keys: [URLResourceKey] = [.isDirectoryKey]
         guard (try? source.resourceValues(forKeys: Set(keys)))?.isDirectory == true else {
-            return [source]
+            // A file on its own has to be a scan too: a saved positive, say, isn't one.
+            return isScan(source.lastPathComponent) ? [source] : []
         }
         guard let walk = FileManager.default.enumerator(at: source, includingPropertiesForKeys: keys)
         else { return [] }
@@ -213,6 +235,16 @@ final class Importer {
     }
 }
 
+/// A raw file of a kind the engine doesn't list as a scan.
+struct NotReadable: LocalizedError {
+    var errorDescription: String? { "Reversal doesn't read this raw format" }
+}
+
+extension Notification.Name {
+    /// The rolls in the app changed while the start screen may be showing them.
+    static let rollsChanged = Notification.Name("rollsChanged")
+}
+
 /// Copies raw photos chosen from the photo library into a roll in the app. The system's picker
 /// runs outside the app and hands over only what was chosen, so this needs no access to the
 /// library. Photos that aren't raw are left out: a JPEG or HEIC of a negative has lost what the
@@ -220,9 +252,12 @@ final class Importer {
 final class PhotosImporter {
     private let lock = NSLock()
     private var canceled = false
+    /// The photo on its way, which may be coming down from iCloud.
+    private var loading: Progress?
 
     func cancel() {
         lock.withLock { canceled = true }
+        loading?.cancel()
     }
 
     private var isCanceled: Bool { lock.withLock { canceled } }
@@ -261,10 +296,12 @@ final class PhotosImporter {
         func next(_ index: Int) {
             guard index < raws.count, !isCanceled else { return finish() }
             let (photo, type) = raws[index]
-            photo.loadFileRepresentation(forTypeIdentifier: type) { file, error in
+            self.loading = photo.loadFileRepresentation(forTypeIdentifier: type) { file, error in
                 // The file is the picker's copy, and is gone when this returns.
                 var outcome: Result<Bool, Error> = .failure(error ?? CocoaError(.fileReadUnknown))
-                if let file {
+                if let file, !isScan(file.lastPathComponent) {
+                    outcome = .failure(NotReadable())
+                } else if let file {
                     outcome = Result { try Importer.copyCoordinated(file, named: file.lastPathComponent, into: roll) }
                 }
                 DispatchQueue.main.async {

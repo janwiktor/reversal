@@ -84,6 +84,7 @@ struct HomeView: View {
                     }
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .rollsChanged)) { _ in refresh() }
             .navigationTitle("Reversal")
             .toolbar {
                 if canClose {

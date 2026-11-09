@@ -106,10 +106,16 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             guard let self else { return stopped() }
             self.stopForNow(then: stopped)
         }
+        // Scans that another app opened in Reversal come after the usual start.
+        let then = { [weak self] in
+            guard let self else { return }
+            self.ready = true
+            self.importWaitingScans()
+        }
         // A card that's gone by now is no news: just ask what to open.
-        guard let last = Library.lastFolder() else { return showHome() }
+        guard let last = Library.lastFolder() else { return showHome(then: then) }
         show(folder: last) { [weak self] opened in
-            if !opened { self?.showHome() }
+            opened ? then() : self?.showHome(then: then)
         }
     }
 
@@ -236,7 +242,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         return controller
     }
 
-    private func showHome() {
+    private func showHome(then: (() -> Void)? = nil) {
         let actions = HomeActions(
             openFolder: { [weak self] in self?.choose(.openFolder, [.folder]) },
             importFolder: { [weak self] in self?.choose(.importFolder, [.folder]) },
@@ -255,7 +261,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         home.modalPresentationStyle = .formSheet
         home.isModalInPresentation = folder == nil
         self.home = home
-        top.present(home, animated: true)
+        top.present(home, animated: true, completion: then)
     }
 
     /// The start screen, while it's up. With no folder open it can't be put away.
@@ -333,11 +339,28 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         }
     }
 
-    /// Scans opened from another app, such as Files or Mail: they join a roll named for where
-    /// they are, and that roll opens.
+    /// The start is over: a folder is open or the start screen is up.
+    private var ready = false
+    /// An import is on screen. One at a time: each has a panel, and ends by opening its roll.
+    private var importing = false
+    /// Scans other apps opened in Reversal, until it can take them.
+    private var waitingScans: [URL] = []
+
+    /// Scans opened from another app, such as Files or Mail. They join a roll and that roll
+    /// opens: one named for their folder if they were opened where they are, or for the day if
+    /// they came as copies, which iOS leaves in the app's inbox.
     func open(scans: [URL]) {
-        guard let first = scans.first else { return }
-        runImport(scans, rollName: first.deletingLastPathComponent().lastPathComponent)
+        waitingScans += scans
+        importWaitingScans()
+    }
+
+    private func importWaitingScans() {
+        guard ready, !importing, let first = waitingScans.first else { return }
+        let copies = Library.isInInbox(first)
+        let scans = waitingScans.filter { Library.isInInbox($0) == copies }
+        waitingScans.removeAll { Library.isInInbox($0) == copies }
+        let roll = copies ? "Opened \(Library.today())" : first.deletingLastPathComponent().lastPathComponent
+        runImport(scans, rollName: roll)
     }
 
     private func choosePhotos() {
@@ -356,8 +379,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         picker.dismiss(animated: true) { [weak self] in
             guard let self, !results.isEmpty else { return }
             // The day here, not in Greenwich.
-            let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
-            self.runPhotosImport(results.map(\.itemProvider), rollName: "Photos \(day)")
+            self.runPhotosImport(results.map(\.itemProvider), rollName: "Photos \(Library.today())")
         }
     }
 
@@ -365,6 +387,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         let importer = PhotosImporter()
         let panel = UIAlertController(title: "Importing", message: "Getting photos…", preferredStyle: .alert)
         panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in importer.cancel() })
+        importing = true
         top.present(panel, animated: true) { [weak self] in
             importer.run(
                 photos: photos, rollName: rollName,
@@ -397,6 +420,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         let importer = Importer()
         let panel = UIAlertController(title: "Importing", message: "Finding scans…", preferredStyle: .alert)
         panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in importer.cancel() })
+        importing = true
         // Started once the panel is up: one that's still arriving can't be dismissed.
         top.present(panel, animated: true) { [weak self] in
             self?.run(importer, sources, rollName: rollName, panel: panel)
@@ -415,8 +439,13 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     private func imported(_ result: Importer.Result, panel: UIAlertController, notRaw: Int = 0) {
         let photos = notRaw == 1 ? "1 photo isn't raw" : "\(notRaw) photos aren't raw"
         let finish = {
-            if result.canceled && result.copied + result.skipped == 0 {
-                // Stopped before anything arrived: nothing to say, and nothing to open.
+            self.importing = false
+            NotificationCenter.default.post(name: .rollsChanged, object: nil)
+            if !self.waitingScans.isEmpty {
+                // More came in meanwhile: on to those, and the last import opens its roll.
+                self.importWaitingScans()
+            } else if result.canceled {
+                // Stopped: nothing to say, and nothing opens over what the user went on to.
             } else if !result.failed.isEmpty {
                 let list = result.failed.joined(separator: "\n")
                 self.top.present(self.alert("Could not import \(result.failed.count) files", list), animated: true)
@@ -433,8 +462,9 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
                 self.switchTo(result.roll)
             }
         }
-        if panel.presentingViewController != nil {
-            panel.dismiss(animated: true, completion: finish)
+        // From what presented it, which also puts away anything shown over the panel.
+        if let presenter = panel.presentingViewController {
+            presenter.dismiss(animated: true, completion: finish)
         } else {
             finish()
         }

@@ -3,6 +3,8 @@
 # Gathers the licenses of what's inside an app into "$licenses". Sourced after libraw.sh, by the Mac
 # app's and the iPad app's builds. Needs root, licenses, rust_package and rust_target.
 
+# From scratch: a file that was gathered under another name mustn't stay.
+rm -rf "$licenses"
 mkdir -p "$licenses"
 cp "$root/LICENSE" "$licenses/Reversal MPL-2.0.txt"
 # LibRaw offers two licenses. It's the CDDL in every build, which lets the app go through app stores.

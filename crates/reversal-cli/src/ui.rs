@@ -577,7 +577,11 @@ impl State {
                 let job: ExportJob = read_body(req)?;
                 let mut paths = Vec::new();
                 for file in &job.files {
-                    self.folder.resolve(file)?;
+                    // A frame that left the folder since the page listed it has no DNG to
+                    // offer, and mustn't keep the others from being found.
+                    if self.folder.resolve(file).is_err() {
+                        continue;
+                    }
                     let dng = self.folder.output_path(file);
                     if dng.is_file() {
                         paths.push(dng.display().to_string());
@@ -1028,9 +1032,11 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with("positives/a-positive.dng"));
-        let other = r#"{"files":["../a.NEF"]}"#;
-        let outside = engine.respond(&request(Method::Post, "/api/positives", &own, other));
-        assert_eq!(outside.status, 404);
+        // A name that isn't a frame of the folder, or leads out of it, finds nothing.
+        let other = r#"{"files":["../a.NEF","gone.NEF","a.NEF"]}"#;
+        let found = engine.respond(&request(Method::Post, "/api/positives", &own, other));
+        let found: serde_json::Value = serde_json::from_slice(&found.body).unwrap();
+        assert_eq!(found["paths"].as_array().unwrap().len(), 1);
 
         // Frames a save was cut short before are listed until they're let go: by a Stop, or
         // by the page when its offer is turned down. Stopping for later keeps them.

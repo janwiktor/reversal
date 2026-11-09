@@ -223,6 +223,14 @@ mod tests {
         assert_eq!(ask("POST", "/api/roll/vote", "", vote).0, 403);
         assert_eq!(ask("DELETE", "/api/files", "", b"").0, 404);
 
+        // The folder of notices the app names is the one the page gets to list.
+        std::fs::write(dir.join("Some license.txt"), "text").unwrap();
+        assert!(unsafe { reversal_engine_open(folder.as_ptr(), folder.as_ptr()) });
+        let (_, _, notices) = ask("GET", "/api/notices", "", b"");
+        assert!(String::from_utf8(notices)
+            .unwrap()
+            .contains("Some license.txt"));
+
         // Trimming keeps the folder open, and answers go on.
         reversal_engine_trim();
         assert_eq!(ask("GET", "/api/version", "", b"").0, 200);
