@@ -29,16 +29,20 @@ let rendering = false;  // one preview at a time; changes meanwhile ask for one 
 let renderAgain = false;
 
 // In an app, the shell does what a page can't. The page sends it { action }: chooseFolder, busy
-// with { busy }, reveal with { path }, and capabilities, which a shell may answer with what it
-// does differently from the Mac app's:
+// with { busy }, reveal with { path }, export with { files }, and capabilities, which a shell
+// may answer with what it does differently from the Mac app's:
 //   export: it hands saved DNGs to other apps, where there's no file manager to show them in
+// reveal and export say where their button is, as { from: [x, y, width, height] }, for a shell
+// that shows its choices next to it.
 const shell = window.webkit?.messageHandlers?.reversal;
 let shellCan = {};
 // A shell that doesn't answer returns nothing here, and one that does returns a promise.
 shell?.postMessage({ action: "capabilities" })?.then?.((can) => {
   shellCan = can ?? {};
   if (shellCan.export) $("reveal").textContent = "Export…";
+  updateExportButton();
 });
+const placeOf = (button) => { const r = button.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!res.ok) {
@@ -319,7 +323,23 @@ $("select-all-box").addEventListener("change", (e) => {
 
 // The open frame's place in the roll, or how many are selected.
 let shownName = null;
+// Where a shell hands DNGs to other apps, any saved frame can go at any time: the selected ones,
+// or the open one. The button after a save only covers what that save wrote, and fades.
+function exportable() {
+  const wanted = selected.size ? frames.filter((f) => selected.has(f.name)) : frames.filter((f) => f.name === shownName);
+  return wanted.filter((f) => f.saved).map((f) => f.name);
+}
+function updateExportButton() {
+  $("export-dngs").hidden = !shellCan.export;
+  $("export-dngs").disabled = !exportable().length;
+}
+$("export-dngs").addEventListener("click", (e) => {
+  const files = exportable();
+  if (files.length) shell.postMessage({ action: "export", files, from: placeOf(e.currentTarget) });
+});
+
 function showCount() {
+  updateExportButton();
   const at = frames.findIndex((f) => f.name === shownName), n = frames.length;
   $("frame-count").textContent = !n ? "" : selected.size ? `${selected.size} of ${n} selected` : at >= 0 ? `${at + 1} of ${n}` : `${n} frame${n > 1 ? "s" : ""}`;
 }
@@ -1146,7 +1166,7 @@ function batchSummary({ done, total, issues, canceled, last_path }) {
   return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
 }
 
-$("reveal").addEventListener("click", () => { if (shell && lastPath) shell.postMessage({ action: "reveal", path: lastPath }); });
+$("reveal").addEventListener("click", (e) => { if (shell && lastPath) shell.postMessage({ action: "reveal", path: lastPath, from: placeOf(e.currentTarget) }); });
 
 async function setHint(key, rect) {
   if (!current) return;

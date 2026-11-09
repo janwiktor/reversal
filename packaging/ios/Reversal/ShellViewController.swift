@@ -213,7 +213,12 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         case "capabilities": return replyHandler(Self.capabilities, nil)
         case "chooseFolder": showHome()
         case "busy": busy = body["busy"] as? Bool ?? false
-        case "reveal": showExport()
+        case "reveal":
+            buttonPlace = Self.place(body["from"])
+            savedDngs { [weak self] dngs in self?.showExport(dngs) }
+        case "export":
+            buttonPlace = Self.place(body["from"])
+            positives(of: body["files"] as? [String] ?? []) { [weak self] dngs in self?.showExport(dngs) }
         default: break
         }
         replyHandler(nil, nil)
@@ -328,35 +333,46 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         }
     }
 
-    private func showExport() {
-        savedDngs { [weak self] dngs in
-            guard let self, !dngs.isEmpty else { return }
-            let title = dngs.count == 1 ? dngs[0].lastPathComponent : "\(dngs.count) DNGs"
-            let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-            sheet.addAction(UIAlertAction(title: "Open in Another App…", style: .default) { _ in self.share(dngs) })
-            sheet.addAction(UIAlertAction(title: "Save to Photos", style: .default) { _ in self.saveToPhotos(dngs) })
-            sheet.addAction(UIAlertAction(title: "Save to Files…", style: .default) { _ in self.saveToFiles(dngs) })
-            sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            self.anchor(sheet) { self.present(sheet, animated: true) }
+    /// The DNGs of these frames, for the ones that have one.
+    private func positives(of files: [String], _ done: @escaping ([URL]) -> Void) {
+        let body = (try? JSONSerialization.data(withJSONObject: ["files": files])) ?? Data()
+        engine.request("POST", "/api/positives", headers: Engine.json, body: body) { response in
+            let paths = response.json?["paths"] as? [String] ?? []
+            done(paths.map { URL(fileURLWithPath: $0) })
         }
     }
 
+    private func showExport(_ dngs: [URL]) {
+        guard !dngs.isEmpty else { return }
+        let title = dngs.count == 1 ? dngs[0].lastPathComponent : "\(dngs.count) DNGs"
+        let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "Open in Another App…", style: .default) { _ in self.share(dngs) })
+        sheet.addAction(UIAlertAction(title: "Save to Photos", style: .default) { _ in self.saveToPhotos(dngs) })
+        sheet.addAction(UIAlertAction(title: "Save to Files…", style: .default) { _ in self.saveToFiles(dngs) })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        anchor(sheet)
+        present(sheet, animated: true)
+    }
+
+    /// Where the page's button is, in the web view, as the page said with its request.
+    private var buttonPlace: CGRect?
+
+    private static func place(_ from: Any?) -> CGRect? {
+        guard let r = from as? [Double], r.count == 4 else { return nil }
+        return CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
+    }
+
     /// Points a popover at the page's button, as iPad requires.
-    private func anchor(_ popover: UIViewController, then present: @escaping () -> Void) {
-        web.evaluateJavaScript(
-            "(() => { const r = document.getElementById('reveal').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()"
-        ) { [weak self] rect, _ in
-            guard let self else { return }
-            let r = (rect as? [Double]) ?? [Double(self.web.bounds.midX), Double(self.web.bounds.maxY), 0, 0]
-            popover.popoverPresentationController?.sourceView = self.web
-            popover.popoverPresentationController?.sourceRect = CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
-            present()
-        }
+    private func anchor(_ popover: UIViewController) {
+        popover.popoverPresentationController?.sourceView = web
+        popover.popoverPresentationController?.sourceRect =
+            buttonPlace ?? CGRect(x: web.bounds.midX, y: web.bounds.maxY, width: 0, height: 0)
     }
 
     private func share(_ dngs: [URL]) {
         let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: nil)
-        anchor(sheet) { [weak self] in self?.present(sheet, animated: true) }
+        anchor(sheet)
+        present(sheet, animated: true)
     }
 
     private func saveToFiles(_ dngs: [URL]) {

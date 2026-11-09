@@ -277,7 +277,7 @@ body[data-frames="closed"] { grid-template-columns: 0 minmax(0, 1fr) var(--right
 /* The checkbox answers to --check-hit around it, so the row starts that much further left. */
 #files li { display: flex; align-items: center; gap: 8px; height: var(--hit); padding-left: max(0px, calc(10px - (var(--check-hit) - var(--check)) / 2)); }
 #files .pick { flex: none; display: grid; place-items: center; width: var(--check-hit); align-self: stretch; }
-#roll-foot { flex: none; display: flex; align-items: center; height: var(--head-h); padding: 0 4px; border-top: 1px solid var(--line); }
+#roll-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; height: var(--head-h); padding: 0 4px; border-top: 1px solid var(--line); }
 #about-open { color: var(--ink-quiet); font-size: 11px; text-decoration-color: transparent; }
 @media (hover: hover) { #files li:hover { background: var(--row-hover); } }
 #files li:has(button[aria-current="true"]) { background: var(--row-on); }

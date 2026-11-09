@@ -20,6 +20,8 @@
 //! POST /api/settings {file, settings, adjust_only}  remember a frame's settings (its sidecar)
 //! POST /api/export   {files}               save DNGs in the background, each with its own settings
 //! GET  /api/export/status                  progress of that
+//! POST /api/positives {files}              where the DNGs of those frames are, for the ones
+//!                                          that have one
 //! POST /api/export/cancel {later}          frames not started yet don't start; with `later`
 //!                                          they stay listed, to be offered again
 //! POST /api/export/forget                  stop offering the frames a save was cut short before
@@ -538,6 +540,18 @@ impl State {
                 self.apply_roll(job)
             }
             (Method::Get, "/api/export/status") => Ok(json_resp(200, &self.batch.status())),
+            (Method::Post, "/api/positives") => {
+                let job: ExportJob = read_body(req)?;
+                let mut paths = Vec::new();
+                for file in &job.files {
+                    self.folder.resolve(file)?;
+                    let dng = self.folder.output_path(file);
+                    if dng.is_file() {
+                        paths.push(dng.display().to_string());
+                    }
+                }
+                Ok(json_resp(200, &json!({ "paths": paths })))
+            }
             (Method::Post, "/api/export/cancel") => {
                 let job: CancelJob = read_body(req)?;
                 self.batch.cancel();
@@ -917,6 +931,24 @@ mod tests {
         assert_eq!(refused.status, 403);
         let form = engine.respond(&request(Method::Post, "/api/roll/vote", &[], vote));
         assert_eq!(form.status, 403);
+
+        // A frame's DNG is found once it's there, and a frame without one is left out.
+        std::fs::write(dir.join("a.NEF"), b"raw").unwrap();
+        std::fs::write(dir.join("b.NEF"), b"raw").unwrap();
+        std::fs::create_dir_all(dir.join("positives")).unwrap();
+        std::fs::write(dir.join("positives/a-positive.dng"), b"dng").unwrap();
+        let both = r#"{"files":["a.NEF","b.NEF"]}"#;
+        let found = engine.respond(&request(Method::Post, "/api/positives", &own, both));
+        let found: serde_json::Value = serde_json::from_slice(&found.body).unwrap();
+        let paths = found["paths"].as_array().unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0]
+            .as_str()
+            .unwrap()
+            .ends_with("positives/a-positive.dng"));
+        let other = r#"{"files":["../a.NEF"]}"#;
+        let outside = engine.respond(&request(Method::Post, "/api/positives", &own, other));
+        assert_eq!(outside.status, 404);
 
         // Mistakes come back as JSON, not as a panic: a bad body, a path or a method unknown.
         let bad = engine.respond(&request(Method::Post, "/api/roll/vote", &own, "{"));
