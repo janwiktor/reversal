@@ -9,7 +9,7 @@ import UIKit
 import UniformTypeIdentifiers
 import WebKit
 
-final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate,
+final class ShellViewController: UIViewController, WKScriptMessageHandlerWithReply, WKNavigationDelegate,
     UIDocumentPickerDelegate
 {
     private enum Pick {
@@ -36,12 +36,6 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
         }
     }
 
-    /// What the page needs here and not elsewhere. It stays the same page, and runs under its
-    /// own content security policy, so this only uses what a script may do there.
-    private static let pageAdjustments = """
-        document.getElementById("reveal").textContent = "Export…";
-        """
-
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
 
     override func viewDidLoad() {
@@ -50,10 +44,8 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
         view.backgroundColor = UIColor(white: 0.15, alpha: 1)
 
         let config = WKWebViewConfiguration()
-        config.userContentController.add(self, name: "reversal")
+        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "reversal")
         config.setURLSchemeHandler(EngineSchemeHandler(engine: engine), forURLScheme: Engine.scheme)
-        config.userContentController.addUserScript(
-            WKUserScript(source: Self.pageAdjustments, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         config.defaultWebpagePreferences.preferredContentMode = .desktop
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
@@ -163,15 +155,25 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
 
     // MARK: The page's requests
 
-    /// Requests from the page. It is served by our own engine, in this process.
-    func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any] else { return }
+    /// What the page learns when it asks what this shell does differently: see `shell` in the
+    /// page's `app.js`. The page stays the same everywhere, and adapts itself to this.
+    private static let capabilities: [String: Any] = ["export": true]
+
+    /// Requests from the page, which is served by our own engine, in this process. Every one
+    /// gets an answer, since the page holds a promise for it.
+    func userContentController(
+        _: WKUserContentController, didReceive message: WKScriptMessage,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        let body = message.body as? [String: Any] ?? [:]
         switch body["action"] as? String {
+        case "capabilities": return replyHandler(Self.capabilities, nil)
         case "chooseFolder": showHome()
         case "busy": busy = body["busy"] as? Bool ?? false
         case "reveal": showExport()
         default: break
         }
+        replyHandler(nil, nil)
     }
 
     // MARK: Getting scans in

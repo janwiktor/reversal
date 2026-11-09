@@ -27,8 +27,17 @@ let folderPath = "";      // the open folder, to name what's saved in it from th
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
 
-// In the Mac app the shell does what a page can't.
+// In an app, the shell does what a page can't. The page sends it { action }: chooseFolder, busy
+// with { busy }, reveal with { path }, and capabilities, which a shell may answer with what it
+// does differently from the Mac app's:
+//   export: it hands saved DNGs to other apps, where there's no file manager to show them in
 const shell = window.webkit?.messageHandlers?.reversal;
+let shellCan = {};
+// A shell that doesn't answer returns nothing here, and one that does returns a promise.
+shell?.postMessage({ action: "capabilities" })?.then?.((can) => {
+  shellCan = can ?? {};
+  if (shellCan.export) $("reveal").textContent = "Export…";
+});
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!res.ok) {
