@@ -42,6 +42,18 @@ shell?.postMessage({ action: "capabilities" })?.then?.((can) => {
   if (shellCan.export) $("reveal").textContent = "Export…";
   updateExportButton();
 });
+// An iPhone's number pads have no minus key, so its value fields that take one get the full
+// keyboard, where numbers and the minus are a tap away. An iPad's number pad has one.
+if (/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 600) {
+  for (const field of document.querySelectorAll("input.val")) {
+    if (field.id === "area-percent-val") continue;
+    field.inputMode = "text";
+    // It's a number: no suggestions, capitals or corrections.
+    field.autocapitalize = "off";
+    field.spellcheck = false;
+    field.setAttribute("autocorrect", "off");
+  }
+}
 const placeOf = (button) => { const r = button.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -439,6 +451,8 @@ for (const button of document.querySelectorAll("#modes button")) {
   button.addEventListener("click", () => slidePanels(() => {
     document.body.dataset.mode = button.dataset.mode;
     showFrames(false);
+    // Each panel from its top: scrolled as the last one was, its heading would be out of view.
+    $("dock").scrollTop = 0;
   }));
 }
 
@@ -1155,15 +1169,17 @@ async function followBatch() {
     status(rollSummary(finished));
     return;
   }
-  if (finished.done === finished.total) selected.clear();
+  // Where DNGs leave through the shell, the frames stay selected: Export… is the next step.
+  if (finished.done === finished.total && !shellCan.export) selected.clear();
   updateSaveButton();
   for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
   lastPath = finished.last_path;
   const reveal = !!(shell && lastPath);
   // Stopped for now, not by the user: the rest is still wanted.
   if (finished.canceled && offerRest(batchSummary(finished), "Save the rest", reveal)) return;
-  // Like any message, a save's result fades unless it has problems to read.
-  status(batchSummary(finished), { reveal });
+  // Like any message, a save's result fades unless it has problems to read. Where its button
+  // is the way out for the DNG, it waits to be used or put away.
+  status(batchSummary(finished), { reveal, stay: reveal && !!shellCan.export });
 }
 
 // The open frame's base and measurements changed on disk: read them back, and keep the slider
@@ -1195,8 +1211,10 @@ function inFolder(path) {
 
 function batchSummary({ done, total, issues, canceled, last_path }) {
   const saved = last_path && inFolder(last_path);
-  const where = saved ? ` to ${saved.slice(0, saved.lastIndexOf("/"))}` : "";
-  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${saved}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
+  // Where DNGs leave through the shell, the folder they're kept in is no news: the name will do.
+  const name = saved && shellCan.export ? saved.slice(saved.lastIndexOf("/") + 1) : saved;
+  const where = saved && !shellCan.export ? ` to ${saved.slice(0, saved.lastIndexOf("/"))}` : "";
+  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${name}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
   return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
 }
 

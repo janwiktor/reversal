@@ -256,7 +256,8 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             },
             rename: { [weak self] roll, name, done in self?.rename(roll, to: name, then: done) },
             delete: { [weak self] roll, done in self?.delete(roll, then: done) },
-            hasOpenFolder: { [weak self] in self?.folder != nil })
+            hasOpenFolder: { [weak self] in self?.folder != nil },
+            isOpen: { [weak self] roll in self?.folder?.standardizedFileURL == roll.url.standardizedFileURL })
         let home = UIHostingController(rootView: HomeView(lastFolder: Library.lastFolder(), actions: actions))
         home.modalPresentationStyle = .formSheet
         home.isModalInPresentation = folder == nil
@@ -447,15 +448,25 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             } else if result.canceled {
                 // Stopped: nothing to say, and nothing opens over what the user went on to.
             } else if !result.failed.isEmpty {
-                let list = result.failed.joined(separator: "\n")
-                self.top.present(self.alert("Could not import \(result.failed.count) files", list), animated: true)
+                let files = result.failed.count == 1 ? "1 file" : "\(result.failed.count) files"
+                let note = UIAlertController(
+                    title: "Could not import \(files)", message: result.failed.joined(separator: "\n"),
+                    preferredStyle: .alert)
+                // What did arrive is still worth opening.
+                note.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                    if result.copied + result.skipped > 0 { self.switchTo(result.roll) }
+                })
+                self.top.present(note, animated: true)
             } else if result.copied + result.skipped == 0 {
                 let none = notRaw > 0
                     ? self.alert("No raw photos there", "Reversal converts the raw file of a scan. A JPEG or HEIC has lost what it measures.")
                     : self.alert("No scans there", "Choose a folder or files with NEF, CR2, ARW, RAF or DNG scans.")
                 self.top.present(none, animated: true)
             } else if notRaw > 0 {
-                let note = UIAlertController(title: "\(photos) and stayed behind", message: nil, preferredStyle: .alert)
+                let arrived = result.copied + result.skipped
+                let note = UIAlertController(
+                    title: "Imported \(arrived == 1 ? "1 raw photo" : "\(arrived) raw photos")",
+                    message: "\(photos) and \(notRaw == 1 ? "was" : "were") left out", preferredStyle: .alert)
                 note.addAction(UIAlertAction(title: "OK", style: .default) { _ in self.switchTo(result.roll) })
                 self.top.present(note, animated: true)
             } else {

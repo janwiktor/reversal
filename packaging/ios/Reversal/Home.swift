@@ -18,6 +18,8 @@ struct HomeActions {
     let delete: (Roll, @escaping () -> Void) -> Void
     /// Whether a folder is open behind the start screen, to go back to.
     let hasOpenFolder: () -> Bool
+    /// Whether this roll is the one that's open.
+    let isOpen: (Roll) -> Bool
 }
 
 struct HomeView: View {
@@ -47,17 +49,15 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Button(action: actions.openFolder) { Label("Open Folder…", systemImage: "folder") }
-                    if let lastFolder, !Library.isInApp(lastFolder) {
-                        Button { actions.open(lastFolder) } label: {
-                            Label("Last folder: \(lastFolder.lastPathComponent)", systemImage: "clock")
-                        }
+                // What's already here comes first: after the first roll, that's why the app is opened.
+                if !rolls.isEmpty {
+                    Section {
+                        ForEach(rolls) { roll in row(roll) }
+                    } header: {
+                        Text("Rolls")
+                    } footer: {
+                        Text("\(Roll.size(rolls.reduce(0) { $0 + $1.bytes })) on this \(device), in Files under Reversal")
                     }
-                } header: {
-                    Text("Work in place")
-                } footer: {
-                    Text("Use a folder in Files, on a memory card or on a drive, with nothing copied. DNGs go in a positives folder inside it, so it must be writable and stay connected.")
                 }
                 Section {
                     Button(action: actions.importFolder) {
@@ -70,18 +70,21 @@ struct HomeView: View {
                         Label("Import from Photos…", systemImage: "photo.on.rectangle")
                     }
                 } header: {
-                    Text("Import")
+                    Text("Copy into Reversal")
                 } footer: {
-                    Text("Copy scans into Reversal, also from folders inside the one you choose. The originals stay where they are, and the card can go. From Photos, only raw photos come along.")
+                    Text("Copies scans into Reversal, so the card can go. From Photos, only raw photos are copied")
                 }
-                if !rolls.isEmpty {
-                    Section {
-                        ForEach(rolls) { roll in row(roll) }
-                    } header: {
-                        Text("In Reversal")
-                    } footer: {
-                        Text("\(Roll.size(rolls.reduce(0) { $0 + $1.bytes })) on this \(device), in Files under Reversal. Deleting a roll frees its space.")
+                Section {
+                    Button(action: actions.openFolder) { Label("Open Folder…", systemImage: "folder") }
+                    if let lastFolder, !Library.isInApp(lastFolder) {
+                        Button { actions.open(lastFolder) } label: {
+                            Label("Last folder: \(lastFolder.lastPathComponent)", systemImage: "clock")
+                        }
                     }
+                } header: {
+                    Text("Open in place")
+                } footer: {
+                    Text("Works on a folder in Files, on a card or a drive, with nothing copied. DNGs go in a positives folder inside it")
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .rollsChanged)) { _ in refresh() }
@@ -100,17 +103,16 @@ struct HomeView: View {
                 }
                 .disabled(!Library.canRename(roll, to: newName))
             }
-            .confirmationDialog(
-                deleting.map { "Delete \($0.name)?" } ?? "", isPresented: shown($deleting),
-                titleVisibility: .visible, presenting: deleting
+            .alert(
+                deleting.map { "Delete “\($0.name)”?" } ?? "", isPresented: shown($deleting), presenting: deleting
             ) { roll in
-                Button("Delete \(roll.contents)", role: .destructive) {
+                Button("Delete Roll", role: .destructive) {
                     deleting = nil
                     actions.delete(roll) { refresh() }
                 }
                 Button("Cancel", role: .cancel) { deleting = nil }
             } message: { _ in
-                Text("This removes them from Reversal for good. What you imported them from, and DNGs you exported, stay where they are.")
+                Text("Its scans and DNGs are removed from Reversal. DNGs you haven't exported are lost. The originals you imported from stay")
             }
         }
     }
@@ -125,13 +127,20 @@ struct HomeView: View {
     private func row(_ roll: Roll) -> some View {
         HStack {
             Button { actions.open(roll.url) } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(roll.name)
-                    Text("\(roll.contents) · \(Roll.size(roll.bytes))")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        // A roll is a thing, not a command: in the text color, not the tint.
+                        // The label colors by name: inside a button, primary means the tint.
+                        Text(roll.name).foregroundStyle(Color(uiColor: .label))
+                        Text("\(roll.contents) · \(Roll.size(roll.bytes))")
+                            .font(.footnote)
+                            .foregroundStyle(Color(uiColor: .secondaryLabel))
+                    }
+                    Spacer()
+                    if actions.isOpen(roll) {
+                        Image(systemName: "checkmark").accessibilityLabel("Open")
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             Menu {
