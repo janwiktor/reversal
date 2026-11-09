@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/reversal-core", "crates/reversal-cli"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 # The oldest Rust that builds this; clippy warns about anything newer.
 rust-version = "1.88"
