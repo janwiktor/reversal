@@ -201,12 +201,16 @@ function markCurrent(name) {
 // in place of the tools under it in portrait, so the frame being chosen shows above the list.
 // On a phone, the bar at the bottom picks which tools show, and closes the list. The column stays
 // as it was left; turning the device to portrait with a frame open shows the tools instead.
-const framesInPlaceOfTools = matchMedia("(max-width: 599px), (orientation: portrait)");
+const framesInPlaceOfTools = matchMedia("not all and (min-width: 600px), (orientation: portrait)");
 let framesColumn = true;
 function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
   $("frames-toggle").setAttribute("aria-expanded", String(on));
   if (!framesInPlaceOfTools.matches) framesColumn = on;
+  // On a phone the list takes the tools' place, so no group of tools reads as shown.
+  for (const button of document.querySelectorAll("#modes button")) {
+    button.setAttribute("aria-pressed", String(!on && button.dataset.mode === document.body.dataset.mode));
+  }
 }
 $("frames-toggle").addEventListener("click", () => showFrames(document.body.dataset.frames !== "open"));
 framesInPlaceOfTools.addEventListener("change", () => showFrames(framesInPlaceOfTools.matches ? !shownName : framesColumn));
@@ -216,7 +220,6 @@ $("crop-open").addEventListener("click", () => {
 for (const button of document.querySelectorAll("#modes button")) {
   button.addEventListener("click", () => {
     document.body.dataset.mode = button.dataset.mode;
-    for (const other of document.querySelectorAll("#modes button")) other.setAttribute("aria-pressed", String(other === button));
     showFrames(false);
   });
 }
@@ -1150,13 +1153,14 @@ function fit() {
   // A phone's stage is narrow, so it keeps a smaller margin around the image.
   const pad = stage.clientWidth < 600 ? 24 : 56;
   // Bars and messages pass over the image, except while cropping: the crop frame's handles
-  // reach out past the image's edge and need to be free to drag, so the image keeps clear of
-  // the crop bar. The bar grows on a touch screen, so this measures it. Twice, because the
-  // image stays centered.
+  // reach out past the image's edge and need to be free to drag, so the image keeps that far
+  // from the stage's sides and clear of the crop bar. Both grow on a touch screen, so this
+  // measures them. Twice, because the image stays centered.
   const bar = $("toolbar");
-  const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--edge-hit")) / 2 : 0;
+  const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--corner-hit")) / 2 : 0;
+  const padX = Math.max(pad, 2 * reach);
   const padY = tool === "crop" ? Math.max(pad, 2 * ($("floats").offsetTop + bar.offsetTop + bar.offsetHeight + Math.max(10, reach))) : pad;
-  const scale = Math.min((stage.clientWidth - pad) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
+  const scale = Math.min((stage.clientWidth - padX) / img.naturalWidth, (stage.clientHeight - padY) / img.naturalHeight);
   $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
   $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
 }

@@ -107,7 +107,6 @@ p, h2 { margin: 0; }
 [inert] { opacity: .45; }
 /* Icon definitions, out of the layout. */
 .sprite { position: absolute; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: #555; background-clip: padding-box; border: 3px solid transparent; border-radius: 5px; }
@@ -214,7 +213,6 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 
 /* Top bar, lined up with the columns below it. */
 #bar { grid-area: bar; display: grid; grid-template: calc(var(--bar-h) - 1px) / var(--left) auto minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
-/* Where the open frame lives: the folder gives way first, so the frame's name stays readable. */
 /* The open frame's name, which opens and closes the frames list. */
 #where { display: flex; align-items: center; min-width: 0; margin: 0 6px; }
 #frames-toggle, #choose-folder { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
@@ -323,7 +321,7 @@ body[data-frames="closed"] #roll { display: none; }
 .float-text { grid-area: text; margin: 0; overflow-wrap: anywhere; }
 .float-actions { grid-area: actions; display: flex; gap: 6px; }
 #note { -webkit-user-select: text; user-select: text; }
-#note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; color: var(--ink-quiet); }
+#note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; }
 .btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
 @media (hover: hover) { .btn.strong:hover { background: #606060; } }
 
@@ -405,7 +403,7 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 /* Portrait, and a phone: the histogram floats over the image's top right corner. Tapping it
    folds it to an icon, which brings it back; the icon turns amber while the DNG can't store
    every pixel. It steps aside while a tool works on the image, and waits for a picture. */
-@media (max-width: 599px), (orientation: portrait) {
+@media not all and (min-width: 600px), (orientation: portrait) {
   #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: 10px; padding: 6px; border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
   #histogram { height: var(--hist-h, 72px); background: none; filter: var(--veil-outline); }
   .clip { color: var(--ink); }
@@ -420,6 +418,8 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
   #hist[data-folded] #hist-fold svg { display: block; width: 18px; height: 18px; fill: none; stroke: var(--ink); stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
   #hist:has(#stored:not([hidden])) #hist-fold svg { stroke: var(--warn); }
   body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist { display: none; }
+  /* With no tool open, messages sit at the foot of the image instead, clear of the histogram. */
+  body[data-tool=""] #floats { top: auto; bottom: 10px; }
 }
 /* Portrait, from a small tablet up: the image takes the full width, and under it the tools
    in two columns, or the frames list in their place. */
@@ -430,6 +430,8 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
   body[data-frames="open"] #dock, body[data-frames="closed"] #roll { display: none; }
   #dock { display: grid; grid-template: "devhead sethead" auto "tone setup" auto "tone color" 1fr / 1fr 1fr; align-content: start; overflow-y: auto; }
   #develop { display: contents; }
+  /* With no box of its own, #develop dims through its groups. */
+  #develop[inert] > * { opacity: .45; }
   #setup-head { grid-area: sethead; }
   #setup { grid-area: setup; }
   #develop-head { grid-area: devhead; }
@@ -440,7 +442,7 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 /* A phone, held upright: the image, then one panel: the frames, or one group of tools
    chosen from the bar at the bottom. A panel of tools takes only the height it needs, up to
    about four rows, and scrolls past that, so the image keeps most of the screen. The frame tools leave the top bar for the Crop panel. */
-@media (max-width: 599px) {
+@media not all and (min-width: 600px) {
   body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
   #bar { display: contents; }
@@ -457,7 +459,7 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
   #crop-tools { flex-wrap: wrap; gap: 12px 8px; padding: 12px; background: var(--panel); }
   #crop-tools .sep { display: none; }
   /* The bar at the bottom already says Crop. */
-  #crop-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #crop-label { display: none; }
   #crop-tools .seg { flex: 1 1 100%; display: flex; }
   #crop-tools .seg button { flex: 1; }
   #crop-tools .slider { flex: 1 1 100%; max-width: none; }
@@ -466,7 +468,7 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
   body[data-mode="color"] :is(#setup-head, #setup, #tone) { display: none; }
   #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: env(safe-area-inset-bottom); }
   #modes button { flex: 1; height: 49px; background: none; border: 0; color: var(--ink-quiet); }
-  body[data-frames="closed"] #modes button[aria-pressed="true"] { color: var(--ink); font-weight: 600; }
+  #modes button[aria-pressed="true"] { color: var(--ink); font-weight: 600; }
   /* The bar names the panel. */
   #develop section h2 { display: none; }
 }
