@@ -25,6 +25,8 @@ final class Engine {
         }
     }
 
+    static let json = ["Content-Type": "application/json"]
+
     private let queue = DispatchQueue(label: "engine", qos: .userInitiated)
 
     /// Opens `folder` in place of the one that was open, after the requests already waiting.
@@ -71,6 +73,9 @@ final class EngineSchemeHandler: NSObject, WKURLSchemeHandler {
     private let engine: Engine
     /// Requests the web view still waits for. Answering one it has stopped raises an exception.
     private var waiting = Set<ObjectIdentifier>()
+    /// Set while another folder is being opened. The page on screen still belongs to the last
+    /// one, and what it asked now would be answered by the new folder, so it gets no answer.
+    var paused = false
 
     init(engine: Engine) {
         self.engine = engine
@@ -81,6 +86,7 @@ final class EngineSchemeHandler: NSObject, WKURLSchemeHandler {
         guard let url = request.url,
             let parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
         else { return task.didFailWithError(URLError(.badURL)) }
+        guard !paused else { return task.didFailWithError(URLError(.cancelled)) }
         // As in a request line, still percent-encoded: the engine decodes it.
         let target = parts.percentEncodedPath + (parts.percentEncodedQuery.map { "?\($0)" } ?? "")
         waiting.insert(ObjectIdentifier(task))

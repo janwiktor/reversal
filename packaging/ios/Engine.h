@@ -15,9 +15,10 @@ typedef struct {
   size_t body_len;
 } ReversalResponse;
 
-/// Opens `folder` in place of the one that was open. If that fails, no folder is open.
+/// Opens `folder` in place of the one that was open, as reversal_engine_close would close it.
+/// If that fails, no folder is open.
 bool reversal_engine_open(const char *folder);
-/// Closes the folder. A save in progress finishes first.
+/// Closes the folder. Frames being saved finish; the rest of a save doesn't start.
 void reversal_engine_close(void);
 /// Answers one request from the page: `method` is GET or POST, `url` the path and query, and
 /// `headers` one "Name: value" per line. Waits for a request that's being answered. Never null.

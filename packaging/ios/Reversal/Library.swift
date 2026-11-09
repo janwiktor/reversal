@@ -64,6 +64,7 @@ final class Importer {
         let copied: Int
         let skipped: Int
         let failed: [String]
+        let canceled: Bool
     }
 
     private let lock = NSLock()
@@ -101,7 +102,8 @@ final class Importer {
             } catch {
                 failed.append(error.localizedDescription)
             }
-            let result = Result(roll: roll, copied: copied, skipped: skipped, failed: failed)
+            let result = Result(
+                roll: roll, copied: copied, skipped: skipped, failed: failed, canceled: self.isCanceled)
             DispatchQueue.main.async { done(result) }
         }
     }
@@ -143,11 +145,13 @@ final class Importer {
     private static func copyCoordinated(_ file: URL, named name: String, into roll: URL) throws -> Bool {
         let fm = FileManager.default
         let size = { (url: URL) in try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize }
-        // Same name and size: already here. Same name only: another frame, as on two cards.
+        // Same name and content: already here. Same name only: another frame, as on two cards
+        // or in two of a card's folders. Uncompressed raws all have one size, so the size alone
+        // can't tell, and a frame taken for another would be left on a card that gets wiped.
         var target = roll.appendingPathComponent(name)
         var number = 1
         while fm.fileExists(atPath: target.path) {
-            if size(target) == size(file) { return false }
+            if size(target) == size(file), fm.contentsEqual(atPath: target.path, andPath: file.path) { return false }
             number += 1
             let stem = (name as NSString).deletingPathExtension
             let ext = (name as NSString).pathExtension

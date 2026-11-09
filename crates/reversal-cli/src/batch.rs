@@ -157,8 +157,11 @@ impl Batch {
                     report(warning);
                 }
                 progress.done += 1;
-                progress.saved_paths.push(done.path.clone());
-                progress.last_path = Some(done.path);
+                // Work that writes no file of its own, such as reading a roll, has no path.
+                if !done.path.is_empty() {
+                    progress.saved_paths.push(done.path.clone());
+                    progress.last_path = Some(done.path);
+                }
             }
             Err(message) => {
                 report(message);

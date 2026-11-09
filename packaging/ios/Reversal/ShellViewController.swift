@@ -18,6 +18,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     private var web: WKWebView!
     private let engine = Engine()
+    private lazy var pageRequests = EngineSchemeHandler(engine: engine)
     private var folder: URL?
     /// The folder outside the app that we hold access to.
     private var scoped: URL?
@@ -45,7 +46,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
         let config = WKWebViewConfiguration()
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "reversal")
-        config.setURLSchemeHandler(EngineSchemeHandler(engine: engine), forURLScheme: Engine.scheme)
+        config.setURLSchemeHandler(pageRequests, forURLScheme: Engine.scheme)
         config.defaultWebpagePreferences.preferredContentMode = .desktop
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
@@ -89,8 +90,10 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     private func show(folder url: URL, done: @escaping (Bool) -> Void = { _ in }) {
         let access = url.startAccessingSecurityScopedResource()
         busy = false
+        pageRequests.paused = true
         engine.open(url) { [weak self] opened in
             guard let self else { return }
+            self.pageRequests.paused = false
             // The engine used the folder that was open until now.
             self.scoped?.stopAccessingSecurityScopedResource()
             self.scoped = nil
@@ -134,17 +137,36 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: finish)
     }
 
-    /// Before the engine stops: ask if it has work running, then let the page store its edits.
+    /// Before another folder opens: ask if this one has work running, stop it, then let the
+    /// page store its edits.
     private func leaveFolder(then proceed: @escaping () -> Void) {
         guard busy else { return rememberEdits(then: proceed) }
         let warning = UIAlertController(
             title: "Reversal is still working",
-            message: "Stopping now leaves the frames in progress unfinished.", preferredStyle: .alert)
+            message: "Stopping now finishes the frames in progress and leaves the rest.", preferredStyle: .alert)
         warning.addAction(UIAlertAction(title: "Keep Working", style: .cancel))
         warning.addAction(UIAlertAction(title: "Stop", style: .destructive) { [weak self] _ in
-            self?.rememberEdits(then: proceed)
+            self?.stopWork { self?.rememberEdits(then: proceed) }
         })
         top.present(warning, animated: true)
+    }
+
+    /// Stops the engine's work and waits for the frames in progress. They still write to this
+    /// folder, which the app may lose its access to once another one opens.
+    private func stopWork(then proceed: @escaping () -> Void) {
+        let stopping = UIAlertController(title: "Stopping…", message: "Finishing the frames in progress", preferredStyle: .alert)
+        top.present(stopping, animated: true) { [weak self] in
+            self?.engine.request("POST", "/api/export/cancel", headers: Engine.json, body: Data("{}".utf8)) { _ in
+                self?.whenIdle { stopping.dismiss(animated: true, completion: proceed) }
+            }
+        }
+    }
+
+    private func whenIdle(_ proceed: @escaping () -> Void) {
+        engine.request("GET", "/api/export/status") { [weak self] response in
+            guard let self, response.json?["running"] as? Bool == true else { return proceed() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.whenIdle(proceed) }
+        }
     }
 
     private func endBackgroundWork() {
@@ -241,14 +263,22 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         let importer = Importer()
         let panel = UIAlertController(title: "Importing", message: "Finding scans…", preferredStyle: .alert)
         panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in importer.cancel() })
-        top.present(panel, animated: true)
+        // Started once the panel is up: one that's still arriving can't be dismissed.
+        top.present(panel, animated: true) { [weak self] in
+            self?.run(importer, sources, rollName: rollName, panel: panel)
+        }
+    }
+
+    private func run(_ importer: Importer, _ sources: [URL], rollName: String, panel: UIAlertController) {
         importer.run(
             sources: sources, rollName: rollName,
             progress: { finished, total in panel.message = "\(finished) of \(total)" },
             done: { [weak self] result in
                 guard let self else { return }
                 let finish = {
-                    if !result.failed.isEmpty {
+                    if result.canceled && result.copied + result.skipped == 0 {
+                        // Stopped before anything arrived: nothing to say, and nothing to open.
+                    } else if !result.failed.isEmpty {
                         let list = result.failed.joined(separator: "\n")
                         self.top.present(self.alert("Could not import \(result.failed.count) files", list), animated: true)
                     } else if result.copied + result.skipped == 0 {
@@ -267,10 +297,12 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     // MARK: Getting DNGs out
 
-    /// The DNGs of the last save, from the engine.
+    /// The DNGs of the last save, from the engine. None while the engine is on to other work.
     private func savedDngs(_ done: @escaping ([URL]) -> Void) {
         engine.request("GET", "/api/export/status") { response in
-            let paths = response.json?["saved_paths"] as? [String] ?? []
+            let status = response.json
+            let finishedSave = status?["task"] as? String == "save" && status?["running"] as? Bool == false
+            let paths = finishedSave ? status?["saved_paths"] as? [String] ?? [] : []
             done(paths.map { URL(fileURLWithPath: $0) })
         }
     }

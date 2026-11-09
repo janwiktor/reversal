@@ -48,7 +48,7 @@ pub unsafe extern "C" fn reversal_engine_open(folder: *const c_char) -> bool {
     }
 }
 
-/// Close the folder. A save in progress finishes first.
+/// Close the folder. Frames being saved finish; the rest of a save doesn't start.
 #[no_mangle]
 pub extern "C" fn reversal_engine_close() {
     *lock(&ENGINE) = None;

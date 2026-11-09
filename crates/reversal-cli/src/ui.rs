@@ -229,10 +229,17 @@ impl Engine {
         Ok(Engine { state })
     }
 
-    /// Answers one request. A save it started keeps running in the background, also after the
-    /// engine is dropped.
+    /// Answers one request. A save it started runs in the background.
     pub fn respond(&mut self, request: &Request) -> Response {
         self.state.respond(request)
+    }
+}
+
+/// Closing a folder stops its background work: the frames in progress finish, and the rest
+/// don't start. Nobody would see them, and the next folder's work would run beside them.
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.state.batch.cancel();
     }
 }
 
@@ -867,6 +874,58 @@ mod tests {
         );
         let put = engine.respond(&request(Method::Other, "/api/files", &[], ""));
         assert_eq!(put.status, 404);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// One exchange with the server over a socket: (status line, headers and body).
+    fn exchange(port: u16, request: &[u8]) -> String {
+        use std::io::Write;
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        // The server may answer and close before it has read all of a body that's too large.
+        let _ = stream.write_all(request);
+        let mut reply = Vec::new();
+        let _ = stream.read_to_end(&mut reply);
+        String::from_utf8_lossy(&reply).into_owned()
+    }
+
+    #[test]
+    fn the_server_carries_requests_and_answers_across_http() {
+        let dir = std::env::temp_dir().join(format!("reversal-http-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (server, mut state, port) = bind(dir.clone(), 0).unwrap();
+        let server = Arc::new(server);
+        let serving = server.clone();
+        let thread = std::thread::spawn(move || state.run(&serving));
+        let host = format!("Host: 127.0.0.1:{port}\r\nConnection: close\r\n");
+
+        let version = exchange(
+            port,
+            format!("GET /api/version HTTP/1.1\r\n{host}\r\n").as_bytes(),
+        );
+        assert!(version.starts_with("HTTP/1.1 200"), "{version}");
+        assert!(version.contains("Content-Type: application/json"));
+        assert!(version.contains("X-Content-Type-Options: nosniff"));
+        assert!(version.contains(env!("CARGO_PKG_VERSION")));
+
+        // A POST's headers and body arrive, and an error keeps its status and JSON shape.
+        let post = |body: &[u8]| {
+            let head = format!(
+                "POST /api/roll/vote HTTP/1.1\r\n{host}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            exchange(port, &[head.as_bytes(), body].concat())
+        };
+        let voted = post(br#"{"bases":[[0.5,0.4,0.3]],"readings":[]}"#);
+        assert!(voted.starts_with("HTTP/1.1 200"), "{voted}");
+        assert!(voted.contains("base_rgb"));
+        let empty = post(br#"{"bases":[],"readings":[]}"#);
+        assert!(empty.starts_with("HTTP/1.1 400"), "{empty}");
+        assert!(empty.contains(r#"{"error":"select at least one frame"}"#));
+        let large = post(&vec![b' '; MAX_BODY_BYTES + 1]);
+        assert!(large.starts_with("HTTP/1.1 413"), "{large}");
+
+        server.unblock();
+        thread.join().unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
 
