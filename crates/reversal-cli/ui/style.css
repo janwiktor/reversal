@@ -382,8 +382,10 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 /* A message with no buttons is its words alone, with even margins. */
 #note[data-bare] { padding-right: 12px; column-gap: 0; }
 #note[data-bare] .float-actions { display: none; }
-/* Read aloud and reached with the keyboard, out of the grid. */
+/* Read aloud and reached with the keyboard, out of the grid; it shows over the box's right end
+   while it has the keyboard's focus. */
 #note-dismiss { position: absolute; }
+#note-dismiss:focus-visible { top: 50%; right: 6px; width: auto; height: var(--control-h); overflow: visible; clip-path: none; transform: translateY(-50%); }
 /* Growing to longer words, the box uncovers them in their final layout through a soft edge, which
    the script narrows to nothing as the box arrives. */
 @property --edge { syntax: "<length>"; inherits: false; initial-value: 0px; }

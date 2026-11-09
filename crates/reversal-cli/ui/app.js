@@ -63,6 +63,8 @@ const motion = (name) => ({ duration: cssTime(name), easing: token("--ease") });
 // stands, and only the newest cleans up, since an ended one can still report finishing in the frame
 // a newer one starts. Flags mark the element for the stylesheet while it moves, a tag says what
 // kind of motion runs, and `after` runs as it ends, told whether it finished or was cut short.
+// Keyframes end where the element rests without them, so a motion ended early, finished at once
+// or skipped for reduced motion lands in the same place.
 const motions = new WeakMap();
 function move(el, channel, keyframes, options, { flags = [], tag = "", after } = {}) {
   endMotion(el, channel);
@@ -74,7 +76,7 @@ function move(el, channel, keyframes, options, { flags = [], tag = "", after } =
   runs.set(channel, { animation, flags, tag, after });
   animation.onfinish = () => { if (runs.get(channel)?.animation === animation) endMotion(el, channel, true); };
 }
-// Ends an element's motion on one channel, or on all of them, where it stands.
+// Ends an element's motion on one channel, or on all of them: where it stands, or as finished.
 function endMotion(el, channel, finished = false) {
   const runs = motions.get(el);
   for (const [name, run] of [...(runs ?? [])]) {
@@ -86,10 +88,9 @@ function endMotion(el, channel, finished = false) {
   }
 }
 const motionTag = (el, channel) => motions.get(el)?.get(channel)?.tag;
-// Fades an element in or out from wherever it is now. Going out, it hides at the end, then `then`
-// runs; brought back meanwhile, it stays.
-function fadeIn(el) {
-  const from = el.hidden ? 0 : Number(getComputedStyle(el).opacity);
+// Fades an element in or out from wherever it is now, or in from `from`. Going out, it hides at the
+// end, then `then` runs; brought back meanwhile, it stays.
+function fadeIn(el, from = el.hidden ? 0 : Number(getComputedStyle(el).opacity)) {
   el.hidden = false;
   el.style.opacity = "";
   if (from < 1) move(el, "fade", { opacity: [from, 1] }, motion("--fade"));
@@ -136,7 +137,7 @@ function slidePanels(change) {
 // from Details.
 const READ_MS = 3500, READ_MS_PER_CHAR = 40, READ_FREE_CHARS = 40, READ_MAX_MS = 8000;
 // A click starts a dismissal that a second click, selecting a word, takes back.
-const DOUBLE_CLICK_MS = 200;
+const DOUBLE_CLICK_MS = 400;
 let noteTimer = 0, noteStays = false, dismissTimer = 0;
 function status(text = "", { stay = false, reveal = false } = {}) {
   const [head, ...rest] = text.split("\n");
@@ -360,10 +361,11 @@ function pressModes() {
 }
 $("frames-toggle").addEventListener("click", () => slidePanels(() => showFrames(document.body.dataset.frames !== "open")));
 framesInPlaceOfTools.addEventListener("change", () => showFrames(framesInPlaceOfTools.matches ? !shownName : framesColumn));
-// A motion measured for one layout ends when the layout changes, and the histogram's rows follow.
+// A motion measured for one layout finishes at once when the layout changes, so what was going
+// goes, and the histogram's rows follow.
 for (const layout of [phoneLayout, framesInPlaceOfTools]) {
   layout.addEventListener("change", () => {
-    for (const el of [document.body, $("bar"), $("hist"), $("note")]) endMotion(el);
+    for (const el of [document.body, $("bar"), $("hist"), $("note")]) endMotion(el, "", true);
     showHistRows(histRows.clip, histRows.stored, { now: true });
   });
 }
@@ -415,7 +417,7 @@ function foldHist(folded) {
     tag: "fold",
     after: (finished) => {
       body.style.width = "";
-      if (finished && folded) move(icon, "fade", { opacity: [0, 1] }, motion("--fade"));
+      if (finished && folded) fadeIn(icon, 0);
     },
   });
 }
@@ -434,11 +436,13 @@ function histStops() {
 // The side panel's histogram always shows its numbers, and its warning fades in over the
 // histogram, in the stylesheet. `now` sets the rows at once, ending what's underway.
 const histRows = { clip: false, stored: false };
+// The floating histogram steps aside while a tool works on the image, or while no image shows.
+const STEPPED_ASIDE = 'body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist';
 function showHistRows(clip, stored, { now = false } = {}) {
   Object.assign(histRows, { clip, stored });
   const hist = $("hist"), floating = framesInPlaceOfTools.matches;
   const rows = [[$("clip"), clip || !floating], [$("stored"), stored]];
-  const shown = floating && !hist.hasAttribute("data-folded") && hist.getClientRects().length > 0;
+  const shown = floating && !hist.hasAttribute("data-folded") && hist.getClientRects().length > 0 && !hist.matches(STEPPED_ASIDE);
   if (now || !shown || motionTag(hist, "size") === "fold") {
     hist.style.height = "";
     for (const [el, on] of rows) {
@@ -451,17 +455,24 @@ function showHistRows(clip, stored, { now = false } = {}) {
   // Words that are wanted again come back from where their fade-out reached.
   for (const [el, on] of rows) if (on && motionTag(el, "fade") === "out") fadeIn(el);
   const going = rows.filter(([el, on]) => !on && !el.hidden).map(([el]) => el);
-  if (going.length) {
+  // Words still waiting unseen go at once; only shown ones fade.
+  const dropped = going.filter((el) => el.style.opacity === "0");
+  for (const el of dropped) { el.hidden = true; el.style.opacity = ""; }
+  const fading = going.filter((el) => !el.hidden);
+  if (fading.length) {
     // The box stops where it is and holds there while the words go.
     const height = hist.getBoundingClientRect().height;
     endMotion(hist, "size");
     hist.style.height = `${height}px`;
-    for (const el of going) fadeOut(el, () => showHistRows(histRows.clip, histRows.stored));
+    for (const el of fading) fadeOut(el, () => showHistRows(histRows.clip, histRows.stored));
     return;
   }
   // Words wait unseen until the box has room for them, including any whose wait was cut short.
   const coming = rows.filter(([el, on]) => on && el.hidden).map(([el]) => el);
   const waiting = rows.filter(([el, on]) => on && !el.hidden && el.style.opacity === "0").map(([el]) => el);
+  // Nothing new: a running grow or shrink carries on, and a box at rest stays.
+  const resizing = motionTag(hist, "size") === "rows";
+  if (!dropped.length && !coming.length && (resizing || (!waiting.length && !hist.style.height))) return;
   const from = hist.getBoundingClientRect().height;
   endMotion(hist, "size");
   hist.style.height = "";
@@ -1507,10 +1518,11 @@ function histogram(img, storedClipped) {
   $("clip-low").classList.toggle("over", low / n > 0.005);
   $("clip-high").classList.toggle("over", high / n > 0.005);
   $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
-  showHistRows(low / n > 0.005 || high / n > 0.005, storedClipped >= 0.0005);
   // "Clipped" above is only the preview's and the DNG keeps it; these pixels are gone for good.
+  // The words go in first, so the box grows to their height.
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of highlights beyond DNG range`;
   $("stored").title = "Brighter than the DNG can store. Lower Exposure to keep them.";
+  showHistRows(low / n > 0.005 || high / n > 0.005, storedClipped >= 0.0005);
 }
 
 api("/api/version").then((r) => r.json()).then(({ version, commit }) => {
