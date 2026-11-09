@@ -65,9 +65,19 @@
   /* Motion: panels slide and what appears fades, briefly and without bounce. */
   --ease: cubic-bezier(.4, 0, .2, 1);
   --slide: 220ms;
+  --slide-long: 280ms;  /* a motion with several steps */
   --fade: 150ms;
+  /* Room around the image, and around what floats over it. */
+  --stage-edge: 28px;
+  --float-gap: 10px;
+  /* The crop frame's corner handles, which reach half their size past the frame. */
+  --corner-hit: 28px;
+  /* The soft edge through which a growing message box uncovers its words. */
+  --soft-edge: 28px;
+  /* Inside the floating histogram's box. */
+  --hist-pad: 6px;
 }
-@media (prefers-reduced-motion: reduce) { :root { --slide: 0s; --fade: 0s; } }
+@media (prefers-reduced-motion: reduce) { :root { --slide: 0s; --slide-long: 0s; --fade: 0s; } }
 /* Fingers need 44px targets. A mouse doesn't, and at 44px the desktop's Develop panel would
    scroll and the frame list would show half as many frames, so this is for touch only. Any
    touch screen counts, also a laptop's next to its trackpad. */
@@ -92,6 +102,7 @@
     --row-gap: 0px;
     --slider-label-h: 16px;
     --slider-track-h: 34px;
+    --corner-hit: 44px;
     /* Under 16px, iOS zooms the page in when a field takes focus. */
     --val-text: 16px;
   }
@@ -289,9 +300,16 @@ body[data-frames="closed"] { grid-template-columns: 0 minmax(0, 1fr) var(--right
 .float .dot { margin-left: 4px; box-shadow: 0 0 0 1px rgb(0 0 0 / .45); }
 
 /* Image: JS sizes #view to fit, so rotation always stays centered. */
-/* The script sets the stage's padding: the margin around the image, and room above it for an open
-   tool's bar. The image eases into that room, after the bar has faded on closing. */
-#stage { grid-area: stage; position: relative; background: var(--surround); display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; transition: padding var(--slide) var(--ease); }
+/* The stage's padding is the room around the image: a margin, room for the crop frame's handles to
+   reach past the image's edge, and above it room for an open tool's bar, whose size the script
+   sets as --bar-room. The image eases into what's left, after the bar has faded on closing. */
+#stage {
+  --reach: 0px;
+  grid-area: stage; position: relative; background: var(--surround); display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; overflow: hidden;
+  padding: max(var(--stage-edge), calc(var(--bar-room, 0px) + max(var(--float-gap), var(--reach)))) max(var(--stage-edge), var(--reach)) max(var(--stage-edge), var(--reach));
+  transition: padding var(--slide) var(--ease);
+}
+body[data-tool="crop"] #stage { --reach: calc(var(--corner-hit) / 2); }
 body[data-tool=""] #stage { transition-delay: var(--fade); }
 #view { position: relative; flex: none; }
 #photo { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
@@ -308,7 +326,7 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 #crop-layer { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
 #crop-dim { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 #crop-hole { position: absolute; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .58); }
-#crop-box { --mark: 3px; --corner-hit: 28px; --edge-hit: 18px; position: absolute; outline: 1px solid var(--crop); outline-offset: 0; cursor: move; }
+#crop-box { --mark: 3px; --edge-hit: 18px; position: absolute; outline: 1px solid var(--crop); outline-offset: 0; cursor: move; }
 #crop-box.fills { cursor: crosshair; }
 .crop-h { position: absolute; padding: 0; border: 0; border-radius: 0; background: none; }
 .crop-h i { position: absolute; pointer-events: none; }
@@ -337,14 +355,14 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 .crop-h.se i, .crop-h.sw i { bottom: var(--inset); border-bottom-width: var(--mark); }
 .crop-h.nw i, .crop-h.sw i { left: var(--inset); border-left-width: var(--mark); }
 .crop-h.ne i, .crop-h.se i { right: var(--inset); border-right-width: var(--mark); }
-@media (any-pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
+@media (any-pointer: coarse) { #crop-box { --edge-hit: 36px; } }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
 /* What floats over the image shares one look: a tool's bar at the top, in room the image makes
    for it, and messages at the foot, which pass over the image. They're see-through. Only the
    bars take pointers, so the image stays draggable around them. */
 .floats { position: absolute; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: min(560px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-#floats { top: 10px; }
-#messages { bottom: 10px; }
+#floats { top: var(--float-gap); }
+#messages { bottom: var(--float-gap); }
 .float { pointer-events: auto; max-width: 100%; display: grid; grid-template: "text actions" auto "more more" auto / minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 6px 6px 12px; border-radius: 6px; }
 .float { background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
 /* A tool's bar fades in and out, keeping its words while it goes; the script fades messages. */
@@ -362,13 +380,15 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 .float-actions { grid-area: actions; display: flex; gap: 6px; }
 #note { -webkit-user-select: text; user-select: text; }
 /* A message with no buttons is its words alone, with even margins. */
-#note:not(:has(.float-actions button:not([hidden]))) { padding-right: 12px; column-gap: 0; }
-#note:not(:has(.float-actions button:not([hidden]))) .float-actions { display: none; }
+#note[data-bare] { padding-right: 12px; column-gap: 0; }
+#note[data-bare] .float-actions { display: none; }
+/* Read aloud and reached with the keyboard, out of the grid. */
+#note-dismiss { position: absolute; }
 /* Growing to longer words, the box uncovers them in their final layout through a soft edge, which
    the script narrows to nothing as the box arrives. */
 @property --edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
 #note-words { display: block; }
-#note[data-resizing] #note-text { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); }
+#note[data-moving] #note-text { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); }
 #note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; }
 .btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
 @media (hover: hover) { .btn.strong:hover { background: #606060; } }
@@ -376,7 +396,9 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 /* Histogram: in landscape, the top of the side panel. */
 #hist { grid-area: hist; position: relative; padding: 10px; background: var(--panel); border-left: 1px solid var(--seam); }
 #hist-body { position: relative; container-type: inline-size; }
-#stored { margin: 4px 0 0; color: var(--warn); font-size: 11px; line-height: 14px; }
+/* In the side panel, the range warning lies over the top of the histogram, across its width, so it
+   appears without moving a slider being dragged. It fades in and out. */
+#stored { position: absolute; top: 4px; left: 4px; right: 4px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
 #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
 .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
@@ -468,18 +490,21 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   #where { margin: 0; padding: 0 6px; }
   #where, #frame-tools, #save { align-self: stretch; position: relative; z-index: 1; background: var(--bar); }
   #crop-tools { align-self: end; }
-  #bar[data-sliding] { overflow: hidden; }
-  #bar[data-sliding] #crop-tools { display: flex; }
+  #bar[data-moving] { overflow: hidden; }
+  #bar[data-moving] #crop-tools { display: flex; }
 }
 /* Portrait, and a phone: the histogram floats over the image's top right corner. Tapping it
    folds it to an icon, which brings it back; the icon turns amber while the DNG can't store
    every pixel. It steps aside while a tool works on the image, and waits for a picture. */
 @media not all and (min-width: 600px), (orientation: portrait) {
-  #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: 10px; padding: 6px; border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
+  #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: var(--float-gap); padding: var(--hist-pad); border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
   #histogram { height: var(--hist-h, 72px); background: none; filter: var(--veil-outline); }
   .clip { color: var(--ink); }
   /* Clipping numbers show only when there's clipping to report. */
-  .clip:not(:has(.over)), .clip span:first-child { display: none; }
+  /* The clipping numbers and the range warning show only when there's something to report, and
+     the script fades them as the box makes room for them or gives it back. */
+  .clip span:first-child { display: none; }
+  #stored { position: static; margin-top: 4px; padding: 0; background: none; transition: none; }
   #hist-fold { display: block; position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; background: none; border: 0; border-radius: 6px; }
   #hist-fold svg { display: none; }
   #hist[data-folded] { width: auto; padding: 0; }
@@ -489,12 +514,12 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   #hist:has(#stored:not([hidden])) #hist-fold svg { color: var(--warn); }
   /* Folding and opening, the box grows from or shrinks into its corner, with the histogram held
      at its open size against the corner and clipped by the moving edges. */
-  #hist[data-resizing] { overflow: hidden; }
-  #hist[data-resizing] #hist-body { display: block; position: absolute; top: 6px; right: 6px; }
+  #hist[data-moving] { overflow: hidden; }
+  #hist[data-folding] #hist-body { display: block; position: absolute; top: var(--hist-pad); right: var(--hist-pad); }
   /* Folding, the icon waits unseen in the corner the box shrinks into, and the script fades it in
      once the box has arrived. */
-  #hist[data-folded][data-resizing] #hist-fold { position: absolute; inset: 0 0 auto auto; z-index: 1; }
-  #hist[data-folded][data-resizing] #hist-fold svg { opacity: 0; }
+  #hist[data-folded][data-folding] #hist-fold { position: absolute; inset: 0 0 auto auto; z-index: 1; }
+  #hist[data-folded][data-folding] #hist-fold svg { opacity: 0; }
   body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist { display: none; opacity: 0; }
   /* It fades as it steps aside and comes back. */
   #hist { transition-property: opacity, display; transition-duration: var(--fade); transition-timing-function: var(--ease); transition-behavior: allow-discrete; }
@@ -522,6 +547,8 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
    chosen from the bar at the bottom. A panel of tools takes only the height it needs, up to
    about four rows, and scrolls past that, so the image keeps most of the screen. The frame tools leave the top bar for the Crop panel. */
 @media not all and (min-width: 600px) {
+  /* A phone's stage is narrow, so it keeps a smaller margin. */
+  :root { --stage-edge: 12px; }
   body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
   #bar { display: contents; }
@@ -552,7 +579,7 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   #modes button[aria-pressed="true"] { color: #fff; font-weight: 600; }
   /* While the panel slides, the script moves the edge between it and the image; rows the panel
      hasn't reached yet take its color, so that edge is the only one that moves. */
-  body[data-sliding] { background: var(--panel); }
+  body[data-moving] { background: var(--panel); }
   /* The bar names the panel. */
   #develop section h2 { display: none; }
 }

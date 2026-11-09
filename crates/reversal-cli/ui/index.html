@@ -91,6 +91,7 @@
       <p class="float-text" id="note-text"><span id="note-words"></span></p>
       <span class="float-actions"><button type="button" class="btn" id="note-details" aria-expanded="false" aria-controls="note-more" hidden>Details</button><button type="button" class="btn" id="reveal" hidden>Show in Finder</button></span>
       <div id="note-more" hidden></div>
+      <button type="button" class="sr-only" id="note-dismiss">Dismiss</button>
     </div>
   </div>
   <p id="message">Choose a frame to convert it</p>
@@ -101,8 +102,9 @@
 <section id="hist" aria-label="Histogram">
   <div id="hist-body">
     <canvas id="histogram" width="504" height="176" aria-label="RGB histogram of the preview"></canvas>
-    <div class="clip"><span title="In the preview only. The DNG keeps these tones.">Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span></span></div>
-    <!-- Under the clipping numbers, in the side panel as over the image. -->
+    <div class="clip" id="clip"><span title="In the preview only. The DNG keeps these tones.">Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span></span></div>
+    <!-- Over the top of the histogram in the side panel, so it appears without moving a slider
+         being dragged; under the clipping numbers where the histogram floats. -->
     <p id="stored" hidden></p>
   </div>
   <button type="button" id="hist-fold" aria-expanded="true" aria-controls="hist-body" title="Hide or show the histogram" aria-label="Histogram"><svg aria-hidden="true"><use href="#i-hist"/></svg></button>

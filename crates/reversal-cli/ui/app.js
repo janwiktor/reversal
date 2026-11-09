@@ -42,13 +42,106 @@ const adj = () => current.settings.adjust;
 const hints = () => current.settings.hints;
 // The film type the frame converts as, or the one just chosen while it's measured for it.
 const filmNow = () => current.pendingFilm ?? current.settings.estimate.film;
+
+// ---------- Motion ----------
+// Motion is brief and only shows what changed: a box that changes size eases there, and what
+// appears or goes fades. The stylesheet animates what ends in one of its own states: a tool's bar,
+// the image and the tools' drawings, the range warning over the side panel's histogram, dialogs,
+// the frames column, and the room the image makes for a tool's bar. The script animates what
+// depends on measuring, all through move(): the panels' edge, a message's box, the floating
+// histogram's box and the words that come and go in them. With reduced motion set, both change at
+// once.
+const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const phoneLayout = matchMedia("not all and (min-width: 600px)");
+const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+// A time token in milliseconds, whether written in s or ms.
+const cssTime = (name) => { const v = token(name); return (parseFloat(v) || 0) * (v.endsWith("ms") ? 1 : 1000); };
+const cssPx = (name) => parseFloat(token(name)) || 0;
+const motion = (name) => ({ duration: cssTime(name), easing: token("--ease") });
+
+// One motion per element and channel, such as "size" or "fade": a new one ends the last where it
+// stands, and only the newest cleans up, since an ended one can still report finishing in the frame
+// a newer one starts. Flags mark the element for the stylesheet while it moves, a tag says what
+// kind of motion runs, and `after` runs as it ends, told whether it finished or was cut short.
+const motions = new WeakMap();
+function move(el, channel, keyframes, options, { flags = [], tag = "", after } = {}) {
+  endMotion(el, channel);
+  if (stillMotion.matches) { after?.(true); return; }
+  const runs = motions.get(el) ?? new Map();
+  motions.set(el, runs);
+  for (const flag of flags) el.dataset[flag] = "";
+  const animation = el.animate(keyframes, options);
+  runs.set(channel, { animation, flags, tag, after });
+  animation.onfinish = () => { if (runs.get(channel)?.animation === animation) endMotion(el, channel, true); };
+}
+// Ends an element's motion on one channel, or on all of them, where it stands.
+function endMotion(el, channel, finished = false) {
+  const runs = motions.get(el);
+  for (const [name, run] of [...(runs ?? [])]) {
+    if (channel && name !== channel) continue;
+    runs.delete(name);
+    run.animation.cancel();
+    for (const flag of run.flags) if (![...runs.values()].some((r) => r.flags.includes(flag))) delete el.dataset[flag];
+    run.after?.(finished);
+  }
+}
+const motionTag = (el, channel) => motions.get(el)?.get(channel)?.tag;
+// Fades an element in or out from wherever it is now. Going out, it hides at the end, then `then`
+// runs; brought back meanwhile, it stays.
+function fadeIn(el) {
+  const from = el.hidden ? 0 : Number(getComputedStyle(el).opacity);
+  el.hidden = false;
+  el.style.opacity = "";
+  if (from < 1) move(el, "fade", { opacity: [from, 1] }, motion("--fade"));
+  else endMotion(el, "fade");
+}
+function fadeOut(el, then) {
+  if (el.hidden || motionTag(el, "fade") === "out") return;
+  const from = Number(getComputedStyle(el).opacity);
+  move(el, "fade", { opacity: [from, 0] }, motion("--fade"), {
+    tag: "out",
+    after: (finished) => { if (finished) { el.hidden = true; then?.(); } },
+  });
+}
+
+// A panel that changes height slides there rather than jumping. The edge it shares with the image
+// eases to its new place and the panel's contents ride that edge, so the image resizes smoothly
+// with it. What a panel shows changes at once: only the edge moves.
+function slidePanels(change) {
+  // On a phone the panels sit under the image in the page's grid. Elsewhere only the crop bar,
+  // under the top bar's row, changes height; the frames column slides by itself.
+  const grid = phoneLayout.matches ? document.body : $("bar");
+  const rows = () => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
+  // From where the edge is now, mid-slide or not.
+  const from = rows();
+  endMotion(grid, "size");
+  change();
+  const to = rows();
+  const n = to.length;
+  if (from.length !== n || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
+  // The page's rows are the bar, the image, the panel rows and the tool bar. Only the image's row
+  // moves: the panel rows under it fill from the top at their new heights and the last takes what's
+  // left, so the panel's contents ride its top edge and the tool bar covers what doesn't fit yet.
+  // The crop bar's two rows both move, and its contents ride their bottom edge.
+  const template = grid === document.body
+    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === n - 2 ? "minmax(0px, 1fr)" : i > 1 && i < n - 1 ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
+    : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
+  move(grid, "size", { gridTemplateRows: [template(false), template(true)] }, motion("--slide"), { flags: ["moving"] });
+}
+
+// ---------- Messages ----------
 // Everything the app has to say floats at the foot of the image, one message at a time. A message
-// that needs reading stays until dismissed or replaced; anything else fades. A click or tap on it
-// dismisses it, and anything longer than a line opens from Details.
-let noteTimer = 0, noteStays = false;
+// that needs reading stays until dismissed or replaced; anything else fades once it has been read,
+// later for longer words. A click or tap on it dismisses it, and anything longer than a line opens
+// from Details.
+const READ_MS = 3500, READ_MS_PER_CHAR = 40, READ_FREE_CHARS = 40, READ_MAX_MS = 8000;
+// A click starts a dismissal that a second click, selecting a word, takes back.
+const DOUBLE_CLICK_MS = 200;
+let noteTimer = 0, noteStays = false, dismissTimer = 0;
 function status(text = "", { stay = false, reveal = false } = {}) {
   const [head, ...rest] = text.split("\n");
   clearTimeout(noteTimer);
+  clearTimeout(dismissTimer);
   noteStays = !!text && (stay || rest.length > 0);
   // No message hides the last one, which keeps its words while it fades.
   if (!text) { hideNote(); return; }
@@ -60,70 +153,48 @@ function status(text = "", { stay = false, reveal = false } = {}) {
     showDetails(false);
     $("note-details").hidden = !rest.length;
     $("reveal").hidden = !reveal;
+    // Without buttons, a message is its words alone.
+    $("note").toggleAttribute("data-bare", !rest.length && !reveal);
   });
-  if (!noteStays) fadeLater();
+  if (!noteStays) fadeLater(Math.min(READ_MAX_MS, READ_MS + READ_MS_PER_CHAR * Math.max(0, head.length - READ_FREE_CHARS)));
 }
 // A message fades in, and one that follows it while it shows keeps the box: the words change at
 // once and the box takes their height, then eases to their width. Growing, it uncovers the words
-// in their final layout through a soft edge, which clears once it arrives.
-let noteFade = null, noteResize = null;
-const motion = (name) => ({ duration: cssTime(name), easing: getComputedStyle(document.documentElement).getPropertyValue("--ease").trim() });
+// in their final layout through a soft edge, which clears as it arrives.
 function showNote(write) {
   const note = $("note");
-  const showing = !note.hidden && !note.dataset.leaving;
-  if (!showing || stillMotion.matches) {
-    noteFade?.cancel();
-    endNoteResize();
-    delete note.dataset.leaving;
+  if (note.hidden || motionTag(note, "fade") === "out") {
+    endMotion(note, "size");
     write();
-    note.hidden = false;
-    if (!stillMotion.matches && !showing) noteFade = note.animate({ opacity: [0, 1] }, motion("--fade"));
+    fadeIn(note);
     return;
   }
   const from = note.getBoundingClientRect().width;
-  endNoteResize();
+  endMotion(note, "size");
   write();
   const to = note.getBoundingClientRect().width;
   if (Math.abs(from - to) < 1) return;
-  const words = $("note-words"), { duration, easing } = motion("--slide");
+  const text = $("note-text"), words = $("note-words");
   if (to > from) {
-    words.style.width = `${$("note-text").getBoundingClientRect().width}px`;
-    note.dataset.resizing = "";
+    words.style.width = `${text.getBoundingClientRect().width}px`;
+    const edge = token("--soft-edge");
     // The edge stays soft while the box grows, and sharpens as it settles.
-    $("note-text").animate({ "--edge": ["28px", "28px", "0px"], offset: [0, 0.7, 1] }, { duration, easing: "linear" });
+    move(text, "edge", { "--edge": [edge, edge, "0px"], offset: [0, 0.7, 1] }, { ...motion("--slide"), easing: "linear" });
   }
-  const resize = note.animate({ width: [`${from}px`, `${to}px`] }, { duration, easing });
-  noteResize = resize;
-  resize.onfinish = () => { if (noteResize === resize) endNoteResize(); };
-}
-// Ends a resize at once, so a newer one starts clean.
-function endNoteResize() {
-  noteResize?.cancel();
-  noteResize = null;
-  for (const a of $("note-text").getAnimations()) a.cancel();
-  delete $("note").dataset.resizing;
-  $("note-words").style.width = "";
+  move(note, "size", { width: [`${from}px`, `${to}px`] }, motion("--slide"), {
+    flags: ["moving"],
+    after: () => { words.style.width = ""; endMotion(text, "edge"); },
+  });
 }
 function hideNote() {
-  const note = $("note");
-  if (note.hidden || note.dataset.leaving) return;
-  endNoteResize();
-  if (stillMotion.matches) { note.hidden = true; return; }
-  note.dataset.leaving = "true";
-  noteFade?.cancel();
-  const fade = note.animate({ opacity: 0 }, motion("--fade"));
-  noteFade = fade;
-  fade.onfinish = () => {
-    if (noteFade !== fade) return;
-    note.hidden = true;
-    delete note.dataset.leaving;
-  };
+  endMotion($("note"), "size");
+  fadeOut($("note"));
 }
-function fadeLater() {
+function fadeLater(ms) {
   noteTimer = setTimeout(() => {
-    if ($("note").matches(":hover, :focus-within")) fadeLater();
+    if ($("note").matches(":hover, :focus-within")) fadeLater(ms);
     else status();
-  }, 3500);
+  }, ms);
 }
 function showDetails(on) {
   $("note-more").hidden = !on;
@@ -132,10 +203,15 @@ function showDetails(on) {
   if (on) { clearTimeout(noteTimer); noteStays = true; }
 }
 $("note-details").addEventListener("click", () => showDetails($("note-more").hidden));
-// Anywhere but its buttons, and not while its words are being selected.
+// Anywhere but its buttons and Details, where words are read and selected. A double-click that
+// selects a word, or a drag that selects some, keeps it.
 $("note").addEventListener("click", (e) => {
-  if (!e.target.closest("button") && getSelection().isCollapsed) status();
+  clearTimeout(dismissTimer);
+  if (e.detail > 1 || e.target.closest("button, #note-more")) return;
+  dismissTimer = setTimeout(() => { if (getSelection().isCollapsed) status(); }, DOUBLE_CLICK_MS);
 });
+// For the keyboard and screen readers, which can't click the box.
+$("note-dismiss").addEventListener("click", () => status());
 
 
 // ---------- Files ----------
@@ -261,49 +337,12 @@ function markCurrent(name) {
   showCount();
 }
 
-// ---------- Motion ----------
-// A panel that changes height slides there rather than jumping. The edge it shares with the image
-// eases to its new place and the panel's contents ride that edge, so the image resizes smoothly
-// with it. What a panel shows changes at once: only the edge moves.
-const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
-const phoneLayout = matchMedia("not all and (min-width: 600px)");
-const cssTime = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
-function slidePanels(change) {
-  // On a phone the panels sit under the image in the page's grid. Elsewhere only the crop bar,
-  // under the top bar's row, changes height; the frames column slides by itself.
-  const grid = phoneLayout.matches ? document.body : $("bar");
-  endSlide(grid);
-  const rows = () => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
-  const from = rows();
-  change();
-  const to = rows();
-  const n = to.length;
-  if (stillMotion.matches || from.length !== n || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
-  // The page's rows are the bar, the image, the panel rows and the tool bar. Only the image's row
-  // moves: the panel rows under it fill from the top at their new heights and the last takes what's
-  // left, so the panel's contents ride its top edge and the tool bar covers what doesn't fit yet.
-  // The crop bar's two rows both move, and its contents ride their bottom edge.
-  const template = grid === document.body
-    ? (image) => to.map((h, i) => (i === 1 ? `${image}px` : i === n - 2 ? "minmax(0, 1fr)" : i > 1 && i < n - 1 ? `minmax(0, ${h}px)` : `${h}px`)).join(" ")
-    : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
-  grid.dataset.sliding = "";
-  grid.style.gridTemplateRows = grid === document.body ? template(from[1]) : template(false);
-  void grid.offsetHeight;  // so the slide starts from there
-  grid.style.transition = "grid-template-rows var(--slide) var(--ease)";
-  grid.style.gridTemplateRows = grid === document.body ? template(to[1]) : template(true);
-  grid.slideEnd = setTimeout(() => endSlide(grid), cssTime("--slide") + 30);
-}
-function endSlide(grid) {
-  clearTimeout(grid.slideEnd);
-  delete grid.dataset.sliding;
-  grid.style.transition = grid.style.gridTemplateRows = "";
-}
-
 // ---------- Layout ----------
 // The frames list opens and closes in every layout: a column beside the image in landscape, and
 // in place of the tools under it in portrait, so the frame being chosen shows above the list.
 // On a phone, the bar at the bottom picks which tools show, and closes the list. The column stays
 // as it was left; turning the device to portrait with a frame open shows the tools instead.
+// The same layouts float the histogram over the image.
 const framesInPlaceOfTools = matchMedia("not all and (min-width: 600px), (orientation: portrait)");
 let framesColumn = true;
 function showFrames(on) {
@@ -321,6 +360,13 @@ function pressModes() {
 }
 $("frames-toggle").addEventListener("click", () => slidePanels(() => showFrames(document.body.dataset.frames !== "open")));
 framesInPlaceOfTools.addEventListener("change", () => showFrames(framesInPlaceOfTools.matches ? !shownName : framesColumn));
+// A motion measured for one layout ends when the layout changes, and the histogram's rows follow.
+for (const layout of [phoneLayout, framesInPlaceOfTools]) {
+  layout.addEventListener("change", () => {
+    for (const el of [document.body, $("bar"), $("hist"), $("note")]) endMotion(el);
+    showHistRows(histRows.clip, histRows.stored, { now: true });
+  });
+}
 $("crop-open").addEventListener("click", () => slidePanels(() => {
   $("crop-open").setAttribute("aria-expanded", String($("crop-open").getAttribute("aria-expanded") !== "true"));
 }));
@@ -333,66 +379,101 @@ for (const button of document.querySelectorAll("#modes button")) {
 
 // In portrait the histogram floats over the image, and tapping it folds it to an icon. In
 // landscape it has its own place and this button isn't shown.
+$("hist-fold").addEventListener("click", () => foldHist(!$("hist").hasAttribute("data-folded")));
 // Opening, the box grows from the icon's corner in one motion that reveals a part at a time: left
 // and down to the histogram, then down to the clipping numbers, then to the range warning when
 // there is one. Folding runs the same way back. The parts keep their open size and the box's
 // edges clip them. The icon fades in once the box has folded.
-let histResize = null;
-$("hist-fold").addEventListener("click", () => {
-  const hist = $("hist"), body = $("hist-body");
-  const folded = !hist.hasAttribute("data-folded");
+// A short step still gets this much of the motion, so it reads as a step of its own.
+const MIN_STEP_PX = 40;
+function foldHist(folded) {
+  const hist = $("hist"), body = $("hist-body"), icon = $("hist-fold").querySelector("svg");
   const box = (r) => ({ width: r.width, height: r.height });
   const from = box(hist.getBoundingClientRect());
-  endHistResize();
+  showHistRows(histRows.clip, histRows.stored, { now: true });
   // The stops are measured open: before folding, or once opened.
   if (!folded) hist.toggleAttribute("data-folded", false);
   const { bodyWidth, stops } = histStops();
   if (folded) hist.toggleAttribute("data-folded", true);
-  const icon = box(hist.getBoundingClientRect());
+  const end = box(hist.getBoundingClientRect());
   $("hist-fold").setAttribute("aria-expanded", String(!folded));
-  if (stillMotion.matches) return;
   // From where the box is now, through the stops still ahead of it.
   const path = folded
-    ? [from, ...[...stops].reverse().filter((s) => s.height < from.height - 0.5), icon]
+    ? [from, ...[...stops].reverse().filter((s) => s.height < from.height - 0.5), end]
     : [from, ...stops.filter((s, i) => s.height > from.height + 0.5 || (i === 0 && s.width > from.width + 0.5))];
-  // The motion spends its time in proportion to how far each step moves the edges, and enough on
-  // a short step that it reads as one.
-  const steps = path.slice(1).map((s, i) => Math.max(40, Math.hypot(s.width - path[i].width, s.height - path[i].height)));
+  // Time goes to each step in proportion to how far it moves the edges.
+  const steps = path.slice(1).map((s, i) => Math.max(MIN_STEP_PX, Math.hypot(s.width - path[i].width, s.height - path[i].height)));
   const total = steps.reduce((a, b) => a + b, 0);
-  if (total < 1) return;
-  let travelled = 0;
+  let traveled = 0;
   const frames = path.map((s, i) => {
-    if (i > 0) travelled += steps[i - 1];
-    return { width: `${s.width}px`, height: `${s.height}px`, offset: travelled / total };
+    if (i > 0) traveled += steps[i - 1];
+    return { width: `${s.width}px`, height: `${s.height}px`, offset: total ? traveled / total : i / (path.length - 1) };
   });
   body.style.width = `${bodyWidth}px`;
-  hist.dataset.resizing = "";
-  const resize = hist.animate(frames, { duration: cssTime("--slide") * 1.25, easing: getComputedStyle(hist).getPropertyValue("--ease").trim() });
-  histResize = resize;
-  resize.onfinish = () => {
-    if (histResize !== resize) return;
-    endHistResize();
-    // Folded, the icon is the last step.
-    if (folded) $("hist-fold").querySelector("svg").animate({ opacity: [0, 1] }, motion("--fade"));
-  };
-});
-// Ends a fold or opening at once, so a newer one starts clean. A cancelled animation reports it
-// later, after the newer one has begun, so this doesn't wait for that.
-function endHistResize() {
-  histResize?.cancel();
-  histResize = null;
-  delete $("hist").dataset.resizing;
-  $("hist-body").style.width = "";
+  move(hist, "size", frames, motion("--slide-long"), {
+    flags: ["moving", "folding"],
+    tag: "fold",
+    after: (finished) => {
+      body.style.width = "";
+      if (finished && folded) move(icon, "fade", { opacity: [0, 1] }, motion("--fade"));
+    },
+  });
 }
 // The open box's size at each part's foot, measured on the open layout.
 function histStops() {
-  const hist = $("hist"), body = $("hist-body");
-  const pad = parseFloat(getComputedStyle(hist).paddingTop) || 6;
+  const body = $("hist-body"), pad = cssPx("--hist-pad");
   const bodyWidth = body.offsetWidth, width = bodyWidth + 2 * pad;
   const top = body.getBoundingClientRect().top;
-  const parts = [$("histogram"), body.querySelector(".clip"), $("stored")].filter((el) => el.getClientRects().length);
+  const parts = [$("histogram"), $("clip"), $("stored")].filter((el) => !el.hidden);
   const stops = parts.map((el) => ({ width, height: el.getBoundingClientRect().bottom - top + 2 * pad }));
   return { bodyWidth, stops: stops.filter((s, i) => i === 0 || s.height > stops[i - 1].height + 0.5) };
+}
+// The floating histogram shows its clipping numbers and range warning only when there's something
+// to report, so they come and go as sliders move. Coming, the box extends first and then the words
+// fade in; going, the words fade out first and then the box shrinks, held at its height meanwhile.
+// The side panel's histogram always shows its numbers, and its warning fades in over the
+// histogram, in the stylesheet. `now` sets the rows at once, ending what's underway.
+const histRows = { clip: false, stored: false };
+function showHistRows(clip, stored, { now = false } = {}) {
+  Object.assign(histRows, { clip, stored });
+  const hist = $("hist"), floating = framesInPlaceOfTools.matches;
+  const rows = [[$("clip"), clip || !floating], [$("stored"), stored]];
+  const shown = floating && !hist.hasAttribute("data-folded") && hist.getClientRects().length > 0;
+  if (now || !shown || motionTag(hist, "size") === "fold") {
+    hist.style.height = "";
+    for (const [el, on] of rows) {
+      endMotion(el, "fade");
+      el.style.opacity = "";
+      el.hidden = !on;
+    }
+    return;
+  }
+  // Words that are wanted again come back from where their fade-out reached.
+  for (const [el, on] of rows) if (on && motionTag(el, "fade") === "out") fadeIn(el);
+  const going = rows.filter(([el, on]) => !on && !el.hidden).map(([el]) => el);
+  if (going.length) {
+    // The box stops where it is and holds there while the words go.
+    const height = hist.getBoundingClientRect().height;
+    endMotion(hist, "size");
+    hist.style.height = `${height}px`;
+    for (const el of going) fadeOut(el, () => showHistRows(histRows.clip, histRows.stored));
+    return;
+  }
+  // Words wait unseen until the box has room for them, including any whose wait was cut short.
+  const coming = rows.filter(([el, on]) => on && el.hidden).map(([el]) => el);
+  const waiting = rows.filter(([el, on]) => on && !el.hidden && el.style.opacity === "0").map(([el]) => el);
+  const from = hist.getBoundingClientRect().height;
+  endMotion(hist, "size");
+  hist.style.height = "";
+  for (const el of coming) { el.style.opacity = "0"; el.hidden = false; }
+  const appear = [...waiting, ...coming];
+  const to = hist.getBoundingClientRect().height;
+  if (Math.abs(from - to) < 0.5) { appear.forEach(fadeIn); return; }
+  move(hist, "size", { height: [`${from}px`, `${to}px`] }, motion("--slide"), {
+    flags: ["moving"],
+    tag: "rows",
+    after: (finished) => { if (finished) appear.forEach(fadeIn); },
+  });
 }
 
 // ---------- Remembering settings ----------
@@ -1087,7 +1168,9 @@ function setTool(t) {
     $("tool-done").title = t === "crop" ? "Enter" : "Esc";
     $("tool-done").setAttribute("aria-keyshortcuts", t === "crop" ? "Enter" : "Escape");
   }
-  fit();
+  // The bar's words, the legend among them, are in place before the image makes room for them.
+  showLegend();
+  placeStage();
   if (current) changed(0);
 }
 
@@ -1364,25 +1447,19 @@ async function refresh() {
   }
 }
 
-// The stage's padding is the room around the image. An open tool's bar gets room of its own
-// above the image, which eases smaller into the rest, so the bar never covers it. While cropping,
-// the frame's handles reach out past the image's edge and need room to be dragged; both grow on a
-// touch screen, so this measures them. Messages pass over the image and take no room.
-function stageRoom() {
-  const stage = $("stage"), bar = $("toolbar");
-  // A phone's stage is narrow, so it keeps a smaller margin.
-  const edge = stage.clientWidth < 600 ? 12 : 28;
-  const reach = tool === "crop" ? parseFloat(getComputedStyle($("crop-box")).getPropertyValue("--corner-hit")) / 2 : 0;
-  const side = Math.max(edge, reach);
-  const top = tool ? $("floats").offsetTop + bar.offsetTop + bar.offsetHeight + Math.max(10, reach) : edge;
-  return `${top}px ${side}px ${side}px`;
+// The stage's padding is the room around the image, which the stylesheet sets: a margin, room for
+// the crop frame's handles, and room above for an open tool's bar, which this measures. The image
+// eases into what's left, so the bar never covers it. Messages pass over the image and take none.
+let barRoom = "";
+function placeStage() {
+  const room = tool ? `${$("floats").offsetTop + $("toolbar").offsetHeight}px` : "0px";
+  if (room !== barRoom) $("stage").style.setProperty("--bar-room", barRoom = room);
 }
+new ResizeObserver(placeStage).observe($("toolbar"));
+// While the padding eases, the stage's content box changes, so this follows it every frame.
 function fit() {
-  const stage = $("stage"), room = stageRoom();
-  if (stage.style.padding !== room) stage.style.padding = room;
-  const img = $("photo");
+  const stage = $("stage"), img = $("photo");
   if (!img.naturalWidth) return;
-  // While the padding eases, this follows it: the stage's size changes, so this runs every frame.
   const s = getComputedStyle(stage);
   const width = stage.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
   const height = stage.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom);
@@ -1430,7 +1507,7 @@ function histogram(img, storedClipped) {
   $("clip-low").classList.toggle("over", low / n > 0.005);
   $("clip-high").classList.toggle("over", high / n > 0.005);
   $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
-  $("stored").hidden = storedClipped < 0.0005;
+  showHistRows(low / n > 0.005 || high / n > 0.005, storedClipped >= 0.0005);
   // "Clipped" above is only the preview's and the DNG keeps it; these pixels are gone for good.
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of highlights beyond DNG range`;
   $("stored").title = "Brighter than the DNG can store. Lower Exposure to keep them.";
@@ -1451,6 +1528,7 @@ $("about-details").addEventListener("toggle", () => {
 $("choose-folder").disabled = !shell;
 updateSaveButton();
 setBusy(false);
+showHistRows(false, false, { now: true });
 $("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
 loadFiles().catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
