@@ -62,7 +62,22 @@
   --slider-label-h: 16px;
   --slider-track-h: 16px;
   --val-text: var(--text);
+  /* Motion: panels slide and what appears fades, briefly and without bounce. */
+  --ease: cubic-bezier(.4, 0, .2, 1);
+  --slide: 220ms;
+  --slide-long: 280ms;  /* a motion with several steps */
+  --fade: 150ms;
+  /* Room around the image, and around what floats over it. */
+  --stage-edge: 28px;
+  --float-gap: 10px;
+  /* The crop frame's corner handles, which reach half their size past the frame. */
+  --corner-hit: 28px;
+  /* The soft edge through which a growing message box uncovers its words. */
+  --soft-edge: 28px;
+  /* Inside the floating histogram's box. */
+  --hist-pad: 6px;
 }
+@media (prefers-reduced-motion: reduce) { :root { --slide: 0s; --slide-long: 0s; --fade: 0s; } }
 /* Fingers need 44px targets. A mouse doesn't, and at 44px the desktop's Develop panel would
    scroll and the frame list would show half as many frames, so this is for touch only. Any
    touch screen counts, also a laptop's next to its trackpad. */
@@ -87,6 +102,7 @@
     --row-gap: 0px;
     --slider-label-h: 16px;
     --slider-track-h: 34px;
+    --corner-hit: 44px;
     /* Under 16px, iOS zooms the page in when a field takes focus. */
     --val-text: 16px;
   }
@@ -138,7 +154,12 @@ button:not(.crop-h)::after {
 .icon { width: max(28px, var(--hit)); padding: 0; display: inline-grid; place-items: center; color: #cfcfcf; }
 @media (hover: hover) { .icon:hover { background: var(--control); color: #fff; } }
 .icon:active, .icon[aria-pressed="true"] { background: var(--control-on); color: #fff; }
-.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+/* Icons share one drawing: a 1.25 px rounded stroke on a 16 px grid, in the button's color. */
+button > svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+/* Controls ease between their states. */
+.btn, .icon, .seg button, .head-btn, .primary, .link, #frames-toggle, #choose-folder, #modes button {
+  transition: background-color var(--fade) var(--ease), color var(--fade) var(--ease), box-shadow var(--fade) var(--ease), text-decoration-color var(--fade) var(--ease);
+}
 button:disabled { opacity: .45; background: none; }
 .link { height: 18px; padding: 0 6px; color: var(--ink); text-decoration: underline; text-decoration-color: #777; text-underline-offset: 2px; }
 @media (hover: hover) { .link:hover { text-decoration-color: currentColor; } }
@@ -222,8 +243,8 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 #where { display: flex; align-items: center; min-width: 0; margin: 0 6px; }
 #frames-toggle, #choose-folder { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
 @media (hover: hover) { :is(#frames-toggle, #choose-folder):not(:disabled):hover { background: var(--control); } }
-:is(#frames-toggle, #choose-folder) svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--ink-quiet); stroke-width: 1.25; stroke-linejoin: round; }
-#frames-toggle[aria-expanded="true"] svg { stroke: var(--ink); }
+:is(#frames-toggle, #choose-folder) svg { color: var(--ink-quiet); transition: color var(--fade) var(--ease); }
+#frames-toggle[aria-expanded="true"] svg { color: var(--ink); }
 #folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 0 0 10px; }
 #crop-open { display: none; }
@@ -235,7 +256,7 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
    like −10.0°, is the widest, so its box is too. */
 #crop-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
 #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-#save { display: flex; justify-content: flex-end; padding: 0 10px; }
+#save { display: flex; align-items: center; justify-content: flex-end; padding: 0 10px; }
 .primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
 @media (hover: hover) { .primary:not(:disabled):hover { background: #2a7ae0; } }
 .primary:not(:disabled):active { background: #1a61b8; }
@@ -249,7 +270,6 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 #choose-folder { width: 100%; }
 /* Hidden frames give the image their column. */
 body[data-frames="closed"] { grid-template-columns: 0 minmax(0, 1fr) var(--right); }
-body[data-frames="closed"] #roll { display: none; }
 #modes { display: none; }
 #roll-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 10px; background: var(--strip); border-bottom: 1px solid var(--seam); color: var(--ink-quiet); }
 #select-all { display: flex; align-items: center; gap: 8px; align-self: stretch; }
@@ -280,7 +300,17 @@ body[data-frames="closed"] #roll { display: none; }
 .float .dot { margin-left: 4px; box-shadow: 0 0 0 1px rgb(0 0 0 / .45); }
 
 /* Image: JS sizes #view to fit, so rotation always stays centered. */
-#stage { grid-area: stage; position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
+/* The stage's padding is the room around the image: a margin, room for the crop frame's handles to
+   reach past the image's edge, and above it room for an open tool's bar, whose size the script
+   sets as --bar-room. The image eases into what's left, after the bar has faded on closing. */
+#stage {
+  --reach: 0px;
+  grid-area: stage; position: relative; background: var(--surround); display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; overflow: hidden;
+  padding: max(var(--stage-edge), calc(var(--bar-room, 0px) + max(var(--float-gap), var(--reach)))) max(var(--stage-edge), var(--reach)) max(var(--stage-edge), var(--reach));
+  transition: padding var(--slide) var(--ease);
+}
+body[data-tool="crop"] #stage { --reach: calc(var(--corner-hit) / 2); }
+body[data-tool=""] #stage { transition-delay: var(--fade); }
 #view { position: relative; flex: none; }
 #photo { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
 #overlay { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
@@ -296,7 +326,7 @@ body[data-frames="closed"] #roll { display: none; }
 #crop-layer { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
 #crop-dim { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 #crop-hole { position: absolute; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .58); }
-#crop-box { --mark: 3px; --corner-hit: 28px; --edge-hit: 18px; position: absolute; outline: 1px solid var(--crop); outline-offset: 0; cursor: move; }
+#crop-box { --mark: 3px; --edge-hit: 18px; position: absolute; outline: 1px solid var(--crop); outline-offset: 0; cursor: move; }
 #crop-box.fills { cursor: crosshair; }
 .crop-h { position: absolute; padding: 0; border: 0; border-radius: 0; background: none; }
 .crop-h i { position: absolute; pointer-events: none; }
@@ -325,18 +355,42 @@ body[data-frames="closed"] #roll { display: none; }
 .crop-h.se i, .crop-h.sw i { bottom: var(--inset); border-bottom-width: var(--mark); }
 .crop-h.nw i, .crop-h.sw i { left: var(--inset); border-left-width: var(--mark); }
 .crop-h.ne i, .crop-h.se i { right: var(--inset); border-right-width: var(--mark); }
-@media (any-pointer: coarse) { #crop-box { --corner-hit: 44px; --edge-hit: 36px; } }
+@media (any-pointer: coarse) { #crop-box { --edge-hit: 36px; } }
 #message { position: absolute; color: var(--ink-quiet); font-size: 13px; line-height: 18px; text-align: center; max-width: 40ch; }
-/* What floats over the image: a tool's bar, then a message, in one look. They're see-through
-   and pass over the image rather than pushing it aside. Only the bars take pointers, so the
-   image stays draggable around them. */
-#floats { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: min(560px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+/* What floats over the image shares one look: a tool's bar at the top, in room the image makes
+   for it, and messages at the foot, which pass over the image. They're see-through. Only the
+   bars take pointers, so the image stays draggable around them. */
+.floats { position: absolute; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: min(560px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+#floats { top: var(--float-gap); }
+#messages { bottom: var(--float-gap); }
 .float { pointer-events: auto; max-width: 100%; display: grid; grid-template: "text actions" auto "more more" auto / minmax(0, 1fr) auto; align-items: center; gap: 0 12px; padding: 6px 6px 6px 12px; border-radius: 6px; }
 .float { background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
+/* A tool's bar fades in and out, keeping its words while it goes; the script fades messages. */
+#toolbar, #stored, #view, #overlay, #crop-layer {
+  transition-property: opacity, display; transition-duration: var(--fade); transition-timing-function: var(--ease); transition-behavior: allow-discrete;
+}
+#toolbar[hidden], #stored[hidden] { opacity: 0; }
+/* A tool's bar shows once the image has begun making room for it. */
+#toolbar:not([hidden]) { transition-delay: calc(var(--slide) / 2); }
+/* The image fades in when a frame opens, and the tools' drawings as they open; all close at once. */
+#view[hidden], #overlay[hidden], #crop-layer[hidden] { transition: none; }
+@starting-style { #toolbar, #stored, #view, #overlay, #crop-layer { opacity: 0; } }
 .float .btn { text-shadow: none; }
 .float-text { grid-area: text; margin: 0; overflow-wrap: anywhere; }
 .float-actions { grid-area: actions; display: flex; gap: 6px; }
 #note { -webkit-user-select: text; user-select: text; }
+/* A message with no buttons is its words alone, with even margins. */
+#note[data-bare] { padding-right: 12px; column-gap: 0; }
+#note[data-bare] .float-actions { display: none; }
+/* Read aloud and reached with the keyboard, out of the grid; it shows over the box's right end
+   while it has the keyboard's focus. */
+#note-dismiss { position: absolute; }
+#note-dismiss:focus-visible { top: 50%; right: 6px; width: auto; height: var(--control-h); overflow: visible; clip-path: none; transform: translateY(-50%); }
+/* Growing to longer words, the box uncovers them in their final layout through a soft edge, which
+   the script narrows to nothing as the box arrives. */
+@property --edge { syntax: "<length>"; inherits: false; initial-value: 0px; }
+#note-words { display: block; }
+#note[data-moving] #note-text { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); }
 #note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; }
 .btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
 @media (hover: hover) { .btn.strong:hover { background: #606060; } }
@@ -344,7 +398,9 @@ body[data-frames="closed"] #roll { display: none; }
 /* Histogram: in landscape, the top of the side panel. */
 #hist { grid-area: hist; position: relative; padding: 10px; background: var(--panel); border-left: 1px solid var(--seam); }
 #hist-body { position: relative; container-type: inline-size; }
-#stored { position: absolute; top: 4px; left: 20px; right: 20px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
+/* In the side panel, the range warning lies over the top of the histogram, across its width, so it
+   appears without moving a slider being dragged. It fades in and out. */
+#stored { position: absolute; top: 4px; left: 4px; right: 4px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
 #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
 .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
@@ -381,6 +437,12 @@ body[data-film="bw"] :is(#color, #modes [data-mode="color"]) { display: none; }
 /* The roll flow */
 #roll-flow, #about { width: min(480px, calc(100vw - 32px)); padding: 16px; border: 0; border-radius: 8px; background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--seam), 0 12px 40px rgb(0 0 0 / .5); }
 #roll-flow::backdrop, #about::backdrop { background: rgb(0 0 0 / .35); }
+/* Dialogs fade in, rising slightly; they close at once. */
+dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--ease), transform var(--fade) var(--ease); }
+@starting-style {
+  dialog[open] { opacity: 0; transform: translateY(6px) scale(.98); }
+  dialog[open]::backdrop { opacity: 0; }
+}
 #roll-flow h2, #about h2 { font-size: 13px; margin: 0 0 8px; }
 #roll-flow p, #about p { line-height: 17px; margin: 0 0 8px; color: var(--ink-quiet); }
 #roll-flow .warn { color: var(--warn); }
@@ -398,6 +460,18 @@ body[data-film="bw"] :is(#color, #modes [data-mode="color"]) { display: none; }
 #about-license { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: 11px; white-space: pre-wrap; color: var(--ink-quiet); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* Landscape from a small tablet up. */
+@media (min-width: 600px) and (orientation: landscape) {
+  /* The side panel scrolls under the histogram, so the seam between them belongs to the histogram
+     and stays when the panel's first heading scrolls away. */
+  #hist { border-bottom: 1px solid var(--seam); }
+  #setup-head { border-top: 0; }
+  /* The frames list slides in from the left and out again: its column eases open or shut while the
+     list keeps its width, riding the column's edge, and hides once out of sight. */
+  body { transition: grid-template-columns var(--slide) var(--ease); }
+  #roll { justify-self: end; width: var(--left); }
+  body[data-frames="closed"] #roll { visibility: hidden; transition: visibility 0s var(--slide); }
+}
 
 /* A narrower window, and portrait from a small tablet up: rotate and mirror stay in the top bar,
    and crop and straighten wait behind the crop button, in a bar of their own under it with
@@ -413,27 +487,45 @@ body[data-film="bw"] :is(#color, #modes [data-mode="color"]) { display: none; }
   #bar:has(#crop-open[aria-expanded="true"]) #crop-tools { display: flex; }
   #crop-tools .sep:first-child { display: none; }
   #crop-tools .slider { max-width: none; }
+  /* The crop bar slides down from behind the top bar's row, which covers it while it moves; the
+     script eases its row open or shut, and it stays shown until shut. */
+  #where { margin: 0; padding: 0 6px; }
+  #where, #frame-tools, #save { align-self: stretch; position: relative; z-index: 1; background: var(--bar); }
+  #crop-tools { align-self: end; }
+  #bar[data-moving] { overflow: hidden; }
+  #bar[data-moving] #crop-tools { display: flex; }
 }
 /* Portrait, and a phone: the histogram floats over the image's top right corner. Tapping it
    folds it to an icon, which brings it back; the icon turns amber while the DNG can't store
    every pixel. It steps aside while a tool works on the image, and waits for a picture. */
 @media not all and (min-width: 600px), (orientation: portrait) {
-  #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: 10px; padding: 6px; border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
+  #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: var(--float-gap); padding: var(--hist-pad); border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
   #histogram { height: var(--hist-h, 72px); background: none; filter: var(--veil-outline); }
   .clip { color: var(--ink); }
   /* Clipping numbers show only when there's clipping to report. */
-  .clip:not(:has(.over)), .clip span:first-child { display: none; }
-  #stored { position: static; margin-top: 4px; padding: 0; background: none; }
+  /* The clipping numbers and the range warning show only when there's something to report, and
+     the script fades them as the box makes room for them or gives it back. */
+  .clip span:first-child { display: none; }
+  #stored { position: static; margin-top: 4px; padding: 0; background: none; transition: none; }
   #hist-fold { display: block; position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; background: none; border: 0; border-radius: 6px; }
   #hist-fold svg { display: none; }
   #hist[data-folded] { width: auto; padding: 0; }
   #hist[data-folded] #hist-body { display: none; }
   #hist[data-folded] #hist-fold { position: static; width: var(--hit); height: var(--hit); display: grid; place-items: center; }
-  #hist[data-folded] #hist-fold svg { display: block; width: 18px; height: 18px; fill: none; stroke: var(--ink); stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
-  #hist:has(#stored:not([hidden])) #hist-fold svg { stroke: var(--warn); }
-  body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist { display: none; }
-  /* With no tool open, messages sit at the foot of the image instead, clear of the histogram. */
-  body[data-tool=""] #floats { top: auto; bottom: 10px; }
+  #hist[data-folded] #hist-fold svg { display: block; color: var(--ink); }
+  #hist:has(#stored:not([hidden])) #hist-fold svg { color: var(--warn); }
+  /* Folding and opening, the box grows from or shrinks into its corner, with the histogram held
+     at its open size against the corner and clipped by the moving edges. */
+  #hist[data-moving] { overflow: hidden; }
+  #hist[data-folding] #hist-body { display: block; position: absolute; top: var(--hist-pad); right: var(--hist-pad); }
+  /* Folding, the icon waits unseen in the corner the box shrinks into, and the script fades it in
+     once the box has arrived. */
+  #hist[data-folded][data-folding] #hist-fold { position: absolute; inset: 0 0 auto auto; z-index: 1; }
+  #hist[data-folded][data-folding] #hist-fold svg { opacity: 0; }
+  body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist { display: none; opacity: 0; }
+  /* It fades as it steps aside and comes back. */
+  #hist { transition-property: opacity, display; transition-duration: var(--fade); transition-timing-function: var(--ease); transition-behavior: allow-discrete; }
+  @starting-style { #hist { opacity: 0; } }
 }
 /* Portrait, from a small tablet up: the image takes the full width, and under it the tools
    in two columns, or the frames list in their place. */
@@ -457,6 +549,8 @@ body[data-film="bw"] :is(#color, #modes [data-mode="color"]) { display: none; }
    chosen from the bar at the bottom. A panel of tools takes only the height it needs, up to
    about four rows, and scrolls past that, so the image keeps most of the screen. The frame tools leave the top bar for the Crop panel. */
 @media not all and (min-width: 600px) {
+  /* A phone's stage is narrow, so it keeps a smaller margin. */
+  :root { --stage-edge: 12px; }
   body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
   #bar { display: contents; }
@@ -481,8 +575,13 @@ body[data-film="bw"] :is(#color, #modes [data-mode="color"]) { display: none; }
   body[data-mode="tone"] :is(#setup-head, #setup, #color) { display: none; }
   body[data-mode="color"] :is(#setup-head, #setup, #tone) { display: none; }
   #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: env(safe-area-inset-bottom); }
-  #modes button { flex: 1; height: 49px; background: none; border: 0; color: var(--ink-quiet); }
-  #modes button[aria-pressed="true"] { color: var(--ink); font-weight: 600; }
+  /* Each tool's icon over its name. A 20 px icon keeps the 1.25 px stroke of the others. */
+  #modes button { flex: 1; height: 49px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-quiet); font-size: 11px; line-height: 13px; }
+  #modes svg { width: 20px; height: 20px; stroke-width: 1; }
+  #modes button[aria-pressed="true"] { color: #fff; font-weight: 600; }
+  /* While the panel slides, the script moves the edge between it and the image; rows the panel
+     hasn't reached yet take its color, so that edge is the only one that moves. */
+  body[data-moving] { background: var(--panel); }
   /* The bar names the panel. */
   #develop section h2 { display: none; }
 }

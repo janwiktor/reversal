@@ -15,6 +15,11 @@
   <symbol id="i-rotate" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7L13 5.8M13 2.6v3.2H9.8"/></symbol>
   <symbol id="i-crop" viewBox="0 0 16 16"><path d="M4.2 1.8v9.3c0 .4.3.7.7.7h9.3M1.8 4.2h9.3c.4 0 .7.3.7.7v9.3"/></symbol>
   <symbol id="i-mirror" viewBox="0 0 16 16"><path d="M8 1.8v12.4M5.8 4.2v7.6L1.8 11.8ZM10.2 4.2v7.6h4Z"/></symbol>
+  <!-- An open-end wrench, drawn level and turned to the diagonal. -->
+  <symbol id="i-setup" viewBox="0 0 16 16"><path transform="rotate(-45 8 8)" d="M2.5 6.85H8.41A3.3 3.3 0 0 1 14.61 6.9H11.2V9.1H14.61A3.3 3.3 0 0 1 8.41 9.15H2.5A1.15 1.15 0 0 1 2.5 6.85Z"/></symbol>
+  <!-- Half dark, for contrast, and half lit, with rays, for brightness. -->
+  <symbol id="i-tone" viewBox="0 0 16 16"><circle cx="6.8" cy="8" r="3.9"/><path d="M6.8 4.1a3.9 3.9 0 0 0 0 7.8Z" fill="currentColor"/><path d="M6.8 1.7v.9M6.8 13.4v.9M11.25 3.55l-.63.63M11.25 12.45l-.63-.63M13.1 8h-.9"/></symbol>
+  <symbol id="i-color" viewBox="0 0 16 16"><path d="M6.4 9.3V3.5a1.6 1.6 0 0 1 3.2 0v5.8a2.9 2.9 0 1 1-3.2 0Z"/><circle cx="8" cy="11.7" r="1" fill="currentColor"/><path d="M8 10.7V6"/></symbol>
 </svg>
 
 <header id="bar">
@@ -73,16 +78,20 @@
       </div>
     </div>
   </div>
-  <!-- One place for everything floating over the image: a tool's bar, then a message. -->
-  <div id="floats">
+  <!-- An open tool's bar, at the top, in room the image makes for it. -->
+  <div class="floats" id="floats">
     <div class="float" id="toolbar" hidden>
       <span class="float-text" id="tool-text"></span>
       <span class="float-actions"><button type="button" class="btn" id="tool-cancel" title="Esc" aria-keyshortcuts="Escape">Cancel</button><button type="button" class="btn strong" id="tool-done">Done</button></span>
     </div>
+  </div>
+  <!-- Messages, at the foot of the image and over it. A click or tap dismisses one. -->
+  <div class="floats" id="messages">
     <div class="float" id="note" role="status" hidden>
-      <p class="float-text" id="note-text"></p>
-      <span class="float-actions"><button type="button" class="btn" id="note-details" aria-expanded="false" aria-controls="note-more" hidden>Details</button><button type="button" class="btn" id="reveal" hidden>Show in Finder</button><button type="button" class="btn" id="note-dismiss">Dismiss</button></span>
+      <p class="float-text" id="note-text"><span id="note-words"></span></p>
+      <span class="float-actions"><button type="button" class="btn" id="note-details" aria-expanded="false" aria-controls="note-more" hidden>Details</button><button type="button" class="btn" id="reveal" hidden>Show in Finder</button></span>
       <div id="note-more" hidden></div>
+      <button type="button" class="btn sr-only" id="note-dismiss">Dismiss</button>
     </div>
   </div>
   <p id="message">Choose a frame to convert it</p>
@@ -93,9 +102,9 @@
 <section id="hist" aria-label="Histogram">
   <div id="hist-body">
     <canvas id="histogram" width="504" height="176" aria-label="RGB histogram of the preview"></canvas>
-    <div class="clip"><span title="In the preview only. The DNG keeps these tones.">Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span></span></div>
-    <!-- Over the histogram, so it appears without moving the slider being dragged, and clear of its
-         edges, where clipping shows. -->
+    <div class="clip" id="clip"><span title="In the preview only. The DNG keeps these tones.">Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span></span></div>
+    <!-- Over the top of the histogram in the side panel, so it appears without moving a slider
+         being dragged; under the clipping numbers where the histogram floats. -->
     <p id="stored" hidden></p>
   </div>
   <button type="button" id="hist-fold" aria-expanded="true" aria-controls="hist-body" title="Hide or show the histogram" aria-label="Histogram"><svg aria-hidden="true"><use href="#i-hist"/></svg></button>
@@ -171,10 +180,10 @@
 
 <!-- On a phone, one tool panel shows at a time, chosen here. -->
 <div id="modes" role="toolbar" aria-label="Tools">
-  <button type="button" data-mode="crop" aria-pressed="false">Crop</button>
-  <button type="button" data-mode="setup" aria-pressed="false">Setup</button>
-  <button type="button" data-mode="tone" aria-pressed="false">Tone</button>
-  <button type="button" data-mode="color" aria-pressed="false">Color</button>
+  <button type="button" data-mode="crop" aria-pressed="false"><svg aria-hidden="true"><use href="#i-crop"/></svg>Crop</button>
+  <button type="button" data-mode="setup" aria-pressed="false"><svg aria-hidden="true"><use href="#i-setup"/></svg>Setup</button>
+  <button type="button" data-mode="tone" aria-pressed="false"><svg aria-hidden="true"><use href="#i-tone"/></svg>Tone</button>
+  <button type="button" data-mode="color" aria-pressed="false"><svg aria-hidden="true"><use href="#i-color"/></svg>Color</button>
 </div>
 
 <dialog id="about" aria-labelledby="about-title">
