@@ -228,7 +228,7 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         if args.crop_area {
             settings.adjust.crop = Some(settings.estimate.area);
         }
-        let bytes = pipeline::export(input, &scan, &settings, compression, out)?;
+        let bytes = pipeline::export(input, scan, &settings, compression, out)?;
         let film = match settings.estimate.film {
             Film::Color => "color",
             Film::Bw => "black and white",

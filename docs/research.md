@@ -233,6 +233,22 @@ The pipeline is per-pixel and runs in plain Rust. GPU work remains an untried op
 | Decoding frames in parallel, with an OpenMP build of LibRaw | Twelve frames took 162 s, against 4.4 s with the development build and 6.1 s with the app's, each decoding one frame at a time | One decode at a time; the plain LibRaw we link isn't thread-safe either |
 | File size with lossless JPEG | About 62–64 MB for a 16 MP D5100 scan, on two frames. Other sizes and JPEG XL weren't measured | No change |
 
+### Memory of a save
+
+A phone gives an app a few gigabytes at most, and a full scan is 12 bytes a pixel as 32-bit float RGB: 193 MB at 16 megapixels, 730 MB at 61. Saving one 16-megapixel frame held 1,150 MB at its peak, measured as the process's peak memory footprint on a Mac. It kept the scan, a straightened copy, a cropped copy and a rotated copy at once, even when none of the three changed anything, then a 16-bit copy of the whole positive for the DNG.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Converting in the scan's own memory: straightening, cropping, mirroring and a half turn copy nothing when they have nothing to do, and crop, mirror and half turn work in place | One image where there were four. A quarter turn and a straighten still need a second image while they run | Keep |
+| Storing samples a strip or a tile at a time, in place of a 16-bit copy of the image | 6 bytes a pixel less | Keep |
+| Closing LibRaw before making the float image from its output | Its working buffers, about 10 bytes a pixel, are gone before ours is made | Keep |
+| Asking once for the room the DNG's bytes need | 60 MB less at 16 megapixels: no doubling and copying as the file grows | Keep |
+| Asking Apple's allocator to hand freed blocks back (`malloc_zone_pressure_relief`) | No effect on the peak | Dropped |
+
+Together: 1,150 MB to 533 MB for a 16-megapixel frame, and 1,803 MB to 1,204 MB for a 24-megapixel X-Trans frame with a quarter turn. Eight conversions of a DNG, a NEF and a RAF, covering every turn, mirror, straighten, crop and both compressions, are byte-identical to the build before. A save takes the same time.
+
+About half of what remains is memory already freed that macOS's allocator keeps for reuse. With that cache off (`MallocLargeCache=0`) the same saves peak at 280 MB and 626 MB, close to what the conversion holds at once: 18 bytes a pixel while decoding, 24 with a quarter turn. Whether iOS keeps such a cache decides which figure applies there, and that can only be measured on a device.
+
 ### License
 
 The aim was a program that stays open source and can be published and sold in app stores. Reversal has one copyright holder and no code ported from other programs, so it could change license.

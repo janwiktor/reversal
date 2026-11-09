@@ -59,16 +59,17 @@ pub fn profiles(settings: &Settings) -> (dng::Profile, Vec<dng::Profile>) {
     (render::profile(adjust.look, tone, film), others)
 }
 
-/// Convert a decoded scan and write the DNG; returns the file size in bytes.
+/// Convert a decoded scan and write the DNG; returns the file size in bytes. It takes the scan
+/// to convert it in place: a second full image is what a phone has no memory for.
 pub fn write_positive(
     out: &Path,
     source_name: &str,
-    scan: &Rgb32,
+    scan: Rgb32,
     settings: &Settings,
     compression: dng::Compression,
     software: &str,
 ) -> io::Result<u64> {
-    let positive = invert::convert(scan, settings);
+    let positive = invert::convert_owned(scan, settings);
     let (profile, extra_profiles) = profiles(settings);
     let xmp = xmp_packet(source_name, settings);
     let opts = dng::DngOptions {
@@ -187,15 +188,8 @@ mod tests {
             invert::estimate(&scan, &invert::Hints::default()),
             invert::Adjust::default(),
         );
-        let n = write_positive(
-            &path,
-            "s.NEF",
-            &scan,
-            &settings,
-            dng::Compression::None,
-            "t",
-        )
-        .unwrap();
+        let n =
+            write_positive(&path, "s.NEF", scan, &settings, dng::Compression::None, "t").unwrap();
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(bytes.len() as u64, n);
         assert_eq!(&bytes[0..4], b"II*\0");

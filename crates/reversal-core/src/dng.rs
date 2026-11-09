@@ -220,16 +220,15 @@ fn profile_blob(p: &Profile) -> Vec<u8> {
     buf.data
 }
 
-fn quantize(img: &Rgb32) -> Vec<u16> {
-    img.data
-        .iter()
-        .map(|&v| ((v * STORE_SCALE).clamp(0.0, 1.0) * 65535.0 + 0.5) as u16)
-        .collect()
+/// A sample as the DNG stores it.
+fn quantize(v: f32) -> u16 {
+    ((v * STORE_SCALE).clamp(0.0, 1.0) * 65535.0 + 0.5) as u16
 }
 
-/// Write the image data; returns the layout tags for the main IFD.
+/// Write the image data; returns the layout tags for the main IFD. Samples are stored a strip
+/// or a tile at a time, never as a second copy of the whole image.
 fn write_pixels(buf: &mut Buf, img: &Rgb32, compression: Compression) -> Vec<Tag> {
-    let samples = quantize(img);
+    let samples = &img.data;
     let (w, h) = (img.width, img.height);
     // LibRaw misplaces the rows of a lossless JPEG tile wider than its image, and TIFF tile
     // widths come in multiples of 16, so images narrower than a tile are stored uncompressed.
@@ -243,7 +242,10 @@ fn write_pixels(buf: &mut Buf, img: &Rgb32, compression: Compression) -> Vec<Tag
             let rows_per_strip = ((1 << 20) / (w * 6)).max(1);
             let (mut offsets, mut counts) = (Vec::new(), Vec::new());
             for chunk in samples.chunks(rows_per_strip * w * 3) {
-                let bytes: Vec<u8> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
+                let bytes: Vec<u8> = chunk
+                    .iter()
+                    .flat_map(|&v| quantize(v).to_le_bytes())
+                    .collect();
                 offsets.push(buf.blob(&bytes));
                 counts.push(bytes.len() as u32);
             }
@@ -266,7 +268,9 @@ fn write_pixels(buf: &mut Buf, img: &Rgb32, compression: Compression) -> Vec<Tag
                             let sx = (tx + x).min(w - 1);
                             let s = (sy * w + sx) * 3;
                             let d = (y * TILE + x) * 3;
-                            tile[d..d + 3].copy_from_slice(&samples[s..s + 3]);
+                            for k in 0..3 {
+                                tile[d + k] = quantize(samples[s + k]);
+                            }
                         }
                     }
                     let jpeg = ljpeg::encode(&tile, TILE, TILE, 3);
@@ -287,9 +291,11 @@ fn write_pixels(buf: &mut Buf, img: &Rgb32, compression: Compression) -> Vec<Tag
 
 /// Encode a positive (scene-linear Rec.2020, frame white ≈ 1, geometry applied) as DNG bytes.
 pub fn encode(img: &Rgb32, opts: &DngOptions) -> Vec<u8> {
-    let mut buf = Buf {
-        data: b"II*\0\0\0\0\0".to_vec(),
-    }; // IFD0 offset patched at the end
+    // Room for the pixels uncompressed, asked for once: growing by doubling would copy the file
+    // several times over, and memory that's never written to costs nothing.
+    let mut data = Vec::with_capacity(img.data.len() * 2 + (1 << 20));
+    data.extend_from_slice(b"II*\0\0\0\0\0"); // IFD0 offset patched at the end
+    let mut buf = Buf { data };
 
     let mut main = write_pixels(&mut buf, img, opts.compression);
     main.extend([

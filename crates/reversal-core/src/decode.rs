@@ -115,8 +115,11 @@ pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
         check(libraw_dcraw_process(lr), "process")?;
         let mut err = 0;
         let img = libraw_dcraw_make_mem_image(lr, &mut err);
-        check(err, "output")?;
+        // The image is a copy of its own, so LibRaw's buffers can go before ours is made. Kept
+        // until the end, they'd make this the most memory a conversion ever holds.
+        drop(handle);
         if img.is_null() {
+            check(err, "output")?;
             return Err(DecodeError("no image returned".into()));
         }
         let (w, h) = ((*img).width as usize, (*img).height as usize);
@@ -142,7 +145,6 @@ pub fn decode(path: &Path) -> Result<Rgb32, DecodeError> {
             })
         };
         libraw_dcraw_clear_mem(img);
-        drop(handle);
         result
     }
 }

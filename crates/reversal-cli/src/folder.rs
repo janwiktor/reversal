@@ -320,7 +320,7 @@ impl Folder {
         let used = std::fs::read(&sidecar_path).ok();
         let (settings, warning) = settings_from(used.as_deref(), &small);
         std::fs::create_dir_all(&self.out_dir).map_err(|e| e.to_string())?;
-        let bytes = pipeline::export(&input, &scan, &settings, Compression::LosslessJpeg, &out)
+        let bytes = pipeline::export(&input, scan, &settings, Compression::LosslessJpeg, &out)
             .map_err(|e| e.to_string())?;
         // What's in the DNG, not what's in the sidecar: that may have changed while this ran.
         reversal_core::write_atomic(&self.in_dng(file), &settings_json(&settings))
