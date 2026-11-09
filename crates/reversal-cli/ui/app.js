@@ -7,9 +7,9 @@ const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "hard"];
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 const TOOL_TEXT = {
-  crop: "Adjust area for the final DNG export.",
-  area: "Drag over the exposed image only, avoiding film base, film holder or sprocket holes. This area drives negative conversion, and doesn't affect final crop.",
-  base: "Drag over clear unexposed part of the film, avoiding sprocket holes, numbers and film stock markings.",
+  crop: "Drag to set crop for DNG export",
+  area: "Drag over the picture only to set the measured area for conversion. Avoid film base, holder and sprocket holes",
+  base: "Drag over clear, unexposed film, away from sprocket holes and edge markings",
 };
 
 let current = null;   // { file, auto, settings }
@@ -88,7 +88,7 @@ async function loadFiles() {
   const scroll = list.scrollTop;
   list.replaceChildren(...frames.map(frameRow));
   list.scrollTop = scroll;
-  if (!frames.length) $("message").textContent = "No raw files in this folder. Open a folder with NEF, CR2, ARW, RAF or DNG scans.";
+  if (!frames.length) $("message").textContent = "No raw files in this folder. Open a folder with NEF, CR2, CR3, ARW, RAF or DNG scans";
   markCurrent(opening ?? current?.file);
   updateSaveButton();
 }
@@ -127,7 +127,7 @@ function showFrameState(f, state) {
   const saving = batch?.task === "save" && batch.active.includes(f.name);
   state.textContent = saving ? "saving" : f.edited ? "edited" : f.saved ? "saved" : "";
   state.className = `state${f.edited && !saving ? " edited" : ""}${f.manualSetup ? " manual" : ""}`;
-  state.title = f.manualSetup ? "Film type chosen, or custom film base or measured area" : f.edited ? "Changes not saved to a DNG yet" : "";
+  state.title = f.manualSetup ? "Film type, film base or measured area set by hand" : f.edited ? "Changes not saved to a DNG yet" : "";
 }
 
 function showFrameStates() {
@@ -336,7 +336,7 @@ function paintSlider(range) {
 // What could spoil this frame's conversion stays in view with the controls that fix it.
 function showSetupNote() {
   const guessing = !current.baseFound && !hints().base && !hints().base_rgb;
-  const note = current.warning ?? (guessing ? "No clear film detected on this frame. Select custom area, or match base across the film roll from other frames." : "");
+  const note = current.warning ?? (guessing ? "No clear film detected. Draw it with Custom, or take it from other frames with Match film base" : "");
   $("setup-note").textContent = note;
   $("setup-note").hidden = !note;
 }
@@ -414,7 +414,7 @@ async function measureStraightened() {
   if (!straightenUnmeasured || !current) return;
   // A custom area keeps its place on the scan while the picture turns under it.
   const custom = hints().base || hints().analysis;
-  straightenUnmeasured = !(await measure(custom ? "Colors measured again. Custom areas stayed in place, so check them in Show areas." : "Colors measured again for the new angle."));
+  straightenUnmeasured = !(await measure(custom ? "Colors measured again. Check custom areas in Show areas" : "Colors measured again for the new angle"));
 }
 // Saved settings must hold what was measured for their angle, so saving and leaving wait for it.
 async function measureSettled() {
@@ -578,7 +578,7 @@ $("reset").addEventListener("click", () => {
   for (const id of SLIDERS) if (!(bw && COLOR_SLIDERS.includes(id))) adj()[id] = 0;
   adj().look = "neutral";
   changed(0);
-  status(bw ? "Tone reset." : "Tone and color reset.");
+  status(bw ? "Tone reset" : "Tone and color reset");
 });
 
 $("export").addEventListener("click", async () => {
@@ -612,7 +612,7 @@ function rollFrames() {
 }
 
 function openRollFlow() {
-  if (batch) { status("Wait for the current work to finish."); return; }
+  if (batch) { status("Wait for the save to finish"); return; }
   finishDrawing();
   roll = { step: "intro", files: rollFrames() };
   showRollFlow();
@@ -637,9 +637,9 @@ function showRollFlow() {
   if (roll.step === "intro") {
     const frameWord = `${count} frame${count === 1 ? "" : "s"}`;
     const scope = count < frames.length ? `the selected ${frameWord}` : `all ${frameWord}`;
-    body.innerHTML = `<p>In roll mode, all frames will share the same film base selection. Use it to unify the film base setting across the roll, or when some of the scans don't have a visible film edge.</p>
-      <p>Reversal measures the film base on <b></b>. You can include both detected and custom film base selection on each frame, and pick which frames to use for the roll. You can verify and apply changes in the next step.</p>
-      <p>Each frame keeps its own color analysis and Develop settings.</p>`;
+    body.innerHTML = `<p>Give every frame the same film base, taken from several frames. Use it for a consistent roll, or when some scans show no clear film edge.</p>
+      <p>Reversal first measures the film base on <b></b>, without changing them. Then you choose which results to use, and apply.</p>
+      <p>It does not change custom film base settings, color measurement, and Develop settings of each frame.</p>`;
     body.querySelector("b").textContent = scope;
     if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Select at least two frames, or none to use the whole folder.</p>`);
     rollButtons("Cancel", `Measure ${count} frame${count === 1 ? "" : "s"}`, count >= 2);
@@ -655,7 +655,7 @@ function showRollFlow() {
 function showRollProgress() {
   const progress = $("roll-progress");
   if (!progress || !batch) return;
-  const verb = roll.step === "reading" ? "Measuring the film base on frame" : "Applying the film base selection to frame";
+  const verb = roll.step === "reading" ? "Measuring the film base on frame" : "Applying the film base to frame";
   progress.textContent = `${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`;
   progress.nextElementSibling.firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
 }
@@ -667,8 +667,8 @@ function showRollReview() {
   const lost = roll.issues.length ? `<p class="warn" id="roll-issues"></p>` : "";
   const noClear = roll.readings.every((r) => r.source === "unsure");
   body.innerHTML = `<p>${noClear
-      ? `<span class="warn">No clear film detected on any frame.</span> Cancel, select a custom film base on a frame with clear film, and start again.`
-      : "Selected frames determine film base settings for the entire roll. Deselect any that look incorrect."}</p>
+      ? `<span class="warn">No clear film detected on any frame.</span> Cancel, set a custom film base on a frame that shows clear film, and start again.`
+      : "Selected frames set the film base for the roll. Deselect any that look wrong."}</p>
     ${lost}<div id="roll-table"></div><div id="roll-result"></div>`;
   if (lost) body.querySelector("#roll-issues").textContent = roll.issues.map((i) => `${i.file}: ${i.message}`).join("\n");
   const table = body.querySelector("#roll-table");
@@ -760,7 +760,7 @@ async function rollReadingsDone(finished) {
   $("roll-cancel").disabled = false;
   if (finished.canceled) {
     closeRollFlow();
-    status("Stopped. No frame changed.");
+    status("Stopped. No frame changed");
     return;
   }
   const readings = await (await api("/api/roll/readings")).json();
@@ -839,15 +839,15 @@ async function reopenAfterRoll() {
 }
 
 function rollSummary({ done, total, issues, canceled }) {
-  const head = canceled ? "Stopped. No frame changed."
-    : issues.length ? "Could not apply the film base selection to every frame."
-    : `${total} frames now share one film base. Choose Detect to reset a frame to an individual setting.`;
+  const head = canceled ? "Stopped. No frame changed"
+    : issues.length ? "Could not apply the film base to every frame"
+    : `${total} frames now share one film base. Choose Detect on a frame to measure its own`;
   return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
 }
 
 function batchSummary({ done, total, issues, canceled, last_path }) {
   const where = last_path ? ` to ${last_path.slice(0, last_path.lastIndexOf("/"))}` : "";
-  const head = total === 1 && done === 0 ? "Could not save the DNG." : total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}.`;
+  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${last_path}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
   return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
 }
 
@@ -855,22 +855,22 @@ $("reveal").addEventListener("click", () => { if (shell && lastPath) shell.postM
 
 async function setHint(key, rect) {
   if (!current) return;
-  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done."); return; }
+  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done"); return; }
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
-  measure(key === "base" ? (rect ? "Custom film base set." : "Using current frame selection only.")
-                         : (rect ? "Custom measured area set." : "Measuring the center of the scan."), true);
+  measure(key === "base" ? (rect ? "Custom film base set" : "Film base set to Detect")
+                         : (rect ? "Custom measured area set" : "Measured area set to Center"), true);
 }
 
 // The detected type is no choice at all, so choosing it again goes back to detecting.
 // A choice shows at once and holds while it's measured, so a second click compares with it.
 function setFilm(film) {
   if (!current || filmNow() === film) return;
-  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done."); return; }
+  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done"); return; }
   hints().film = film === current.filmDetected ? null : film;
   current.pendingFilm = film;
   syncControls();
-  measure(film === "bw" ? "Converting as black and white." : "Converting as color.");
+  measure(film === "bw" ? "Processing as black and white" : "Processing as color");
 }
 
 // Measures the frame as it's set now. A later call replaces an earlier one still on its way.
@@ -978,7 +978,7 @@ function showLegend() {
     dot.className = `dot ${items.get(p.value)}`;
     return [p.value, dot];
   });
-  $("tool-text").replaceChildren("Showing the ", ...list, holder ? ", which the analysis leaves out." : ".");
+  $("tool-text").replaceChildren("Showing the ", ...list, holder ? ", which measuring leaves out" : "");
 }
 function holderShape() {
   const areas = holderAreas();
@@ -1261,8 +1261,9 @@ function histogram(img, storedClipped) {
   $("clip-high").classList.toggle("over", high / n > 0.005);
   $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
   $("stored").hidden = storedClipped < 0.0005;
-  $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% is too bright to store. Lower Exposure.`;
-  $("stored").title = `${(storedClipped * 100).toFixed(2)}% of pixels are brighter than the DNG can store. Lower Exposure to keep them.`;
+  // "Clipped" above is only the preview's and the DNG keeps it; these pixels are gone for good.
+  $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of highlights beyond DNG range`;
+  $("stored").title = "Brighter than the DNG can store. Lower Exposure to keep them.";
 }
 
 api("/api/version").then((r) => r.json()).then(({ version, commit }) => {
