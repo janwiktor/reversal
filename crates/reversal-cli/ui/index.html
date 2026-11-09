@@ -7,21 +7,28 @@
 <title>Reversal</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body data-frames="open" data-mode="tone" data-tool="">
 <svg class="sprite" width="0" height="0" aria-hidden="true">
   <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 12.5v-9c0-.4.3-.7.7-.7h3.4l1.5 1.7h6.1c.4 0 .7.3.7.7v7.3c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7Z"/></symbol>
+  <symbol id="i-frames" viewBox="0 0 16 16"><path d="M2.5 3.2h11c.4 0 .7.3.7.7v8.2c0 .4-.3.7-.7.7h-11c-.4 0-.7-.3-.7-.7V3.9c0-.4.3-.7.7-.7ZM6.2 3.2v9.6"/></symbol>
+  <symbol id="i-hist" viewBox="0 0 16 16"><path d="M1.8 13.2h12.4M2.5 13.2C4 13.2 4.6 5 6.3 5s2 5.2 3.4 5.2 1.6-3.4 2.8-3.4 1.2 6.4 1.8 6.4"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7L13 5.8M13 2.6v3.2H9.8"/></symbol>
+  <symbol id="i-crop" viewBox="0 0 16 16"><path d="M4.2 1.8v9.3c0 .4.3.7.7.7h9.3M1.8 4.2h9.3c.4 0 .7.3.7.7v9.3"/></symbol>
   <symbol id="i-mirror" viewBox="0 0 16 16"><path d="M8 1.8v12.4M5.8 4.2v7.6L1.8 11.8ZM10.2 4.2v7.6h4Z"/></symbol>
 </svg>
 
 <header id="bar">
   <div id="where">
-    <button type="button" id="choose-folder"><svg aria-hidden="true"><use href="#i-folder"/></svg><span id="folder"></span></button>
-    <span id="file-name"></span>
+    <!-- Opens and closes the frames list, in every layout. -->
+    <button type="button" id="frames-toggle" aria-controls="roll" aria-expanded="true" title="Show or hide the frames"><svg aria-hidden="true"><use href="#i-frames"/></svg><span id="file-name">Frames</span></button>
   </div>
   <div id="frame-tools" role="toolbar" aria-label="Frame">
     <button type="button" class="icon" id="rotate" title="Rotate 90°" aria-label="Rotate 90°"><svg aria-hidden="true"><use href="#i-rotate"/></svg></button>
     <button type="button" class="icon" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up" aria-label="Mirror"><svg aria-hidden="true"><use href="#i-mirror"/></svg></button>
+    <!-- In a narrower window, crop and straighten wait behind this button, in a bar of their own. -->
+    <button type="button" class="icon" id="crop-open" aria-expanded="false" aria-controls="crop-tools" title="Crop and straighten" aria-label="Crop and straighten"><svg aria-hidden="true"><use href="#i-crop"/></svg></button>
+  </div>
+  <div id="crop-tools" role="group" aria-label="Crop and straighten">
     <span class="sep"></span>
     <span id="crop-label"><span class="swatch crop"></span>Crop</span>
     <div class="seg" role="group" aria-labelledby="crop-label" title="What the saved DNG keeps. This doesn't change the colors.">
@@ -39,6 +46,7 @@
 </header>
 
 <nav id="roll" aria-label="Frames">
+  <div id="roll-folder"><button type="button" id="choose-folder"><svg aria-hidden="true"><use href="#i-folder"/></svg><span id="folder"></span></button></div>
   <div id="roll-head">
     <label id="select-all"><input type="checkbox" id="select-all-box">Select all</label>
     <span id="frame-count"></span>
@@ -77,20 +85,25 @@
       <div id="note-more" hidden></div>
     </div>
   </div>
-  <p id="message">Choose a frame on the left to convert it.</p>
+  <p id="message">Choose a frame to convert it.</p>
 </main>
 
-<aside id="dock" aria-label="Development controls">
-  <div id="hist">
+<!-- The histogram: above the side panel in landscape, over the image's corner in portrait,
+     where it folds away to an icon. -->
+<section id="hist" aria-label="Histogram">
+  <div id="hist-body">
     <canvas id="histogram" width="504" height="176" aria-label="RGB histogram of the preview"></canvas>
-    <div class="clip"><span>Clipped</span><span id="clip-low">Shadows 0%</span><span id="clip-high">Highlights 0%</span></div>
+    <div class="clip"><span>Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span></span></div>
     <!-- Over the histogram, so it appears without moving the slider being dragged, and clear of its
          edges, where clipping shows. -->
     <p id="stored" hidden></p>
   </div>
+  <button type="button" id="hist-fold" aria-expanded="true" aria-controls="hist-body" title="Hide or show the histogram" aria-label="Histogram"><svg aria-hidden="true"><use href="#i-hist"/></svg></button>
+</section>
 
-  <!-- How the scan is read. These can break the conversion, so they always stay in view. -->
-  <div class="panel-head">
+<aside id="dock" aria-label="Development controls">
+  <!-- How the scan is read. These can break the conversion, so they come first. -->
+  <div class="panel-head" id="setup-head">
     <span id="h-setup">Setup</span>
     <button type="button" class="head-btn" id="show-areas" aria-pressed="false" title="Show the film base, measured area, final crop and detected film holder on the entire scan">Show areas</button>
   </div>
@@ -121,12 +134,12 @@
     <p id="setup-note" hidden></p>
   </section>
 
-  <div class="panel-head">
+  <div class="panel-head" id="develop-head">
     <span>Develop</span>
     <button type="button" class="head-btn" id="reset" title="Reset tone and color" disabled>Reset</button>
   </div>
   <div id="develop">
-    <section aria-labelledby="h-tone">
+    <section id="tone" aria-labelledby="h-tone">
       <h2 id="h-tone">Tone</h2>
       <div class="slider"><label for="exposure">Exposure</label><input id="exposure" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="exposure-val" type="text" inputmode="numeric" aria-label="Exposure value" value="0"></div>
       <div class="slider"><label for="contrast">Contrast</label><input id="contrast" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="contrast-val" type="text" inputmode="numeric" aria-label="Contrast value" value="0"></div>
@@ -143,7 +156,7 @@
         </div>
       </div>
     </section>
-    <section aria-labelledby="h-color">
+    <section id="color" aria-labelledby="h-color">
       <h2 id="h-color">Color</h2>
       <div class="slider"><label for="temperature">Temperature</label><input id="temperature" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="temperature-val" type="text" inputmode="numeric" aria-label="Temperature value" value="0"></div>
       <div class="slider"><label for="tint">Tint</label><input id="tint" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="tint-val" type="text" inputmode="numeric" aria-label="Tint value" value="0"></div>
@@ -151,6 +164,14 @@
     </section>
   </div>
 </aside>
+
+<!-- On a phone, one tool panel shows at a time, chosen here. -->
+<div id="modes" role="toolbar" aria-label="Tools">
+  <button type="button" data-mode="crop" aria-pressed="false">Crop</button>
+  <button type="button" data-mode="setup" aria-pressed="false">Setup</button>
+  <button type="button" data-mode="tone" aria-pressed="false">Tone</button>
+  <button type="button" data-mode="color" aria-pressed="false">Color</button>
+</div>
 
 <dialog id="about" aria-labelledby="about-title">
   <h2 id="about-title">Reversal</h2>
