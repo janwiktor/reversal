@@ -268,8 +268,10 @@ body[data-frames="closed"] #roll { display: none; }
 #files .state.edited { color: var(--ink); }
 /* Dots: in front of a frame's state in the list, after a label once its choice departs from
    what's detected, and in the Show areas message as its legend. */
-.dot, .changed::after, #files .state.manual::before { content: ""; flex: none; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); vertical-align: 1px; }
+.dot, :is(.row-label, #crop-label).changed::after, #files .state.manual::before { content: ""; flex: none; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); vertical-align: 1px; }
 #files .state.manual::before { --dot: var(--manual); margin-right: 5px; }
+/* Read aloud with the label, and so with the choices it names. */
+:is(.row-label, #crop-label).changed::after { content: "" / "changed"; }
 #l-film { --dot: var(--film); }
 #l-base, .dot.base { --dot: var(--base); }
 #l-area, .dot.area { --dot: var(--area); }

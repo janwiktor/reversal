@@ -5,6 +5,7 @@ const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "bla
 const COLOR_SLIDERS = ["temperature", "tint", "saturation"];
 const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "hard"];
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 const TOOL_TEXT = {
   crop: "Adjust area for the final DNG export.",
   area: "Drag over the exposed image only, avoiding film base, film holder or sprocket holes. This area drives negative conversion, and doesn't affect final crop.",
@@ -968,18 +969,16 @@ function showLegend() {
   if (tool !== "show") return;
   // Until the holder is known, keep it named so the text doesn't change under the reader.
   const holder = !hints().analysis && !(holderKnown() && !current.holder.areas.length);
-  const items = [["film base", "base"], ["measured area", "area"]];
-  if (adj().crop) items.push(["final crop", "crop"]);
-  if (holder) items.push(["detected film holder", "holder"]);
-  const parts = ["Showing the "];
-  items.forEach(([name, cls], i) => {
-    if (i) parts.push(i === items.length - 1 ? (items.length > 2 ? ", and " : " and ") : ", ");
+  const items = new Map([["film base", "base"], ["measured area", "area"]]);
+  if (adj().crop) items.set("final crop", "crop");
+  if (holder) items.set("detected film holder", "holder");
+  const list = LIST.formatToParts([...items.keys()]).flatMap((p) => {
+    if (p.type !== "element") return [p.value];
     const dot = document.createElement("span");
-    dot.className = `dot ${cls}`;
-    parts.push(name, dot);
+    dot.className = `dot ${items.get(p.value)}`;
+    return [p.value, dot];
   });
-  parts.push(holder ? ", which the analysis leaves out." : ".");
-  $("tool-text").replaceChildren(...parts);
+  $("tool-text").replaceChildren("Showing the ", ...list, holder ? ", which the analysis leaves out." : ".");
 }
 function holderShape() {
   const areas = holderAreas();

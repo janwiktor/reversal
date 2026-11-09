@@ -155,7 +155,7 @@ Setup decides how the scan is read. It stays pinned above the development contro
 
 Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Cancel or Escape does too. A dot in the frame list marks a chosen film type, or a custom film base or measured area.
 
-The dots after a label show only once its choice departs from what's detected: Film after choosing the type the scan doesn't read as, Film base for a custom or roll base, Measured for a custom area or Center size, and Crop for any crop. Each takes its area's color: orange for the film base, light blue for the measured area, purple for the crop, and light gray for the film type, which draws no area. Red, yellow and green are kept for status, so the holder, which the analysis leaves out, is the only area in red.
+The dots after a label show only once its choice departs from what's detected: Film after choosing the type the scan doesn't read as, Film base for a custom or roll base, Measured for a custom area or Center size, and Crop for any crop where its label shows (on a phone, the Crop panel's choices say it instead). A screen reader reads the dot as changed. Each takes its area's color: orange for the film base, light blue for the measured area, purple for the crop, and light gray for the film type, which draws no area. Red, yellow and green are kept for status, so the holder, which the analysis leaves out, is the only area in red.
 
 ### Development
 
