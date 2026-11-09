@@ -230,12 +230,16 @@ flowchart TD
 
 The Mac app shows the same web page as the browser, so there is one UI to maintain. It adds only what a page can't do: start the engine, choose a folder and show a file in Finder.
 
+An iOS app for iPhone and iPad is a prototype and isn't released. It shows the same page, with the engine linked into the app, because iOS can't start another process. Its Swift side adds only what a page can't do there: reach files outside the app, and hand DNGs to Photos, Files and other apps. An iPhone stays upright. On its side one panel of tools fits beside the image, but the image keeps about a third of the screen, too little to judge a conversion while moving a slider. An iPad turns freely.
+
 | Part | Responsibility |
 | --- | --- |
 | `crates/reversal-core` | Decode, invert, render previews, write DNGs; no UI, servers or host SDKs |
 | `crates/reversal-cli` | The `reversal` binary: `convert`, plus the `ui` server, batches and per-frame settings |
 | `crates/reversal-cli/ui` | The web page, embedded in the binary |
 | `packaging/macos` | The Swift window, icon and disk image build |
+| `crates/reversal-ios` | The engine as a static library with a C interface, for the iOS app |
+| `packaging/ios` | The iOS app prototype: Xcode project, Swift shell and engine build script |
 
 ### Rules
 

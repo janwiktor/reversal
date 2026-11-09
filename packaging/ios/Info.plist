@@ -15,11 +15,10 @@
   <key>UIUserInterfaceStyle</key><string>Dark</string>
   <key>UIApplicationSceneManifest</key>
   <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+  <!-- An iPhone stays upright: on its side, the tools would leave the image a third of the screen. -->
   <key>UISupportedInterfaceOrientations</key>
   <array>
     <string>UIInterfaceOrientationPortrait</string>
-    <string>UIInterfaceOrientationLandscapeLeft</string>
-    <string>UIInterfaceOrientationLandscapeRight</string>
   </array>
   <key>UISupportedInterfaceOrientations~ipad</key>
   <array>
