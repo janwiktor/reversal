@@ -31,8 +31,5 @@
   <key>UIFileSharingEnabled</key><true/>
   <key>LSSupportsOpeningDocumentsInPlace</key><true/>
   <key>NSPhotoLibraryAddUsageDescription</key><string>Reversal saves the DNGs you choose to your photo library.</string>
-  <!-- The page talks to the engine in this same app, over http on 127.0.0.1. -->
-  <key>NSAppTransportSecurity</key>
-  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>
 </plist>

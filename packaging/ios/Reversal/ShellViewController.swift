@@ -1,6 +1,6 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// The window around the page: starts the engine on a folder, and answers what the page asks of
+// The window around the page: opens a folder in the engine, and answers what the page asks of
 // its shell. The page is the same one the Mac app and a browser get.
 
 import Photos
@@ -17,7 +17,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
     }
 
     private var web: WKWebView!
-    private var port: UInt16 = 0
+    private let engine = Engine()
     private var folder: URL?
     /// The folder outside the app that we hold access to.
     private var scoped: URL?
@@ -51,6 +51,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
 
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "reversal")
+        config.setURLSchemeHandler(EngineSchemeHandler(engine: engine), forURLScheme: Engine.scheme)
         config.userContentController.addUserScript(
             WKUserScript(source: Self.pageAdjustments, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         config.defaultWebpagePreferences.preferredContentMode = .desktop
@@ -62,7 +63,9 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
         web.scrollView.bounces = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.allowsLinkPreview = false
-        web.isInspectable = true
+        #if DEBUG
+            web.isInspectable = true
+        #endif
 
         web.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(web)
@@ -81,47 +84,43 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
         guard !started else { return }
         started = true
         // A card that's gone by now is no news: just ask what to open.
-        guard let last = Library.lastFolder(), show(folder: last) else { return showHome() }
+        guard let last = Library.lastFolder() else { return showHome() }
+        show(folder: last) { [weak self] opened in
+            if !opened { self?.showHome() }
+        }
     }
 
     // MARK: Engine
 
-    /// The engine serves one folder, so a new folder gets a new engine.
-    @discardableResult
-    private func show(folder url: URL) -> Bool {
-        scoped?.stopAccessingSecurityScopedResource()
-        scoped = url.startAccessingSecurityScopedResource() ? url : nil
+    /// The engine holds one folder at a time. `done` hears whether this one opened; if it
+    /// didn't, none is open.
+    private func show(folder url: URL, done: @escaping (Bool) -> Void = { _ in }) {
+        let access = url.startAccessingSecurityScopedResource()
         busy = false
-        let started = url.path.withCString { reversal_engine_start($0) }
-        guard started != 0 else {
-            scoped?.stopAccessingSecurityScopedResource()
-            scoped = nil
-            folder = nil
-            port = 0
-            return false
+        engine.open(url) { [weak self] opened in
+            guard let self else { return }
+            // The engine used the folder that was open until now.
+            self.scoped?.stopAccessingSecurityScopedResource()
+            self.scoped = nil
+            if opened {
+                self.scoped = access ? url : nil
+                self.folder = url
+                Library.remember(folder: url)
+                self.web.load(URLRequest(url: Engine.page))
+            } else {
+                if access { url.stopAccessingSecurityScopedResource() }
+                self.folder = nil
+            }
+            done(opened)
         }
-        port = started
-        folder = url
-        Library.remember(folder: url)
-        web.load(URLRequest(url: engineURL("/")))
-        return true
     }
 
-    private func engineURL(_ path: String) -> URL {
-        URL(string: "http://127.0.0.1:\(port)\(path)")!
-    }
-
-    /// iOS may close the engine's socket while the app is away, so check on coming back. The
-    /// edits are in the sidecars, so a new engine picks up where the last one was. Only a refused
-    /// connection counts: the engine answers one request at a time, so it may just be decoding.
-    func checkEngine() {
-        guard let folder, port != 0 else { return }
-        var request = URLRequest(url: engineURL("/api/version"))
-        request.timeoutInterval = 5
-        URLSession.shared.dataTask(with: request) { [weak self] _, _, error in
-            guard let error = error as? URLError, error.code != .timedOut else { return }
-            DispatchQueue.main.async { self?.show(folder: folder) }
-        }.resume()
+    /// The page stays in the app: nothing it shows leads anywhere else.
+    func webView(
+        _: WKWebView, decidePolicyFor action: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        decisionHandler(action.request.url?.scheme == Engine.scheme ? .allow : .cancel)
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -222,9 +221,11 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
         leaveFolder { [weak self] in
             guard let self else { return }
             self.dismissAll {
-                guard !self.show(folder: url) else { return }
-                self.showHome()
-                self.top.present(self.alert("Could not open \(url.lastPathComponent)", "Check that it's still connected."), animated: true)
+                self.show(folder: url) { opened in
+                    guard !opened else { return }
+                    self.showHome()
+                    self.top.present(self.alert("Could not open \(url.lastPathComponent)", "Check that it's still connected."), animated: true)
+                }
             }
         }
     }
@@ -266,11 +267,10 @@ final class ShellViewController: UIViewController, WKScriptMessageHandler, WKNav
 
     /// The DNGs of the last save, from the engine.
     private func savedDngs(_ done: @escaping ([URL]) -> Void) {
-        URLSession.shared.dataTask(with: engineURL("/api/export/status")) { data, _, _ in
-            let status = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            let paths = status?["saved_paths"] as? [String] ?? []
-            DispatchQueue.main.async { done(paths.map { URL(fileURLWithPath: $0) }) }
-        }.resume()
+        engine.request("GET", "/api/export/status") { response in
+            let paths = response.json?["saved_paths"] as? [String] ?? []
+            done(paths.map { URL(fileURLWithPath: $0) })
+        }
     }
 
     private func showExport() {

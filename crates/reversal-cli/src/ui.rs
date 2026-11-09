@@ -216,29 +216,6 @@ pub fn serve(
     Ok(())
 }
 
-/// The server on a thread of this process, on a free port, for a platform where an app can't
-/// start another process. It stops when this is dropped; a save in progress finishes first.
-pub struct InProcess {
-    pub port: u16,
-    server: Arc<Server>,
-}
-
-impl InProcess {
-    pub fn start(dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let (server, mut state, port) = bind(dir, 0)?;
-        let server = Arc::new(server);
-        let serving = server.clone();
-        std::thread::spawn(move || state.run(&serving));
-        Ok(InProcess { port, server })
-    }
-}
-
-impl Drop for InProcess {
-    fn drop(&mut self) {
-        self.server.unblock();
-    }
-}
-
 /// The engine for an app that holds it in its own process and passes it the requests of its web
 /// view, where an app can't start another process and has no reason to open a port. The page is
 /// the one the server serves, at [`APP_ORIGIN`].

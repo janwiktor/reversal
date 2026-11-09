@@ -85,7 +85,7 @@ Rules:
 - Own minimal **DNG writer** in `reversal-core` (no Adobe DNG SDK in the product).
 - **Web UI:** plain HTML/CSS/JS served by the `reversal ui` command; no frontend build step.
 - **Mac app:** `packaging/macos/build.sh`. The window adds only what a page can't do (start the engine, choose a folder), so features belong in the engine and the page, not in Swift.
-- **iOS app:** `packaging/ios/Reversal.xcodeproj`. iOS can't start another process, so the same server runs on a thread of the app. The Swift shell adds only access to files outside the app and handing DNGs to Files, Photos and other apps. Its build phase runs `packaging/ios/engine.sh`, which builds LibRaw and `reversal-ios` for the SDK.
+- **iOS app:** `packaging/ios/Reversal.xcodeproj`. iOS can't start another process, so the app links the engine, and its web view's requests reach it as calls, through `Engine` in `ui.rs`, with no server or port. The Swift shell adds only access to files outside the app and handing DNGs to Files, Photos and other apps. Its build phase runs `packaging/ios/engine.sh`, which builds LibRaw and `reversal-ios` for the SDK.
 
 ## Commands
 

@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Reversal for iPad: a window around the web UI, as on the Mac. The engine runs in this process,
-// because an iOS app can't start another one. The Swift side adds only what a page can't do:
+// Reversal for iPhone and iPad: a window around the web UI, as on the Mac. The engine runs in this
+// process, because an iOS app can't start another one. The Swift side adds only what a page can't do:
 // reach files outside the app, and hand DNGs to Files, Photos and other apps.
 
 import UIKit
@@ -32,6 +32,5 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.window = window
     }
 
-    func sceneDidBecomeActive(_: UIScene) { shell.checkEngine() }
     func sceneDidEnterBackground(_: UIScene) { shell.rememberEdits() }
 }
