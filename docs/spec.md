@@ -151,9 +151,11 @@ Setup decides how the scan is read. It stays pinned above the development contro
 | Film | Color or B&W, showing what the frame converts as. Choosing the type it doesn't read as marks Film with a dot, and choosing the detected one again goes back to detecting; the tooltip says which. B&W leaves only Tone under Develop |
 | Film base | Detect, or Custom to drag over clear film by hand. Match film base… shares one across frames |
 | Measured | Center (size 50–100%, default 85%, without the holder), or Custom to drag over the picture by hand, which is the fix when the holder is misjudged. Sets where color and exposure are measured, never the crop |
-| Show areas | Draws the film base, measured area and crop on the entire scan, each in the color of its label. With Center, the detected holder is hatched in magenta and labeled Film holder (detected) under Measured. A custom area leaves nothing out, so neither the hatching nor the label shows |
+| Show areas | Draws the film base, measured area and crop on the entire scan, and its message names each one with a dot in its color. With Center, the detected holder is hatched in red and named in the message too. A custom area leaves nothing out, so neither the hatching nor the name shows |
 
 Each group shows one choice: the one in use, or Custom while its drag tool is open. The Center size slider hides with a custom area. Choosing another option cancels an unfinished drag, and Cancel or Escape does too. A dot in the frame list marks a chosen film type, or a custom film base or measured area.
+
+The dots after a label show only once its choice departs from what's detected: Film after choosing the type the scan doesn't read as, Film base for a custom or roll base, Measured for a custom area or Center size, and Crop for any crop where its label shows (on a phone, the Crop panel's choices say it instead). A screen reader reads the dot as changed. Each takes its area's color: orange for the film base, light blue for the measured area, purple for the crop, and light gray for the film type, which draws no area. Red, yellow and green are kept for status, so the holder, which the analysis leaves out, is the only area in red.
 
 ### Development
 

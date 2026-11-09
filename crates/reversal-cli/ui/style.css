@@ -28,11 +28,16 @@
   --veil-edge: inset 0 0 0 1px rgb(255 255 255 / .14);
   --veil-text: 0 0 2px rgb(0 0 0 / .9), 0 1px 3px rgb(0 0 0 / .7);
   --veil-outline: drop-shadow(0 0 1px rgb(0 0 0 / .8));
-  /* Region overlays */
-  --crop: #4fdc74;
+  /* Region overlays and the dots that stand for them. Red, yellow and green mean a status, so a
+     region takes one only when it is one: the holder is red because analysis leaves it out. */
+  --crop: #d66bff;
   --area: #5ec8ff;
-  --base: #ffb547;
-  --holder: #d0009a;
+  --base: #ff8f3a;
+  --holder: #ff4545;
+  /* A film type chosen over the detected one. */
+  --film: #c8c8c8;
+  /* A frame set up by hand, in the frame list. */
+  --manual: #ffb547;
   --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --left: 220px;
   --right: 272px;
@@ -261,7 +266,18 @@ body[data-frames="closed"] #roll { display: none; }
 #files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #files .state { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
 #files .state.edited { color: var(--ink); }
-#l-film.chosen::after, #files .state.manual::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--base); margin-right: 5px; vertical-align: 2px; }
+/* Dots: in front of a frame's state in the list, after a label once its choice departs from
+   what's detected, and in the Show areas message as its legend. */
+.dot, :is(.row-label, #crop-label).changed::after, #files .state.manual::before { content: ""; flex: none; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); vertical-align: 1px; }
+#files .state.manual::before { --dot: var(--manual); margin-right: 5px; }
+/* Read aloud with the label, and so with the choices it names. */
+:is(.row-label, #crop-label).changed::after { content: "" / "changed"; }
+#l-film { --dot: var(--film); }
+#l-base, .dot.base { --dot: var(--base); }
+#l-area, .dot.area { --dot: var(--area); }
+#crop-label, .dot.crop { --dot: var(--crop); }
+.dot.holder { --dot: var(--holder); }
+.float .dot { margin-left: 4px; box-shadow: 0 0 0 1px rgb(0 0 0 / .45); }
 
 /* Image: JS sizes #view to fit, so rotation always stays centered. */
 #stage { grid-area: stage; position: relative; display: flex; align-items: center; justify-content: center; padding: 28px; min-width: 0; min-height: 0; overflow: hidden; }
@@ -353,12 +369,6 @@ section h2 { font-size: var(--text); font-weight: 600; margin-bottom: 2px; line-
 .row.first { margin-top: 0; }
 .row { display: grid; grid-template-columns: var(--label) minmax(0, 1fr); align-items: center; gap: 0 6px; min-height: var(--hit); margin-top: var(--row-gap); }
 .row-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); white-space: nowrap; }
-.swatch { flex: none; width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid; }
-.swatch.crop { border-color: var(--crop); }
-.swatch.area { border-color: var(--area); }
-.swatch.base { border-color: var(--base); }
-.swatch.holder { border-color: var(--holder); }
-#holder-legend .row-label { grid-column: 1 / -1; }
 #setup .slider { margin-top: var(--row-gap); }
 #setup .row .btn { width: 100%; padding: 0 6px; }
 /* Equal halves, so the choices of every Setup row line up whatever their words. */

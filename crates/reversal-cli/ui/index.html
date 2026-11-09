@@ -30,7 +30,7 @@
   </div>
   <div id="crop-tools" role="group" aria-label="Crop and straighten">
     <span class="sep"></span>
-    <span id="crop-label"><span class="swatch crop"></span>Crop</span>
+    <span id="crop-label">Crop</span>
     <div class="seg" role="group" aria-labelledby="crop-label" title="What the saved DNG keeps. This doesn't change the colors.">
       <button type="button" id="crop-full" aria-pressed="true">Entire scan</button>
       <button type="button" id="crop-frame" aria-pressed="false" title="Keep the area measured in Setup">Measured area</button>
@@ -116,21 +116,18 @@
       </div>
     </div>
     <div class="row">
-      <div class="row-label" id="l-base"><span class="swatch base"></span>Film base</div>
+      <div class="row-label" id="l-base">Film base</div>
       <div class="seg" role="group" aria-labelledby="l-base" title="Clear, unexposed film, which sets the color conversion for this frame">
         <button type="button" id="base-auto" aria-pressed="true">Detect</button>
         <button type="button" id="base-draw" aria-pressed="false">Custom</button>
       </div>
     </div>
     <div class="row">
-      <div class="row-label" id="l-area"><span class="swatch area"></span>Measured</div>
+      <div class="row-label" id="l-area">Measured</div>
       <div class="seg" role="group" aria-labelledby="l-area" title="Where this frame's color and exposure are measured. Center ignores the film holder, and Custom measures exactly what you draw. This doesn't change the crop.">
         <button type="button" id="area-auto" aria-pressed="true">Center</button>
         <button type="button" id="area-draw" aria-pressed="false">Custom</button>
       </div>
-    </div>
-    <div class="row" id="holder-legend" hidden>
-      <div class="row-label"><span class="swatch holder"></span>Film holder (detected)</div>
     </div>
     <div class="slider" id="area-percent-row"><label for="area-percent">Center size</label><input id="area-percent" class="from-min" type="range" min="50" max="100" step="1" value="85"><input class="val" id="area-percent-val" type="text" inputmode="numeric" aria-label="Center size value" value="85%"></div>
     <div class="row">
