@@ -639,7 +639,7 @@ function showRollFlow() {
     const scope = count < frames.length ? `the selected ${frameWord}` : `all ${frameWord}`;
     body.innerHTML = `<p>Give every frame the same film base, taken from several frames. Use it for a consistent roll, or when some scans show no clear film edge.</p>
       <p>Reversal first measures the film base on <b></b>, without changing them. Then you choose which results to use, and apply.</p>
-      <p>Frames with a custom film base keep it. Every frame keeps its own color measurement and Develop settings.</p>`;
+      <p>It does not change custom film base settings, color measurement, and Develop settings of each frame.</p>`;
     body.querySelector("b").textContent = scope;
     if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Select at least two frames, or none to use the whole folder.</p>`);
     rollButtons("Cancel", `Measure ${count} frame${count === 1 ? "" : "s"}`, count >= 2);
@@ -870,7 +870,7 @@ function setFilm(film) {
   hints().film = film === current.filmDetected ? null : film;
   current.pendingFilm = film;
   syncControls();
-  measure(film === "bw" ? "Converting as black and white" : "Converting as color");
+  measure(film === "bw" ? "Processing as black and white" : "Processing as color");
 }
 
 // Measures the frame as it's set now. A later call replaces an earlier one still on its way.
