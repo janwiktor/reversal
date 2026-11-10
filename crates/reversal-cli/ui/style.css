@@ -154,6 +154,9 @@ button:not(.crop-h)::after {
 .icon { width: max(28px, var(--hit)); padding: 0; display: inline-grid; place-items: center; color: #cfcfcf; }
 @media (hover: hover) { .icon:hover { background: var(--control); color: #fff; } }
 .icon:active, .icon[aria-pressed="true"] { background: var(--control-on); color: #fff; }
+/* An icon in a gray button: for what leads away from the work, at either end of the top bar. */
+@media (hover: hover) { .icon.btn:hover { background: var(--control-hover); } }
+.icon.btn:disabled { background: var(--control); }
 /* Icons share one drawing: a 1.25 px rounded stroke on a 16 px grid, in the button's color. */
 button > svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
 /* Controls ease between their states. */
@@ -241,7 +244,7 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 /* Top bar, lined up with the columns below it. */
 #bar { grid-area: bar; display: grid; grid-template: calc(var(--bar-h) - 1px) / var(--left) auto minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
 /* The open frame's name, which opens and closes the frames list. */
-#where { display: flex; align-items: center; min-width: 0; margin: 0 6px; }
+#where { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 6px; }
 #frames-toggle, #choose-folder { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
 @media (hover: hover) { :is(#frames-toggle, #choose-folder):not(:disabled):hover { background: var(--control); } }
 :is(#frames-toggle, #choose-folder) svg { color: var(--ink-quiet); transition: color var(--fade) var(--ease); }
