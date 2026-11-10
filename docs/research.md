@@ -247,7 +247,18 @@ A phone gives an app a few gigabytes at most, and a full scan is 12 bytes a pixe
 
 Together: 1,150 MB to 533 MB for a 16-megapixel frame, and 1,803 MB to 1,204 MB for a 24-megapixel X-Trans frame with a quarter turn. Eight conversions of a DNG, a NEF and a RAF, covering every turn, mirror, straighten, crop and both compressions, are byte-identical to the build before. A save takes the same time.
 
-About half of what remains is memory already freed that macOS's allocator keeps for reuse. With that cache off (`MallocLargeCache=0`) the same saves peak at 280 MB and 626 MB, close to what the conversion holds at once: 18 bytes a pixel while decoding, 24 with a quarter turn. iOS keeps such a cache too. On an iPad Air (M3, iOS 27.2) the same 16-megapixel frame with a quarter turn peaked at 704 MB, and saving a roll of 138 frames peaked at 681 MB; opening a frame peaked at 505 MB. The app held 414 MB as the roll's save ended, 289 MB three seconds later and 36 MB after ten, with nothing asked of the allocator, and asking it then freed nothing more. That iPad allows an app about 5.1 GB. An iPhone and larger frames are still to measure.
+About half of what remains is memory already freed that macOS's allocator keeps for reuse. With that cache off (`MallocLargeCache=0`) the same saves peak at 280 MB and 626 MB, close to what the conversion holds at once: 18 bytes a pixel while decoding, 24 with a quarter turn. iOS keeps such a cache too. On an iPad Air (M3, iOS 27.2) the same 16-megapixel frame with a quarter turn peaked at 704 MB, and saving a roll of 138 frames peaked at 681 MB; opening a frame peaked at 505 MB. The app held 414 MB as the roll's save ended, 289 MB three seconds later and 36 MB after ten, with nothing asked of the allocator, and asking it then freed nothing more. That iPad allows an app about 5.1 GB.
+
+An iPhone 16 Pro Max (iOS 27.0.1) allows about 3.4 GB. Each frame below was opened, turned a quarter and saved in a run of its own. There's no camera file above 24 megapixels at hand, so the two largest are uncompressed Bayer DNGs written for the test, which show what the conversion holds at that size and not what a camera's own format costs to decode.
+
+| Frame | Peak after opening | Peak after saving |
+| --- | --- | --- |
+| 16 megapixels, NEF | 513 MB | 719 MB |
+| 24 megapixels, X-Trans RAF | 823 MB | 1,068 MB |
+| 45 megapixels, written DNG | 1,368 MB | 1,381 MB |
+| 60 megapixels, written DNG | 1,806 MB | 1,854 MB |
+
+So a 60-megapixel frame fits there with 1.5 GB to spare, and above 24 megapixels opening a frame costs as much as saving it. After a large save the app can hold up to 1.1 GB for more than a minute: freed memory that neither the allocator gives back when asked nor the engine holds in its cache. It doesn't add up. Saves of 45, 60, 60, 45 and 16 megapixels in a row peaked at 2,093 MB, 240 MB above the largest alone, and the app was at 23 MB within a minute of the last. Phones with less memory are still to measure.
 
 ### Threads and saving off screen on iOS
 
