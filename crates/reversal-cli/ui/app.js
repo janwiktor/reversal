@@ -84,6 +84,8 @@ const filmNow = () => current.pendingFilm ?? current.settings.estimate.film;
 // once.
 const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const phoneLayout = matchMedia("not all and (min-width: 600px)");
+// Where the frames list and the tools share one panel under the image.
+const panelUnderImage = matchMedia("not all and (min-width: 600px), (orientation: portrait)");
 const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 // A time token in milliseconds, whether written in s or ms.
 const cssTime = (name) => { const v = token(name); return (parseFloat(v) || 0) * (v.endsWith("ms") ? 1 : 1000); };
@@ -139,10 +141,9 @@ function fadeOut(el, then) {
 // A panel that changes height slides there rather than jumping. The edge it shares with the image
 // eases to its new place and the panel's contents ride that edge, so the image resizes smoothly
 // with it. What a panel shows changes at once: only the edge moves.
-function slidePanels(change) {
-  // On a phone the panels sit under the image in the page's grid. Elsewhere only the crop bar,
-  // under the top bar's row, changes height; the frames column slides by itself.
-  const grid = phoneLayout.matches ? document.body : $("bar");
+function slidePanels(change, grid = panelUnderImage.matches ? document.body : $("bar")) {
+  // On a phone and in portrait the panels sit under the image in the page's grid. Elsewhere only
+  // the crop bar, under the top bar's row, changes height; the frames column slides by itself.
   const rows = () => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
   // From where the edge is now, mid-slide or not.
   const from = rows();
@@ -151,15 +152,52 @@ function slidePanels(change) {
   const to = rows();
   const n = to.length;
   if (from.length !== n || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
-  // The page's rows are the bar, the image, the panel rows and the tool bar. Only the image's row
-  // moves: the panel rows under it fill from the top at their new heights and the last takes what's
-  // left, so the panel's contents ride its top edge and the tool bar covers what doesn't fit yet.
-  // The crop bar's two rows both move, and its contents ride their bottom edge.
+  // The page's rows are the bar, the image, the panel rows and, on a phone, the tool bar. Only the
+  // image's row moves: the panel rows under it fill from the top at their new heights and the last
+  // takes what's left, so the panel's contents ride its top edge and the tool bar covers what
+  // doesn't fit yet. The crop bar's two rows both move, and its contents ride their bottom edge.
+  const last = phoneLayout.matches ? n - 2 : n - 1;
   const template = grid === document.body
-    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === n - 2 ? "minmax(0px, 1fr)" : i > 1 && i < n - 1 ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
+    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
     : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
   move(grid, "size", { gridTemplateRows: [template(false), template(true)] }, motion("--slide"), { flags: ["moving"] });
 }
+
+// A row that comes or goes eases its height, so what's under it slides there rather than jumps.
+// `now` puts it in place at once.
+function slideRow(row, show, now = false) {
+  const going = motionTag(row, "size");
+  if ((going ? going === "in" : !row.hidden) === show) return;
+  const from = row.hidden ? 0 : row.getBoundingClientRect().height;
+  endMotion(row, "size");
+  row.hidden = false;
+  const full = row.getBoundingClientRect().height;
+  // Out of sight, in a panel that isn't shown, there's nothing to slide.
+  if (now || !full) { row.hidden = !show; return; }
+  const gap = parseFloat(getComputedStyle(row).marginTop) || 0;
+  const part = (share) => ({ height: `${full * share}px`, marginTop: `${gap * share}px`, opacity: share });
+  move(row, "size", [part(from / full), part(show ? 1 : 0)], motion("--slide"), {
+    flags: ["moving"],
+    tag: show ? "in" : "out",
+    after: (finished) => { if (finished && !show) row.hidden = true; },
+  });
+}
+
+// A touch screen sends no double click, so two short taps in one place count as one.
+function onDoubleTap(el, run) {
+  let down = null, last = 0;
+  el.addEventListener("pointerdown", (e) => { down = e.pointerType === "mouse" ? null : { x: e.clientX, y: e.clientY, at: e.timeStamp }; });
+  el.addEventListener("pointerup", (e) => {
+    const tap = down && e.timeStamp - down.at < 300 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 10;
+    down = null;
+    if (tap && e.timeStamp - last < DOUBLE_CLICK_MS) { last = 0; run(); } else last = tap ? e.timeStamp : 0;
+  });
+}
+
+// The page is an app's window, not a document, and keeps its size. A pinch on a trackpad comes as
+// a wheel turn with Control held in some browsers and as a gesture in others.
+addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+for (const type of ["gesturestart", "gesturechange"]) addEventListener(type, (e) => e.preventDefault());
 
 // ---------- Messages ----------
 // Everything the app has to say floats at the foot of the image, one message at a time. A message
@@ -423,7 +461,7 @@ function markCurrent(name) {
 // On a phone, the bar at the bottom picks which tools show, and closes the list. The column stays
 // as it was left; turning the device to portrait with a frame open shows the tools instead.
 // The same layouts float the histogram over the image.
-const framesInPlaceOfTools = matchMedia("not all and (min-width: 600px), (orientation: portrait)");
+const framesInPlaceOfTools = panelUnderImage;
 let framesColumn = true;
 function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
@@ -450,7 +488,7 @@ for (const layout of [phoneLayout, framesInPlaceOfTools]) {
 }
 $("crop-open").addEventListener("click", () => slidePanels(() => {
   $("crop-open").setAttribute("aria-expanded", String($("crop-open").getAttribute("aria-expanded") !== "true"));
-}));
+}, $("bar")));
 for (const button of document.querySelectorAll("#modes button")) {
   button.addEventListener("click", () => slidePanels(() => {
     document.body.dataset.mode = button.dataset.mode;
@@ -670,11 +708,21 @@ function showSetupNote() {
   $("setup-note").hidden = !note;
 }
 
+let syncedFrame = null;  // the frame the controls last showed
 function syncControls() {
   const a = adj();
   // Black and white has only Tone to develop. On a phone, its Color panel gives way to Tone.
   const film = filmNow();
-  document.body.dataset.film = film;
+  // The panel under the image is as tall as what it shows, so its edge slides when that changes.
+  if (document.body.dataset.film !== film) {
+    slidePanels(() => {
+      document.body.dataset.film = film;
+      if (film === "bw" && document.body.dataset.mode === "color") {
+        document.body.dataset.mode = "tone";
+        pressModes();
+      }
+    });
+  }
   $("film-color").setAttribute("aria-pressed", String(film === "color"));
   $("film-bw").setAttribute("aria-pressed", String(film === "bw"));
   const chosen = !!hints().film;
@@ -687,10 +735,6 @@ function syncControls() {
   $("film-seg").title = chosen
     ? `Chosen for this frame. The scan reads as ${reads}; choose that to go back to detecting.`
     : "Detected from the scan. Choose the other type to convert this frame as that instead.";
-  if (film === "bw" && document.body.dataset.mode === "color") {
-    document.body.dataset.mode = "tone";
-    pressModes();
-  }
   for (const id of [...SLIDERS, "straighten"]) showValue(id, a[id]);
   for (const look of LOOKS) $(`look-${look}`).setAttribute("aria-pressed", String(a.look === look));
   const percent = hints().area_percent ?? current.defaultAreaPercent;
@@ -702,7 +746,9 @@ function syncControls() {
   const customArea = tool === "area" || !!hints().analysis;
   $("area-auto").setAttribute("aria-pressed", String(!customArea));
   $("area-draw").setAttribute("aria-pressed", String(customArea));
-  $("area-percent-row").hidden = customArea;
+  // Another frame shows its own at once; a choice made on this one slides the row in or out.
+  slideRow($("area-percent-row"), !customArea, syncedFrame !== current.file);
+  syncedFrame = current.file;
   showLegend();
   const customBase = tool === "base" || !!hints().base;
   $("base-auto").setAttribute("aria-pressed", String(!customBase && !hints().base_rgb));
@@ -725,7 +771,9 @@ function changed(delay = 0) {
 for (const id of [...SLIDERS, "straighten"]) {
   $(id).title = "Double-click to reset";
   $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); if (id === "straighten") straightenMoved(); changed(); } });
-  $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; if (id === "straighten") straightenMoved(); changed(0); } });
+  const reset = () => { if (current) { adj()[id] = 0; if (id === "straighten") straightenMoved(); changed(0); } };
+  $(id).addEventListener("dblclick", reset);
+  onDoubleTap($(id), reset);
 }
 
 // A new angle closes the areas, which no longer fit, but not the crop frame, since straightening and
@@ -775,6 +823,7 @@ function setAreaPercent(percent) {
 }
 $("area-percent").addEventListener("input", (e) => setAreaPercent(Number(e.target.value)));
 $("area-percent").addEventListener("dblclick", () => setAreaPercent(null));
+onDoubleTap($("area-percent"), () => setAreaPercent(null));
 
 // A value box drives its slider, so a typed number goes the same way as a drag.
 for (const id of [...SLIDERS, "straighten", "area-percent"]) {
