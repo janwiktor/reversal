@@ -257,7 +257,7 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
    like −10.0°, is the widest, so its box is too. */
 #crop-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
 #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-#save { display: flex; align-items: center; justify-content: flex-end; padding: 0 10px; }
+#save { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 10px; }
 .primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
 @media (hover: hover) { .primary:not(:disabled):hover { background: #2a7ae0; } }
 .primary:not(:disabled):active { background: #1a61b8; }
@@ -405,6 +405,9 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
 .clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
+/* An arrow toward the end of the histogram a number counts: left for shadows, right for highlights. */
+.clip-end { display: inline-block; width: 0; height: 0; border: 4px solid transparent; border-left-width: 0; border-right: 5px solid currentColor; margin-right: 4px; }
+#clip-high .clip-end { border-right-width: 0; border-left: 5px solid currentColor; margin: 0 0 0 4px; }
 /* Too narrow for the names: the numbers alone, under the ends of the histogram they count. */
 @container (max-width: 200px) {
   .clip-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

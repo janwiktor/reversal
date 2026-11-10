@@ -32,6 +32,8 @@ let renderAgain = false;
 // with { busy }, reveal with { path }, export with { files }, and capabilities, which a shell
 // may answer with what it does differently from the Mac app's:
 //   export: it hands saved DNGs to other apps, where there's no file manager to show them in
+//   rolls: chooseFolder opens its start screen, with the rolls it keeps, so the way there
+//     stays in the bar
 // reveal and export say where their button is, as { from: [x, y, width, height] }, for a shell
 // that shows its choices next to it.
 const shell = window.webkit?.messageHandlers?.reversal;
@@ -40,6 +42,8 @@ let shellCan = {};
 shell?.postMessage({ action: "capabilities" })?.then?.((can) => {
   shellCan = can ?? {};
   if (shellCan.export) $("reveal").textContent = "Export…";
+  $("start-open").hidden = !shellCan.rolls;
+  updateExportButton();
   updateExportButton();
 });
 // An iPhone's number pads have no minus key, so its value fields that take one get the full
@@ -1680,9 +1684,11 @@ $("choose-folder").disabled = !shell;
 updateSaveButton();
 setBusy(false);
 showHistRows(false, false, { now: true });
-$("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
+for (const id of ["choose-folder", "start-open"]) $(id).addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
 
 loadFiles().then(() => {
+  // A folder opens on its first frame: an empty stage only asks for a tap that's always the same.
+  if (!current && !opening && frames.length) open(frames[0].name);
   const left = unfinished.length;
   offerRest(`Saving stopped with ${left} frame${left > 1 ? "s" : ""} left`, left > 1 ? "Save them" : "Save it");
 }).catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });

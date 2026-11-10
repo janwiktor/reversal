@@ -3,7 +3,6 @@
 // The window around the page: opens a folder in the engine, and answers what the page asks of
 // its shell. The page is the same one the Mac app and a browser get.
 
-import Photos
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -14,7 +13,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     UIDocumentPickerDelegate, PHPickerViewControllerDelegate
 {
     private enum Pick {
-        case openFolder, importFolder, importFiles, saveToFiles
+        case openFolder, importFolder, importFiles
     }
 
     private var web: WKWebView!
@@ -210,7 +209,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     /// What the page learns when it asks what this shell does differently: see `shell` in the
     /// page's `app.js`. The page stays the same everywhere, and adapts itself to this.
-    private static let capabilities: [String: Any] = ["export": true]
+    private static let capabilities: [String: Any] = ["export": true, "rolls": true]
 
     /// Requests from the page, which is served by our own engine, in this process. Every one
     /// gets an answer, since the page holds a promise for it.
@@ -336,7 +335,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         case .importFiles:
             let parent = first.deletingLastPathComponent().lastPathComponent
             runImport(urls, rollName: parent)
-        case .saveToFiles, nil: break
+        case nil: break
         }
     }
 
@@ -502,14 +501,10 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         }
     }
 
+    /// Hands DNGs on with the system's share sheet, which has Photos, Files and other apps.
     private func showExport(_ dngs: [URL]) {
         guard !dngs.isEmpty else { return }
-        let title = dngs.count == 1 ? dngs[0].lastPathComponent : "\(dngs.count) DNGs"
-        let sheet = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: "Open in Another App…", style: .default) { _ in self.share(dngs) })
-        sheet.addAction(UIAlertAction(title: "Save to Photos", style: .default) { _ in self.saveToPhotos(dngs) })
-        sheet.addAction(UIAlertAction(title: "Save to Files…", style: .default) { _ in self.saveToFiles(dngs) })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: nil)
         anchor(sheet)
         top.present(sheet, animated: true)
     }
@@ -532,44 +527,6 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         popover.popoverPresentationController?.sourceView = view
         popover.popoverPresentationController?.sourceRect = place
         if view !== web { popover.popoverPresentationController?.permittedArrowDirections = [] }
-    }
-
-    private func share(_ dngs: [URL]) {
-        let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: nil)
-        anchor(sheet)
-        top.present(sheet, animated: true)
-    }
-
-    private func saveToFiles(_ dngs: [URL]) {
-        pick = .saveToFiles
-        let picker = UIDocumentPickerViewController(forExporting: dngs, asCopy: true)
-        picker.delegate = self
-        top.present(picker, animated: true)
-    }
-
-    private func saveToPhotos(_ dngs: [URL]) {
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async {
-                    self.top.present(self.alert("Reversal can't add to Photos", "Allow it in Settings, under Privacy & Security."), animated: true)
-                }
-                return
-            }
-            PHPhotoLibrary.shared().performChanges {
-                for dng in dngs {
-                    let options = PHAssetResourceCreationOptions()
-                    options.originalFilename = dng.lastPathComponent
-                    PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: dng, options: options)
-                }
-            } completionHandler: { added, error in
-                DispatchQueue.main.async {
-                    let reply = added
-                        ? self.alert("Saved to Photos", dngs.count == 1 ? dngs[0].lastPathComponent : "\(dngs.count) DNGs")
-                        : self.alert("Photos did not accept this", error?.localizedDescription ?? "")
-                    self.top.present(reply, animated: true)
-                }
-            }
-        }
     }
 
     private func alert(_ title: String, _ message: String) -> UIAlertController {
