@@ -3,14 +3,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Reversal</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-frames="open" data-mode="tone" data-tool="">
 <svg class="sprite" width="0" height="0" aria-hidden="true">
-  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 12.5v-9c0-.4.3-.7.7-.7h3.4l1.5 1.7h6.1c.4 0 .7.3.7.7v7.3c0 .4-.3.7-.7.7H2.5c-.4 0-.7-.3-.7-.7Z"/></symbol>
+  <!-- A folder with a magnifying glass: where scans are found and opened. -->
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M7.6 12.2H2.5c-.4 0-.7-.3-.7-.7v-8c0-.4.3-.7.7-.7h3.4l1.5 1.7h6.1c.4 0 .7.3.7.7v1.9"/><circle cx="11.1" cy="10.6" r="2.4"/><path d="M12.9 12.4l1.7 1.7"/></symbol>
   <symbol id="i-frames" viewBox="0 0 16 16"><path d="M2.5 3.2h11c.4 0 .7.3.7.7v8.2c0 .4-.3.7-.7.7h-11c-.4 0-.7-.3-.7-.7V3.9c0-.4.3-.7.7-.7ZM6.2 3.2v9.6"/></symbol>
+  <!-- The system's sign for handing something on: an arrow up out of a tray. -->
+  <symbol id="i-share" viewBox="0 0 16 16"><path d="M8 1.8v8.2M5.3 4.4 8 1.8l2.7 2.6M5.4 6.9H3.9c-.4 0-.7.3-.7.7v5.9c0 .4.3.7.7.7h8.2c.4 0 .7-.3.7-.7V7.6c0-.4-.3-.7-.7-.7h-1.5"/></symbol>
   <symbol id="i-hist" viewBox="0 0 16 16"><path d="M1.8 13.2h12.4M2.5 13.2C4 13.2 4.6 5 6.3 5s2 5.2 3.4 5.2 1.6-3.4 2.8-3.4 1.2 6.4 1.8 6.4"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7L13 5.8M13 2.6v3.2H9.8"/></symbol>
   <symbol id="i-crop" viewBox="0 0 16 16"><path d="M4.2 1.8v9.3c0 .4.3.7.7.7h9.3M1.8 4.2h9.3c.4 0 .7.3.7.7v9.3"/></symbol>
@@ -24,6 +27,9 @@
 
 <header id="bar">
   <div id="where">
+    <!-- Where the shell has a start screen with the rolls, the way to it is always here. It and
+         the share button at the bar's other end lead away from the work, so they look alike. -->
+    <button type="button" class="icon btn" id="start-open" title="Rolls and folders" aria-label="Rolls and folders" hidden><svg aria-hidden="true"><use href="#i-folder"/></svg></button>
     <!-- Opens and closes the frames list, in every layout. -->
     <button type="button" id="frames-toggle" aria-controls="roll" aria-expanded="true" title="Show or hide the frames"><svg aria-hidden="true"><use href="#i-frames"/></svg><span id="file-name">Frames</span></button>
   </div>
@@ -46,6 +52,7 @@
   </div>
   <div id="save">
     <button type="button" class="primary" id="export" disabled>Save DNG</button>
+    <button type="button" class="icon btn" id="export-dngs" title="Hand the DNGs of the selected frames, or of the open one, to another app" aria-label="Export DNGs" hidden><svg aria-hidden="true"><use href="#i-share"/></svg></button>
     <span class="sr-only" id="save-progress" role="status"></span>
   </div>
 </header>
@@ -89,7 +96,7 @@
   <div class="floats" id="messages">
     <div class="float" id="note" role="status" hidden>
       <p class="float-text" id="note-text"><span id="note-words"></span></p>
-      <span class="float-actions"><button type="button" class="btn" id="note-details" aria-expanded="false" aria-controls="note-more" hidden>Details</button><button type="button" class="btn" id="reveal" hidden>Show in Finder</button></span>
+      <span class="float-actions"><button type="button" class="btn" id="note-details" aria-expanded="false" aria-controls="note-more" hidden>Details</button><button type="button" class="btn" id="note-action" hidden></button><button type="button" class="btn" id="reveal" hidden>Show in Finder</button></span>
       <div id="note-more" hidden></div>
       <button type="button" class="btn sr-only" id="note-dismiss">Dismiss</button>
     </div>
@@ -102,7 +109,7 @@
 <section id="hist" aria-label="Histogram">
   <div id="hist-body">
     <canvas id="histogram" width="504" height="176" aria-label="RGB histogram of the preview"></canvas>
-    <div class="clip" id="clip"><span title="In the preview only. The DNG keeps these tones.">Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span></span></div>
+    <div class="clip" id="clip"><span title="In the preview only. The DNG keeps these tones.">Clipped</span><span id="clip-low"><span class="clip-name">Shadows </span><i class="clip-end" aria-hidden="true"></i><span class="clip-pct">0%</span></span><span id="clip-high"><span class="clip-name">Highlights </span><span class="clip-pct">0%</span><i class="clip-end" aria-hidden="true"></i></span></div>
     <!-- Over the top of the histogram in the side panel, so it appears without moving a slider
          being dragged; under the clipping numbers where the histogram floats. -->
     <p id="stored" hidden></p>
@@ -154,12 +161,6 @@
   <div id="develop">
     <section id="tone" aria-labelledby="h-tone">
       <h2 id="h-tone">Tone</h2>
-      <div class="slider"><label for="exposure">Exposure</label><input id="exposure" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="exposure-val" type="text" inputmode="numeric" aria-label="Exposure value" value="0"></div>
-      <div class="slider"><label for="contrast">Contrast</label><input id="contrast" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="contrast-val" type="text" inputmode="numeric" aria-label="Contrast value" value="0"></div>
-      <div class="slider"><label for="highlights">Highlights</label><input id="highlights" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="highlights-val" type="text" inputmode="numeric" aria-label="Highlights value" value="0"></div>
-      <div class="slider"><label for="shadows">Shadows</label><input id="shadows" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="shadows-val" type="text" inputmode="numeric" aria-label="Shadows value" value="0"></div>
-      <div class="slider"><label for="whites">Whites</label><input id="whites" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="whites-val" type="text" inputmode="numeric" aria-label="Whites value" value="0"></div>
-      <div class="slider"><label for="blacks">Blacks</label><input id="blacks" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="blacks-val" type="text" inputmode="numeric" aria-label="Blacks value" value="0"></div>
       <div class="row">
         <div class="row-label" id="l-profile">Profile</div>
         <div class="seg" role="group" aria-labelledby="l-profile">
@@ -168,6 +169,12 @@
           <button type="button" id="look-hard" aria-pressed="false">Hard</button>
         </div>
       </div>
+      <div class="slider"><label for="exposure">Exposure</label><input id="exposure" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="exposure-val" type="text" inputmode="numeric" aria-label="Exposure value" value="0"></div>
+      <div class="slider"><label for="contrast">Contrast</label><input id="contrast" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="contrast-val" type="text" inputmode="numeric" aria-label="Contrast value" value="0"></div>
+      <div class="slider"><label for="highlights">Highlights</label><input id="highlights" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="highlights-val" type="text" inputmode="numeric" aria-label="Highlights value" value="0"></div>
+      <div class="slider"><label for="shadows">Shadows</label><input id="shadows" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="shadows-val" type="text" inputmode="numeric" aria-label="Shadows value" value="0"></div>
+      <div class="slider"><label for="whites">Whites</label><input id="whites" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="whites-val" type="text" inputmode="numeric" aria-label="Whites value" value="0"></div>
+      <div class="slider"><label for="blacks">Blacks</label><input id="blacks" type="range" min="-100" max="100" step="1" value="0"><input class="val" id="blacks-val" type="text" inputmode="numeric" aria-label="Blacks value" value="0"></div>
     </section>
     <section id="color" aria-labelledby="h-color">
       <h2 id="h-color">Color</h2>
@@ -194,6 +201,7 @@
   <p>This product includes DNG technology under license by Adobe.</p>
   <p>RAW decoding uses LibRaw, copyright © 2008-2025 LibRaw LLC, under the CDDL 1.0: https://opensource.org/license/cddl-1-0. Its source code is available from https://www.libraw.org/download.</p>
   <details id="about-details"><summary>License text</summary><pre id="about-license"></pre></details>
+  <div id="about-notices"></div>
   <div class="dialog-actions"><button type="button" class="btn" id="about-close">Close</button></div>
 </dialog>
 

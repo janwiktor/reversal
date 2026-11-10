@@ -81,7 +81,7 @@ pub fn output_paths(inputs: &[PathBuf], output: Option<&Path>) -> Result<Vec<Pat
 /// Convert a decoded scan and write the DNG; returns the file size in bytes.
 pub fn export(
     input: &Path,
-    scan: &Rgb32,
+    scan: Rgb32,
     settings: &Settings,
     compression: Compression,
     out: &Path,

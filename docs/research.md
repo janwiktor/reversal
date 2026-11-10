@@ -233,6 +233,52 @@ The pipeline is per-pixel and runs in plain Rust. GPU work remains an untried op
 | Decoding frames in parallel, with an OpenMP build of LibRaw | Twelve frames took 162 s, against 4.4 s with the development build and 6.1 s with the app's, each decoding one frame at a time | One decode at a time; the plain LibRaw we link isn't thread-safe either |
 | File size with lossless JPEG | About 62–64 MB for a 16 MP D5100 scan, on two frames. Other sizes and JPEG XL weren't measured | No change |
 
+### Memory of a save
+
+A phone gives an app a few gigabytes at most, and a full scan is 12 bytes a pixel as 32-bit float RGB: 193 MB at 16 megapixels, 730 MB at 61. Saving one 16-megapixel frame held 1,150 MB at its peak, measured as the process's peak memory footprint on a Mac. It kept the scan, a straightened copy, a cropped copy and a rotated copy at once, even when none of the three changed anything, then a 16-bit copy of the whole positive for the DNG.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Converting in the scan's own memory: straightening, cropping, mirroring and a half turn copy nothing when they have nothing to do, and crop, mirror and half turn work in place | One image where there were four. A quarter turn and a straighten still need a second image while they run | Keep |
+| Storing samples a strip or a tile at a time, in place of a 16-bit copy of the image | 6 bytes a pixel less | Keep |
+| Closing LibRaw before making the float image from its output | Its working buffers, about 10 bytes a pixel, are gone before ours is made | Keep |
+| Asking once for the room the DNG's bytes need | 60 MB less at 16 megapixels: no doubling and copying as the file grows | Keep |
+| Asking Apple's allocator to hand freed blocks back (`malloc_zone_pressure_relief`) | No effect on the peak | Dropped |
+
+Together: 1,150 MB to 533 MB for a 16-megapixel frame, and 1,803 MB to 1,204 MB for a 24-megapixel X-Trans frame with a quarter turn. Eight conversions of a DNG, a NEF and a RAF, covering every turn, mirror, straighten, crop and both compressions, are byte-identical to the build before. A save takes the same time.
+
+About half of what remains is memory already freed that macOS's allocator keeps for reuse. With that cache off (`MallocLargeCache=0`) the same saves peak at 280 MB and 626 MB, close to what the conversion holds at once: 18 bytes a pixel while decoding, 24 with a quarter turn. iOS keeps such a cache too. On an iPad Air (M3, iOS 27.2) the same 16-megapixel frame with a quarter turn peaked at 704 MB, and saving a roll of 138 frames peaked at 681 MB; opening a frame peaked at 505 MB. The app held 414 MB as the roll's save ended, 289 MB three seconds later and 36 MB after ten, with nothing asked of the allocator, and asking it then freed nothing more. That iPad allows an app about 5.1 GB.
+
+An iPhone 16 Pro Max (iOS 27.0.1) allows about 3.4 GB. Each frame below was opened, turned a quarter and saved in a run of its own. There's no camera file above 24 megapixels at hand, so the two largest are uncompressed Bayer DNGs written for the test, which show what the conversion holds at that size and not what a camera's own format costs to decode.
+
+| Frame | Peak after opening | Peak after saving |
+| --- | --- | --- |
+| 16 megapixels, NEF | 513 MB | 719 MB |
+| 24 megapixels, X-Trans RAF | 823 MB | 1,068 MB |
+| 45 megapixels, written DNG | 1,368 MB | 1,381 MB |
+| 60 megapixels, written DNG | 1,806 MB | 1,854 MB |
+
+So a 60-megapixel frame fits there with 1.5 GB to spare, and above 24 megapixels opening a frame costs as much as saving it. After a large save the app can hold up to 1.1 GB for more than a minute: freed memory that neither the allocator gives back when asked nor the engine holds in its cache. It's reused, not added to. Saves of 45, 60, 60, 45 and 16 megapixels in a row peaked at 2,093 MB, 240 MB above the largest alone, and the app was at 23 MB within a minute of the last. Phones with less memory are still to measure.
+
+### Threads and saving off screen on iOS
+
+Work on a whole image is shared out to a thread per core, and the thread that shares it out waits for them. On Apple's systems a thread started the usual way gets the default quality-of-service class, whatever class its starter has. The iOS app's requests reach the engine on a queue of the class for work the user waits for, so each preview had a thread of that class waiting for threads of a lower one: a priority inversion, which Xcode's Thread Performance Checker reported with `for_each_part` in its backtrace.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Threads that share out work take the class of the thread that waits for them, the class for drawing and input counting as the one below it | The checker reports nothing for opening a frame and saving a roll, where it reported the inversion before. The split of the work, and so the output, is the same | Keep |
+| Lowering the queue's class to the default | Would also end the report, by making what the user waits for less urgent | Rejected |
+
+A save continues off screen as a task iOS shows with its progress, but slower. On the same iPad a roll saved at 1.2 s a frame on screen and 5.8 s a frame off screen. About 1.2 cores were busy either way, and a frame cost 6.7 s of processor time off screen against 1.5 s on screen: the work isn't held back for lack of a turn, it runs on slower or slowed cores.
+
+| Class of the threads that save | On screen | Off screen | Decision |
+| --- | --- | --- | --- |
+| Default, as threads start | 1.2 s a frame | 5.8 s a frame | Keep |
+| The class for work the user waits for | 1.2 s | 5.9 s | No gain. Previews asked for during a save would also lose their lead over it |
+| The class for long work with a progress bar | 3.1 s | 7.2 s | Rejected: slower on screen, no faster off it |
+
+So the slowdown is how iOS treats an app that's off screen, and the app can't change it by ranking its threads. Returning to the app brings back full speed at once.
+
 ### License
 
 The aim was a program that stays open source and can be published and sold in app stores. Reversal has one copyright holder and no code ported from other programs, so it could change license.

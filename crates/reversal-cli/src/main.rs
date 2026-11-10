@@ -2,15 +2,11 @@
 
 //! `reversal` — convert film negative scans to positive LinearRaw DNGs.
 
-mod batch;
-mod folder;
-mod pipeline;
-mod ui;
-
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use reversal_cli::{pipeline, ui};
 use reversal_core::image::Rgb32;
 use reversal_core::invert::{self, Adjust, Film, Hints, Settings};
 use reversal_core::render::Look;
@@ -51,6 +47,9 @@ enum Command {
         /// Exit when stdin closes. For an app that starts this as its engine.
         #[arg(long, hide = true)]
         exit_with_stdin: bool,
+        /// A folder of license notices for the page to show. For an app that carries them.
+        #[arg(long, hide = true)]
+        notices: Option<PathBuf>,
     },
 }
 
@@ -148,7 +147,8 @@ fn main() {
             dir,
             port,
             exit_with_stdin,
-        } => ui::serve(dir, port, exit_with_stdin),
+            notices,
+        } => ui::serve(dir, port, exit_with_stdin, notices),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -232,7 +232,7 @@ fn convert(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
         if args.crop_area {
             settings.adjust.crop = Some(settings.estimate.area);
         }
-        let bytes = pipeline::export(input, &scan, &settings, compression, out)?;
+        let bytes = pipeline::export(input, scan, &settings, compression, out)?;
         let film = match settings.estimate.film {
             Film::Color => "color",
             Film::Bw => "black and white",

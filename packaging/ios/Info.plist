@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Reversal</string>
+  <key>CFBundleDisplayName</key><string>Reversal</string>
+  <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0</string>
+  <key>CFBundleVersion</key><string>0</string>
+  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Jan Ambroziewicz. Reversal is under the Mozilla Public License 2.0, with no warranty. Source code: https://github.com/janwiktor/reversal. Includes DNG technology under license by Adobe. Uses LibRaw, Copyright © 2008-2025 LibRaw LLC, under the CDDL 1.0, with its source available; see Licenses/LibRaw.txt in the app.</string>
+  <key>LSRequiresIPhoneOS</key><true/>
+  <key>UILaunchScreen</key><dict/>
+  <key>UIUserInterfaceStyle</key><string>Dark</string>
+  <key>UIApplicationSceneManifest</key>
+  <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+  <!-- An iPhone stays upright: on its side, the tools would leave the image a third of the screen. -->
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+  </array>
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <!-- Imported rolls and their DNGs show up in Files, under On My iPad. -->
+  <key>UIFileSharingEnabled</key><true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+  <!-- Other apps offer Reversal for a raw file, after the apps that show it as a photo. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Raw scan</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>public.camera-raw-image</string></array>
+    </dict>
+  </array>
+  <!-- A save goes on while the app is off screen, see BackgroundWork.swift. -->
+  <key>BGTaskSchedulerPermittedIdentifiers</key>
+  <array><string>$(PRODUCT_BUNDLE_IDENTIFIER).work</string></array>
+  <key>NSPhotoLibraryAddUsageDescription</key><string>Reversal saves the DNGs you choose to your photo library.</string>
+</dict>
+</plist>

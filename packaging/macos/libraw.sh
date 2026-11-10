@@ -2,7 +2,8 @@
 
 # Builds the LibRaw that goes in the Mac app, in "$build", unless it's already there. Sourced
 # by build.sh and by CI, so the tests run against the same library the app ships with.
-# Sets prefix, source_dir, LIBRAW_VERSION and MACOS_TARGET.
+# Sets prefix, source_dir, LIBRAW_VERSION and MACOS_TARGET. For another platform, set
+# LIBRAW_CONFIGURE_EXTRA to the compilers and host to configure with.
 
 LIBRAW_VERSION=0.22.3
 LIBRAW_SHA256=789f3c33466210a1a0907f747a97c715d21bbf4af712f257fcbbd90111b227e4
@@ -22,6 +23,7 @@ if [ ! -f "$prefix/lib/pkgconfig/libraw.pc" ]; then
   tar -xzf "$tarball" -C "$build"
   (cd "$source_dir" &&
     ./configure --prefix="$prefix" --disable-shared --enable-static --disable-openmp \
-      --disable-lcms --disable-jpeg --enable-zlib --disable-examples >/dev/null &&
+      --disable-lcms --disable-jpeg --enable-zlib --disable-examples \
+      ${LIBRAW_CONFIGURE_EXTRA[@]+"${LIBRAW_CONFIGURE_EXTRA[@]}"} >/dev/null &&
     make -j"$(sysctl -n hw.ncpu)" install >/dev/null)
 fi

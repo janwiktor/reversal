@@ -407,7 +407,15 @@ fn assert_reads_back(
     positive: &Rgb32,
 ) {
     let out = dir.0.join(name);
-    write_positive(&out, "scene.dng", scan, settings, compression, "test").unwrap();
+    write_positive(
+        &out,
+        "scene.dng",
+        scan.clone(),
+        settings,
+        compression,
+        "test",
+    )
+    .unwrap();
     let back = decode(&out).unwrap();
     assert_eq!(
         (back.width, back.height),

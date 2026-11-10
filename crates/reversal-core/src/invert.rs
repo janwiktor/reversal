@@ -1086,10 +1086,21 @@ pub fn picture_for_clipping(scan: &Rgb32, s: &Settings) -> Rgb32 {
 /// The positive as it will be written: straighten, crop, invert, saturate, mirror, rotate.
 /// `crop_override` replaces the output crop (e.g. `Some(NRect::FULL)` for a full view).
 pub fn convert_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
+    convert_straight(scan.straighten(s.adjust.straighten), s, crop_override)
+}
+
+/// [`convert`] for a scan that isn't needed afterwards. It converts in the scan's own memory, so
+/// a full scan is held once where [`convert`] holds it and its positive. Straightening and a
+/// quarter turn still need a second image while they run. The result is the same.
+pub fn convert_owned(scan: Rgb32, s: &Settings) -> Rgb32 {
+    convert_straight(scan.into_straightened(s.adjust.straighten), s, None)
+}
+
+fn convert_straight(straight: Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
     let a = &s.adjust;
-    let straight = scan.straighten(a.straighten);
     let crop = crop_override.or(a.crop).unwrap_or(NRect::FULL);
-    let mut img = straight.crop(crop.to_pixels(straight.width, straight.height));
+    let pixels = crop.to_pixels(straight.width, straight.height);
+    let mut img = straight.into_cropped(pixels);
     let gain = a.saturation_gain();
     let (gains, weights) = (
         gains_ev(s.estimate.film, a),
@@ -1101,9 +1112,9 @@ pub fn convert_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) ->
         }
     });
     if a.flip_h {
-        img = img.flip_h();
+        img.flip_h_in_place();
     }
-    img.rotate_cw(a.rotate)
+    img.into_rotated_cw(a.rotate)
 }
 
 pub fn convert(scan: &Rgb32, s: &Settings) -> Rgb32 {
@@ -1136,6 +1147,56 @@ mod tests {
             area: NRect::FULL,
             gray: CURVES,
             anchor: 0.7,
+        }
+    }
+
+    #[test]
+    fn converting_in_the_scans_own_memory_gives_the_same_positive() {
+        let scan = scan_in_holder(false);
+        let part = NRect {
+            x0: 0.1,
+            y0: 0.2,
+            x1: 0.8,
+            y1: 0.9,
+        };
+        let cases = [
+            (0, false, 0.0, None),
+            (1, true, 0.0, None),
+            (2, false, 1.5, Some(part)),
+            (3, true, 0.0, Some(part)),
+        ];
+        for (rotate, flip_h, straighten, crop) in cases {
+            let adjust = Adjust {
+                rotate,
+                flip_h,
+                straighten,
+                crop,
+                ..Adjust::default()
+            };
+            let s = Settings::new(est(), adjust);
+            // The conversion as it was before it worked in place: a copy for each step.
+            let a = &s.adjust;
+            let straight = scan.straighten(a.straighten);
+            let pixels = a.crop.unwrap_or(NRect::FULL);
+            let mut copied = straight.crop(pixels.to_pixels(straight.width, straight.height));
+            let (gains, weights) = (gains_ev(Film::Color, a), silver_weights(BASE));
+            for px in copied.data.as_chunks_mut::<3>().0 {
+                *px = saturate(
+                    positive_with(*px, &s.estimate, gains, weights),
+                    a.saturation_gain(),
+                );
+            }
+            if a.flip_h {
+                copied = copied.flip_h();
+            }
+            let copied = copied.rotate_cw(a.rotate);
+            for converted in [convert(&scan, &s), convert_owned(scan.clone(), &s)] {
+                assert_eq!(
+                    (converted.width, converted.height),
+                    (copied.width, copied.height)
+                );
+                assert_eq!(converted.data, copied.data);
+            }
         }
     }
 

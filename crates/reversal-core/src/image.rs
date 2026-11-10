@@ -2,6 +2,8 @@
 
 //! Interleaved floating-point RGB image buffer.
 
+use crate::priority::Priority;
+
 /// Linear RGB image, interleaved, row-major. Values are relative to sensor white (1.0).
 #[derive(Clone, Debug)]
 pub struct Rgb32 {
@@ -178,6 +180,33 @@ impl Rgb32 {
         self.downsample(factor.max(1))
     }
 
+    /// [`Self::straighten`] for an image that isn't needed afterwards: nothing is copied when
+    /// there's nothing to turn. A full scan is hundreds of megabytes, so each copy counts.
+    pub fn into_straightened(self, degrees: f32) -> Rgb32 {
+        if degrees.abs() < 1e-3 {
+            return self;
+        }
+        self.straighten(degrees)
+    }
+
+    /// [`Self::crop`] in the image's own memory.
+    pub fn into_cropped(mut self, r: Rect) -> Rgb32 {
+        let r = r.clamp(self.width, self.height);
+        let (w, h) = (r.right - r.left, r.bottom - r.top);
+        if (w, h) == (self.width, self.height) {
+            return self;
+        }
+        // Rows only move toward the start, so none is overwritten before it's read.
+        for y in 0..h {
+            let src = ((r.top + y) * self.width + r.left) * 3;
+            self.data.copy_within(src..src + w * 3, y * w * 3);
+        }
+        self.data.truncate(w * h * 3);
+        self.data.shrink_to_fit();
+        (self.width, self.height) = (w, h);
+        self
+    }
+
     pub fn crop(&self, r: Rect) -> Rgb32 {
         let r = r.clamp(self.width, self.height);
         let (w, h) = (r.right - r.left, r.bottom - r.top);
@@ -192,14 +221,30 @@ impl Rgb32 {
     /// Mirror left-right (emulsion-up scans).
     pub fn flip_h(&self) -> Rgb32 {
         let mut out = self.clone();
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let s = (y * self.width + x) * 3;
-                let d = (y * self.width + (self.width - 1 - x)) * 3;
-                out.data[d..d + 3].copy_from_slice(&self.data[s..s + 3]);
-            }
-        }
+        out.flip_h_in_place();
         out
+    }
+
+    pub fn flip_h_in_place(&mut self) {
+        if self.width == 0 {
+            return;
+        }
+        for row in self.data.chunks_exact_mut(self.width * 3) {
+            row.as_chunks_mut::<3>().0.reverse();
+        }
+    }
+
+    /// [`Self::rotate_cw`] for an image that isn't needed afterwards. A half turn and no turn
+    /// happen in its own memory; a quarter turn needs a second image while it's made.
+    pub fn into_rotated_cw(mut self, quarter_turns: u8) -> Rgb32 {
+        match quarter_turns % 4 {
+            0 => self,
+            2 => {
+                self.data.as_chunks_mut::<3>().0.reverse();
+                self
+            }
+            q => self.rotate_cw(q),
+        }
     }
 
     /// Rotate clockwise by `quarter_turns` × 90°.
@@ -252,10 +297,15 @@ pub fn for_each_part<T: Send>(data: &mut [T], unit: usize, f: impl Fn(usize, &mu
     if units * unit >= data.len() {
         return f(0, data);
     }
+    // This thread waits for the others, so they work at its priority.
+    let priority = Priority::current();
     std::thread::scope(|scope| {
         for (i, part) in data.chunks_mut(units * unit).enumerate() {
             let f = &f;
-            scope.spawn(move || f(i * units * unit, part));
+            scope.spawn(move || {
+                priority.adopt();
+                f(i * units * unit, part)
+            });
         }
     });
 }
@@ -266,8 +316,9 @@ mod tests {
 
     fn numbered(w: usize, h: usize) -> Rgb32 {
         let mut img = Rgb32::new(w, h);
+        // Each channel its own value, so a pixel put together from two others would show.
         for (i, v) in img.data.iter_mut().enumerate() {
-            *v = (i / 3) as f32;
+            *v = (i / 3) as f32 + (i % 3) as f32 / 4.0;
         }
         img
     }
@@ -308,6 +359,68 @@ mod tests {
             });
             assert!(data.iter().enumerate().all(|(i, &v)| v == i + 1));
         }
+    }
+
+    #[test]
+    fn working_in_place_gives_what_a_copy_gives() {
+        let img = numbered(7, 5);
+        let mut flipped = img.clone();
+        flipped.flip_h_in_place();
+        for y in 0..5 {
+            for x in 0..7 {
+                assert_eq!(flipped.get(x, y), img.get(6 - x, y));
+            }
+        }
+        // A half turn in place puts each pixel opposite, whole.
+        let half = img.clone().into_rotated_cw(2);
+        for y in 0..5 {
+            for x in 0..7 {
+                assert_eq!(half.get(x, y), img.get(6 - x, 4 - y));
+            }
+        }
+        for turns in 0..5 {
+            let turned = img.clone().into_rotated_cw(turns);
+            let copy = img.rotate_cw(turns);
+            assert_eq!((turned.width, turned.height), (copy.width, copy.height));
+            assert_eq!(turned.data, copy.data);
+        }
+        let rects = [
+            Rect {
+                left: 2,
+                top: 1,
+                right: 6,
+                bottom: 4,
+            },
+            Rect {
+                left: 0,
+                top: 0,
+                right: 7,
+                bottom: 5,
+            },
+            Rect {
+                left: 0,
+                top: 3,
+                right: 1,
+                bottom: 5,
+            },
+            Rect {
+                left: 5,
+                top: 0,
+                right: 99,
+                bottom: 99,
+            },
+        ];
+        for rect in rects {
+            let cropped = img.clone().into_cropped(rect);
+            let copy = img.crop(rect);
+            assert_eq!((cropped.width, cropped.height), (copy.width, copy.height));
+            assert_eq!(cropped.data, copy.data);
+        }
+        assert_eq!(img.clone().into_straightened(0.0).data, img.data);
+        assert_eq!(
+            img.clone().into_straightened(3.0).data,
+            img.straighten(3.0).data
+        );
     }
 
     #[test]

@@ -54,17 +54,10 @@ fi
 
 # Licenses of what's inside.
 licenses="$app/Contents/Resources/Licenses"
-cp "$root/LICENSE" "$licenses/Reversal MPL-2.0.txt"
-# LibRaw offers two licenses. It's the CDDL in every build, which lets the app go through app stores.
-cp "$source_dir/LICENSE.CDDL" "$source_dir/COPYRIGHT" "$licenses/"
-{
-  echo "LibRaw $LIBRAW_VERSION is used under the CDDL 1.0, see LICENSE.CDDL."
-  echo "Its source code is attached to each release of Reversal, and is at"
-  echo "https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz"
-} >"$licenses/LibRaw.txt"
-echo "This product includes DNG technology under license by Adobe." >"$licenses/DNG.txt"
-(cd "$root" && cargo tree -e normal --target aarch64-apple-darwin --prefix none --format '{p}' --locked |
-  python3 "$here/notices.py") >"$licenses/Rust crates.txt"
+rust_package=reversal-cli
+rust_target=aarch64-apple-darwin
+# shellcheck source=licenses.sh
+. "$here/licenses.sh"
 
 # Inside out: the engine first, then the bundle that seals it.
 codesign --force --sign - "$app/Contents/MacOS/reversal-engine"

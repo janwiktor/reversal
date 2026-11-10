@@ -1,0 +1,86 @@
+name: iOS app
+
+# Builds the iPhone and iPad app for the simulator, unsigned: it shows that the engine and LibRaw
+# build for iOS and that the app links them. Pull requests build it only when something that goes
+# into it changes, to keep their checks fast. Every push to main builds it.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/ios-app.yml"
+      - "packaging/ios/**"
+      - "packaging/macos/libraw.sh"
+      - "packaging/macos/licenses.sh"
+      - "packaging/macos/notices.py"
+      - "crates/reversal-ios/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/*/Cargo.toml"
+      - "crates/*/build.rs"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build for the simulator
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The app's build number counts commits.
+          fetch-depth: 0
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-apple-ios-sim
+          rustup default stable
+      - name: Install pkgconf
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install pkgconf
+      # The script reuses a built LibRaw, and takes its license files from the source folder.
+      - name: Restore LibRaw
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            dist/build/ios/iphonesimulator/LibRaw-*
+            dist/build/ios/iphonesimulator/libraw-install-*
+          key: libraw-ios-simulator-${{ runner.arch }}-${{ hashFiles('packaging/macos/libraw.sh', 'packaging/ios/engine.sh') }}
+      - name: Build
+        run: |
+          xcodebuild -project packaging/ios/Reversal.xcodeproj -scheme Reversal -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath dist/build/ios/DerivedData CODE_SIGNING_ALLOWED=NO build
+      - name: Check the app
+        run: |
+          app=dist/build/ios/DerivedData/Build/Products/Release-iphonesimulator/Reversal.app
+          # The version and build number have to agree with Cargo.toml and git.
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          plist="$app/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist")" = "$version"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$plist")" = "$(git rev-list --count HEAD)"
+          test -f "$app/Licenses/Reversal MPL-2.0.txt"
+          test -f "$app/Licenses/LibRaw CDDL-1.0.txt"
+          test -s "$app/Licenses/Rust crates.txt"
+          # The engine is linked in: anything outside iOS would be missing on a device.
+          nm "$app/Reversal" | grep -q reversal_engine_request
+          otool -L "$app/Reversal"
+          if otool -L "$app/Reversal" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/)'; then
+            echo "The app links a library that isn't part of iOS." >&2
+            exit 1
+          fi
