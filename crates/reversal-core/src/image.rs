@@ -2,6 +2,8 @@
 
 //! Interleaved floating-point RGB image buffer.
 
+use crate::priority::Priority;
+
 /// Linear RGB image, interleaved, row-major. Values are relative to sensor white (1.0).
 #[derive(Clone, Debug)]
 pub struct Rgb32 {
@@ -295,10 +297,15 @@ pub fn for_each_part<T: Send>(data: &mut [T], unit: usize, f: impl Fn(usize, &mu
     if units * unit >= data.len() {
         return f(0, data);
     }
+    // This thread waits for the others, so they work at its priority.
+    let priority = Priority::current();
     std::thread::scope(|scope| {
         for (i, part) in data.chunks_mut(units * unit).enumerate() {
             let f = &f;
-            scope.spawn(move || f(i * units * unit, part));
+            scope.spawn(move || {
+                priority.adopt();
+                f(i * units * unit, part)
+            });
         }
     });
 }

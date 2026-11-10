@@ -13,6 +13,7 @@ pub mod dng;
 pub mod image;
 pub mod invert;
 pub mod ljpeg;
+pub mod priority;
 pub mod render;
 
 use std::ffi::OsString;
