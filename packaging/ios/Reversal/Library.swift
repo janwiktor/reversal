@@ -5,11 +5,20 @@
 
 import Foundation
 import PhotosUI
+import UIKit
 import UniformTypeIdentifiers
 
 func isScan(_ name: String) -> Bool {
     name.withCString { reversal_is_scan($0) }
 }
+
+/// A count with its word: "1 scan", "36 scans".
+func counted(_ n: Int, _ word: String) -> String {
+    "\(n) \(word)\(n == 1 ? "" : "s")"
+}
+
+/// "iPad" or "iPhone", for messages that name the device.
+var deviceName: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
 
 /// A roll imported into the app.
 struct Roll: Identifiable {
@@ -21,12 +30,11 @@ struct Roll: Identifiable {
     let bytes: Int64
     var id: URL { url }
     var name: String { url.lastPathComponent }
-    var positives: URL { url.appendingPathComponent("positives", isDirectory: true) }
 
     /// Such as "36 scans, 12 DNGs".
     var contents: String {
-        let scans = frames == 1 ? "1 scan" : "\(frames) scans"
-        return dngs == 0 ? scans : "\(scans), \(dngs == 1 ? "1 DNG" : "\(dngs) DNGs")"
+        let scans = counted(frames, "scan")
+        return dngs == 0 ? scans : "\(scans), \(counted(dngs, "DNG"))"
     }
 
     static func size(_ bytes: Int64) -> String {
@@ -34,7 +42,10 @@ struct Roll: Identifiable {
     }
 
     /// The DNGs themselves, in name order.
-    func dngFiles() -> [URL] {
+    func dngFiles() -> [URL] { Roll.dngFiles(in: url) }
+
+    static func dngFiles(in roll: URL) -> [URL] {
+        let positives = roll.appendingPathComponent("positives", isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(at: positives, includingPropertiesForKeys: nil)) ?? []
         return files
             .filter { $0.pathExtension.lowercased() == "dng" }
@@ -56,15 +67,16 @@ enum Library {
         return folders
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
             // Not the system's own: its inbox for files other apps send, and what Files hides.
-            .filter { !$0.lastPathComponent.hasPrefix(".") && !isSystemFolder($0.lastPathComponent) }
+            .filter { canName(roll: $0.lastPathComponent) }
             .map { folder in
                 let names = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
                 var bytes: Int64 = 0
                 for case let file as URL in fm.enumerator(at: folder, includingPropertiesForKeys: [.fileSizeKey]) ?? .init() {
                     bytes += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
                 }
-                let roll = Roll(url: folder, frames: names.filter(isScan).count, dngs: 0, bytes: bytes)
-                return Roll(url: folder, frames: roll.frames, dngs: roll.dngFiles().count, bytes: bytes)
+                return Roll(
+                    url: folder, frames: names.filter(isScan).count,
+                    dngs: Roll.dngFiles(in: folder).count, bytes: bytes)
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -102,8 +114,11 @@ enum Library {
         canName(roll: folder) ? folder : "Imported \(today())"
     }
 
-    static func isInInbox(_ url: URL) -> Bool {
-        url.resolvingSymlinksInPath().path.hasPrefix(inbox.resolvingSymlinksInPath().path + "/")
+    static func isInInbox(_ url: URL) -> Bool { isInside(url, inbox) }
+
+    /// Whether a file or folder lies somewhere in a folder, which itself doesn't count.
+    private static func isInside(_ url: URL, _ folder: URL) -> Bool {
+        url.resolvingSymlinksInPath().path.hasPrefix(folder.resolvingSymlinksInPath().path + "/")
     }
 
     /// The day here, not in Greenwich, to name a roll of things that came without a folder.
@@ -128,8 +143,9 @@ enum Library {
         try FileManager.default.removeItem(at: roll.url)
     }
 
+    /// The app's own folder of rolls counts, as do the rolls in it.
     static func isInApp(_ url: URL) -> Bool {
-        url.resolvingSymlinksInPath().path.hasPrefix(documents.resolvingSymlinksInPath().path)
+        url.resolvingSymlinksInPath() == documents.resolvingSymlinksInPath() || isInside(url, documents)
     }
 }
 

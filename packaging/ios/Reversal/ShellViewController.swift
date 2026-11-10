@@ -86,10 +86,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         ) { [weak self] _ in
             guard let self, self.busy, ProcessInfo.processInfo.thermalState == .critical else { return }
             self.stopForNow()
-            let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
-            self.top.present(
-                self.alert("Saving paused", "This \(device) is too hot to go on. Save the rest when it has cooled."),
-                animated: true)
+            self.tell("Saving paused", "This \(deviceName) is too hot to go on. Save the rest when it has cooled.")
         }
     }
 
@@ -258,7 +255,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             rename: { [weak self] roll, name, done in self?.rename(roll, to: name, then: done) },
             delete: { [weak self] roll, done in self?.delete(roll, then: done) },
             hasOpenFolder: { [weak self] in self?.folder != nil },
-            isOpen: { [weak self] roll in self?.folder?.standardizedFileURL == roll.url.standardizedFileURL })
+            isOpen: { [weak self] roll in self?.isOpen(roll) == true })
         let home = UIHostingController(rootView: HomeView(lastFolder: Library.lastFolder(), actions: actions))
         home.modalPresentationStyle = .formSheet
         home.isModalInPresentation = folder == nil
@@ -269,11 +266,14 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     /// The start screen, while it's up. With no folder open it can't be put away.
     private weak var home: UIViewController?
 
+    private func isOpen(_ roll: Roll) -> Bool {
+        folder?.standardizedFileURL == roll.url.standardizedFileURL
+    }
+
     /// A roll that's open has to close before its folder moves or goes: the engine holds it,
     /// and may be saving into it. `change` then runs with the engine closed.
     private func closing(_ roll: Roll, then change: @escaping (_ wasOpen: Bool) -> Void) {
-        let isOpen = folder?.standardizedFileURL == roll.url.standardizedFileURL
-        guard isOpen else { return change(false) }
+        guard isOpen(roll) else { return change(false) }
         let close = { [weak self] in
             self?.engine.close {
                 self?.folder = nil
@@ -300,7 +300,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
             do {
                 now = try Library.rename(roll, to: name)
             } catch {
-                self.top.present(self.alert("Could not rename \(roll.name)", error.localizedDescription), animated: true)
+                self.tell("Could not rename \(roll.name)", error.localizedDescription)
             }
             wasOpen ? self.reopen(now, then: done) : done()
         }
@@ -314,7 +314,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
                 // The page still shows the roll that's gone, behind a start screen that now stays.
                 if wasOpen { self.web.loadHTMLString("", baseURL: Engine.page) }
             } catch {
-                self.top.present(self.alert("Could not delete \(roll.name)", error.localizedDescription), animated: true)
+                self.tell("Could not delete \(roll.name)", error.localizedDescription)
                 if wasOpen { return self.reopen(roll.url, then: done) }
             }
             done()
@@ -380,23 +380,16 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true) { [weak self] in
             guard let self, !results.isEmpty else { return }
-            // The day here, not in Greenwich.
             self.runPhotosImport(results.map(\.itemProvider), rollName: "Photos \(Library.today())")
         }
     }
 
     private func runPhotosImport(_ photos: [NSItemProvider], rollName: String) {
         let importer = PhotosImporter()
-        let panel = UIAlertController(title: "Importing", message: "Getting photos…", preferredStyle: .alert)
-        panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in importer.cancel() })
-        importing = true
-        top.present(panel, animated: true) { [weak self] in
-            importer.run(
-                photos: photos, rollName: rollName,
-                progress: { finished, total in panel.message = "\(finished) of \(total)" },
-                done: { result, notRaw in
-                    self?.imported(result, panel: panel, notRaw: notRaw)
-                })
+        importPanel("Getting photos…", stop: importer.cancel) { [weak self] panel, progress in
+            importer.run(photos: photos, rollName: rollName, progress: progress) { result, notRaw in
+                self?.imported(result, panel: panel, notRaw: notRaw)
+            }
         }
     }
 
@@ -407,7 +400,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
                 self.show(folder: url) { opened in
                     guard !opened else { return }
                     self.showHome()
-                    self.top.present(self.alert("Could not open \(url.lastPathComponent)", "Check that it's still connected."), animated: true)
+                    self.tell("Could not open \(url.lastPathComponent)", "Check that it's still connected.")
                 }
             }
         }
@@ -427,69 +420,68 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     private func runImport(_ sources: [URL], rollName: String) {
         let importer = Importer()
-        let panel = UIAlertController(title: "Importing", message: "Finding scans…", preferredStyle: .alert)
-        panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in importer.cancel() })
-        importing = true
-        // Started once the panel is up: one that's still arriving can't be dismissed.
-        top.present(panel, animated: true) { [weak self] in
-            self?.run(importer, sources, rollName: rollName, panel: panel)
+        importPanel("Finding scans…", stop: importer.cancel) { [weak self] panel, progress in
+            importer.run(sources: sources, rollName: rollName, progress: progress) { result in
+                self?.imported(result, panel: panel)
+            }
         }
     }
 
-    private func run(_ importer: Importer, _ sources: [URL], rollName: String, panel: UIAlertController) {
-        importer.run(
-            sources: sources, rollName: rollName,
-            progress: { finished, total in panel.message = "\(finished) of \(total)" },
-            done: { [weak self] result in self?.imported(result, panel: panel) })
+    /// The panel an import shows while it runs, with its count and a Stop. `start` runs once
+    /// it's up, since a panel that's still arriving can't be dismissed.
+    private func importPanel(
+        _ message: String, stop: @escaping () -> Void,
+        start: @escaping (UIAlertController, _ progress: @escaping (Int, Int) -> Void) -> Void
+    ) {
+        let panel = UIAlertController(title: "Importing", message: message, preferredStyle: .alert)
+        panel.addAction(UIAlertAction(title: "Stop", style: .cancel) { _ in stop() })
+        importing = true
+        top.present(panel, animated: true) {
+            start(panel) { finished, total in panel.message = "\(finished) of \(total)" }
+        }
     }
 
     /// How an import ends: its roll opens, or there's a word on why there's nothing to open.
     /// `notRaw` counts chosen photos that were left out for not being raw.
     private func imported(_ result: Importer.Result, panel: UIAlertController, notRaw: Int = 0) {
-        let photos = notRaw == 1 ? "1 photo isn't raw" : "\(notRaw) photos aren't raw"
-        let finish = {
-            NotificationCenter.default.post(name: .rollsChanged, object: nil)
-            if !result.failed.isEmpty, !result.canceled {
-                let files = result.failed.count == 1 ? "1 file" : "\(result.failed.count) files"
-                let note = UIAlertController(
-                    title: "Could not import \(files)", message: result.failed.joined(separator: "\n"),
-                    preferredStyle: .alert)
-                // The import isn't over until this is read: scans that came in meanwhile wait
-                // for it, and then go first. Otherwise what did arrive is still worth opening.
-                note.addAction(UIAlertAction(title: "OK", style: .default) { _ in
-                    self.importing = false
-                    if !self.waitingScans.isEmpty {
-                        self.importWaitingScans()
-                    } else if result.copied + result.skipped > 0 {
-                        self.switchTo(result.roll)
-                    }
-                })
-                self.top.present(note, animated: true)
-                return
-            }
+        let arrived = result.copied + result.skipped
+        // The import is over once its word is read. Scans that came in meanwhile then go
+        // first, and the last import opens its roll.
+        let moveOn = { (open: Bool) in
             self.importing = false
             if !self.waitingScans.isEmpty {
-                // More came in meanwhile: on to those, and the last import opens its roll.
                 self.importWaitingScans()
-            } else if result.canceled {
-                // Stopped: nothing to say, and nothing opens over what the user went on to.
-            } else if result.copied + result.skipped == 0 {
-                let none = notRaw > 0
-                    ? self.alert("No raw photos there", "Reversal converts the raw file of a scan. A JPEG or HEIC has lost what it measures.")
-                    : self.alert("No scans there", "Choose a folder or files with NEF, CR2, ARW, RAF or DNG scans.")
-                self.top.present(none, animated: true)
-            } else if notRaw > 0 {
-                let arrived = result.copied + result.skipped
-                let note = UIAlertController(
-                    title: "Imported \(arrived == 1 ? "1 raw photo" : "\(arrived) raw photos")",
-                    message: "\(photos) and \(notRaw == 1 ? "was" : "were") left out", preferredStyle: .alert)
-                note.addAction(UIAlertAction(title: "OK", style: .default) { _ in self.switchTo(result.roll) })
-                self.top.present(note, animated: true)
-            } else {
+            } else if open {
                 self.switchTo(result.roll)
             }
         }
-        putAway(panel, then: finish)
+        putAway(panel) {
+            NotificationCenter.default.post(name: .rollsChanged, object: nil)
+            if result.canceled {
+                // Stopped: nothing to say, and nothing opens over what the user went on to.
+                moveOn(false)
+            } else if !result.failed.isEmpty {
+                // What did arrive is still worth opening.
+                self.tell(
+                    "Could not import \(counted(result.failed.count, "file"))",
+                    result.failed.joined(separator: "\n")
+                ) { moveOn(arrived > 0) }
+            } else if arrived == 0, notRaw > 0 {
+                self.tell(
+                    "No raw photos there",
+                    "Reversal converts the raw file of a scan. A JPEG or HEIC has lost what it measures."
+                ) { moveOn(false) }
+            } else if arrived == 0 {
+                self.tell("No scans there", "Choose a folder or files with NEF, CR2, ARW, RAF or DNG scans.") {
+                    moveOn(false)
+                }
+            } else if notRaw > 0 {
+                let photos = notRaw == 1 ? "1 photo isn't raw and was" : "\(notRaw) photos aren't raw and were"
+                self.tell("Imported \(counted(arrived, "raw photo"))", "\(photos) left out") { moveOn(true) }
+            } else {
+                moveOn(true)
+            }
+        }
     }
 
     // MARK: Getting DNGs out
@@ -541,9 +533,10 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         if view !== web { popover.popoverPresentationController?.permittedArrowDirections = [] }
     }
 
-    private func alert(_ title: String, _ message: String) -> UIAlertController {
+    /// Says what needs reading, over whatever is on top. `then` runs once it's read.
+    private func tell(_ title: String, _ message: String, then: (() -> Void)? = nil) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        return alert
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in then?() })
+        top.present(alert, animated: true)
     }
 }

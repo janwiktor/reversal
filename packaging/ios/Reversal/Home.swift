@@ -44,8 +44,6 @@ struct HomeView: View {
         canClose = actions.hasOpenFolder()
     }
 
-    private var device: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
-
     var body: some View {
         NavigationStack {
             List {
@@ -56,7 +54,7 @@ struct HomeView: View {
                     } header: {
                         Text("Rolls")
                     } footer: {
-                        Text("\(Roll.size(rolls.reduce(0) { $0 + $1.bytes })) on this \(device), in Files under Reversal")
+                        Text("\(Roll.size(rolls.reduce(0) { $0 + $1.bytes })) on this \(deviceName), in Files under Reversal")
                     }
                 }
                 Section {
