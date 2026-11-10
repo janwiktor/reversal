@@ -90,6 +90,18 @@ enum Library {
         name.caseInsensitiveCompare("Inbox") == .orderedSame
     }
 
+    /// Whether a folder of that name can be a roll: the start screen lists it, and it isn't
+    /// the inbox itself.
+    static func canName(roll name: String) -> Bool {
+        !name.isEmpty && !name.contains("/") && !name.hasPrefix(".") && !isSystemFolder(name)
+    }
+
+    /// The name for a roll of scans from a folder of that name, which a roll may not be able
+    /// to take.
+    static func rollName(from folder: String) -> String {
+        canName(roll: folder) ? folder : "Imported \(today())"
+    }
+
     static func isInInbox(_ url: URL) -> Bool {
         url.resolvingSymlinksInPath().path.hasPrefix(inbox.resolvingSymlinksInPath().path + "/")
     }
@@ -102,8 +114,7 @@ enum Library {
     /// A name a roll can take: one folder's worth, and not another roll's.
     static func canRename(_ roll: Roll, to name: String) -> Bool {
         let name = name.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name != roll.name, !name.contains("/"), !name.hasPrefix("."), !isSystemFolder(name)
-        else { return false }
+        guard canName(roll: name), name != roll.name else { return false }
         return !FileManager.default.fileExists(atPath: documents.appendingPathComponent(name).path)
     }
 
@@ -150,18 +161,27 @@ final class Importer {
         DispatchQueue.global(qos: .userInitiated).async {
             let scoped = sources.filter { $0.startAccessingSecurityScopedResource() }
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
-            let roll = Library.documents.appendingPathComponent(rollName, isDirectory: true)
+            let roll = Library.documents.appendingPathComponent(
+                Library.rollName(from: rollName), isDirectory: true)
             var (copied, skipped) = (0, 0)
             var failed: [String] = []
+            // A copy another app sent is ours to clear away, whether or not it reached a roll:
+            // nothing lists the inbox, so what stayed there would take room unseen.
+            defer {
+                for source in sources where Library.isInInbox(source) {
+                    try? FileManager.default.removeItem(at: source)
+                }
+            }
             do {
-                try FileManager.default.createDirectory(at: roll, withIntermediateDirectories: true)
                 let files = sources.flatMap(Self.scans)
+                // No roll for nothing to put in it.
+                if !files.isEmpty {
+                    try FileManager.default.createDirectory(at: roll, withIntermediateDirectories: true)
+                }
                 DispatchQueue.main.async { progress(0, files.count) }
                 for (index, file) in files.enumerated() where !self.isCanceled {
                     do {
                         try Self.copy(file, into: roll) ? (copied += 1) : (skipped += 1)
-                        // A copy another app sent is ours to clear away once it's in a roll.
-                        if Library.isInInbox(file) { try? FileManager.default.removeItem(at: file) }
                     } catch {
                         failed.append("\(file.lastPathComponent): \(error.localizedDescription)")
                     }

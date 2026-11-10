@@ -195,7 +195,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         top.present(stopping, animated: true) { [weak self] in
             // For now: the rest is offered when this folder is next open.
             self?.stopForNow {
-                self?.whenIdle { stopping.dismiss(animated: true, completion: proceed) }
+                self?.whenIdle { self?.putAway(stopping, then: proceed) }
             }
         }
     }
@@ -418,6 +418,13 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         dismiss(animated: true, completion: proceed)
     }
 
+    /// Dismisses a panel from what presented it, which also puts away anything shown over it.
+    /// Asked of the panel itself, a dismissal takes only what's over it and leaves it up.
+    private func putAway(_ panel: UIViewController, then proceed: @escaping () -> Void) {
+        guard let presenter = panel.presentingViewController else { return proceed() }
+        presenter.dismiss(animated: true, completion: proceed)
+    }
+
     private func runImport(_ sources: [URL], rollName: String) {
         let importer = Importer()
         let panel = UIAlertController(title: "Importing", message: "Finding scans…", preferredStyle: .alert)
@@ -441,23 +448,31 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     private func imported(_ result: Importer.Result, panel: UIAlertController, notRaw: Int = 0) {
         let photos = notRaw == 1 ? "1 photo isn't raw" : "\(notRaw) photos aren't raw"
         let finish = {
-            self.importing = false
             NotificationCenter.default.post(name: .rollsChanged, object: nil)
+            if !result.failed.isEmpty, !result.canceled {
+                let files = result.failed.count == 1 ? "1 file" : "\(result.failed.count) files"
+                let note = UIAlertController(
+                    title: "Could not import \(files)", message: result.failed.joined(separator: "\n"),
+                    preferredStyle: .alert)
+                // The import isn't over until this is read: scans that came in meanwhile wait
+                // for it, and then go first. Otherwise what did arrive is still worth opening.
+                note.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                    self.importing = false
+                    if !self.waitingScans.isEmpty {
+                        self.importWaitingScans()
+                    } else if result.copied + result.skipped > 0 {
+                        self.switchTo(result.roll)
+                    }
+                })
+                self.top.present(note, animated: true)
+                return
+            }
+            self.importing = false
             if !self.waitingScans.isEmpty {
                 // More came in meanwhile: on to those, and the last import opens its roll.
                 self.importWaitingScans()
             } else if result.canceled {
                 // Stopped: nothing to say, and nothing opens over what the user went on to.
-            } else if !result.failed.isEmpty {
-                let files = result.failed.count == 1 ? "1 file" : "\(result.failed.count) files"
-                let note = UIAlertController(
-                    title: "Could not import \(files)", message: result.failed.joined(separator: "\n"),
-                    preferredStyle: .alert)
-                // What did arrive is still worth opening.
-                note.addAction(UIAlertAction(title: "OK", style: .default) { _ in
-                    if result.copied + result.skipped > 0 { self.switchTo(result.roll) }
-                })
-                self.top.present(note, animated: true)
             } else if result.copied + result.skipped == 0 {
                 let none = notRaw > 0
                     ? self.alert("No raw photos there", "Reversal converts the raw file of a scan. A JPEG or HEIC has lost what it measures.")
@@ -474,12 +489,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
                 self.switchTo(result.roll)
             }
         }
-        // From what presented it, which also puts away anything shown over the panel.
-        if let presenter = panel.presentingViewController {
-            presenter.dismiss(animated: true, completion: finish)
-        } else {
-            finish()
-        }
+        putAway(panel, then: finish)
     }
 
     // MARK: Getting DNGs out
