@@ -5,7 +5,7 @@ members = ["crates/reversal-core", "crates/reversal-cli", "crates/reversal-ios"]
 default-members = ["crates/reversal-core", "crates/reversal-cli"]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 # The oldest Rust that builds this; clippy warns about anything newer.
 rust-version = "1.88"
