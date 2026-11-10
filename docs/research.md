@@ -247,7 +247,26 @@ A phone gives an app a few gigabytes at most, and a full scan is 12 bytes a pixe
 
 Together: 1,150 MB to 533 MB for a 16-megapixel frame, and 1,803 MB to 1,204 MB for a 24-megapixel X-Trans frame with a quarter turn. Eight conversions of a DNG, a NEF and a RAF, covering every turn, mirror, straighten, crop and both compressions, are byte-identical to the build before. A save takes the same time.
 
-About half of what remains is memory already freed that macOS's allocator keeps for reuse. With that cache off (`MallocLargeCache=0`) the same saves peak at 280 MB and 626 MB, close to what the conversion holds at once: 18 bytes a pixel while decoding, 24 with a quarter turn. Whether iOS keeps such a cache decides which figure applies there, and that can only be measured on a device.
+About half of what remains is memory already freed that macOS's allocator keeps for reuse. With that cache off (`MallocLargeCache=0`) the same saves peak at 280 MB and 626 MB, close to what the conversion holds at once: 18 bytes a pixel while decoding, 24 with a quarter turn. iOS keeps such a cache too. On an iPad Air (M3, iOS 27.2) the same 16-megapixel frame with a quarter turn peaked at 704 MB, and saving a roll of 138 frames peaked at 681 MB; opening a frame peaked at 505 MB. The app held 414 MB as the roll's save ended, 289 MB three seconds later and 36 MB after ten, with nothing asked of the allocator, and asking it then freed nothing more. That iPad allows an app about 5.1 GB. An iPhone and larger frames are still to measure.
+
+### Threads and saving off screen on iOS
+
+Work on a whole image is shared out to a thread per core, and the thread that shares it out waits for them. On Apple's systems a thread started the usual way gets the default quality-of-service class, whatever class its starter has. The iOS app's requests reach the engine on a queue of the class for work the user waits for, so each preview had a thread of that class waiting for threads of a lower one: a priority inversion, which Xcode's Thread Performance Checker reported with `for_each_part` in its backtrace.
+
+| Tested | Effect | Decision |
+| --- | --- | --- |
+| Threads that share out work take the class of the thread that waits for them, the class for drawing and input counting as the one below it | The checker reports nothing for opening a frame and saving a roll, where it reported the inversion before. The split of the work, and so the output, is the same | Keep |
+| Lowering the queue's class to the default | Would also end the report, by making what the user waits for less urgent | Rejected |
+
+A save continues off screen as a task iOS shows with its progress, but slower. On the same iPad a roll saved at 1.2 s a frame on screen and 5.8 s a frame off screen. About 1.2 cores were busy either way, and a frame cost 6.7 s of processor time off screen against 1.5 s on screen: the work isn't held back for lack of a turn, it runs on slower or slowed cores.
+
+| Class of the threads that save | On screen | Off screen | Decision |
+| --- | --- | --- | --- |
+| Default, as threads start | 1.2 s a frame | 5.8 s a frame | Keep |
+| The class for work the user waits for | 1.2 s | 5.9 s | No gain. Previews asked for during a save would also lose their lead over it |
+| The class for long work with a progress bar | 3.1 s | 7.2 s | Rejected: slower on screen, no faster off it |
+
+So the slowdown is how iOS treats an app that's off screen, and the app can't change it by ranking its threads. Returning to the app brings back full speed at once.
 
 ### License
 
