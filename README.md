@@ -16,7 +16,7 @@ Open it in a RAW editor of your choice, on desktop or mobile, with no plugin or 
 
 Reversal is pre-alpha, so expect rough edges and changes. Submit feedback via [GitHub issues](https://github.com/janwiktor/reversal/issues).
 
-- **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI. An app for iPhone and iPad is a prototype: it builds from source and isn't released.
+- **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI. The app for iPhone and iPad is a prototype. Not released yet, you can only build it from source for now.
 - **Film:** color and black and white negatives, detected per frame. Slide film is out of scope.
 - **Cameras:** limited testing, on files from a single DSLR (Nikon D5100 NEF) and one light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
 - **Editors:** DNG rendering is benchmarked against Adobe Camera Raw only. Other tools may show the same file differently.
