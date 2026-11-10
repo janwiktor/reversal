@@ -357,7 +357,13 @@ function frameRow(f) {
   const name = document.createElement("span"); name.className = "name"; name.textContent = f.name; name.title = f.name;
   const state = document.createElement("span");
   b.append(name, state);
-  b.addEventListener("click", () => open(f.name));
+  // Where the list takes the tools' place, a tap shows the frame and a tap on the frame that's
+  // shown goes on to its tools: the list stays for looking through a roll, and gives way to work
+  // on one frame.
+  b.addEventListener("click", () => {
+    if (panelUnderImage.matches && f.name === (opening ?? current?.file)) slidePanels(() => showFrames(false));
+    else open(f.name);
+  });
   li.append(pick, b);
   showFrameState(f, state);
   return li;
