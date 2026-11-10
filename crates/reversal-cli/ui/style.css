@@ -19,6 +19,9 @@
   --tick: #6e6e6e;
   --ink: #e2e2e2;
   --ink-quiet: #a6a6a6;
+  --ink-on: #fff;        /* on a control that's pressed, hovered or typed into */
+  --control-edge: #4a4a4a;
+  --fill: #cfcfcf;       /* the part of a track that's filled */
   --accent: #1f6fd1;     /* ticks and the Save button; white on it holds 4.5:1 */
   --focus: #4a94f0;
   --warn: #ffb547;
@@ -47,6 +50,7 @@
      layout with two densities. --hit is the row pitch and the least a control answers to;
      a control may look smaller and still answer to all of it. */
   --text: 12px;
+  --text-small: 11px;    /* a note beside what it's about */
   --leading: 16px;
   --hit: 24px;
   --control-h: 24px;
@@ -61,7 +65,6 @@
   --row-gap: 4px;
   --slider-label-h: 16px;
   --slider-track-h: 16px;
-  --val-text: var(--text);
   /* Where the page runs to the screen's lower edge, the strip the system keeps for its own
      gesture: what's at the foot of the page fills it with its background and keeps clear of it. */
   --foot: env(safe-area-inset-bottom, 0px);
@@ -104,7 +107,6 @@
     --bar-h: 52px;
     --head-h: 44px;
     --row-gap: 0px;
-    --slider-label-h: 16px;
     --slider-track-h: 34px;
     --corner-hit: 44px;
   }
@@ -150,13 +152,12 @@ button:not(.crop-h)::after {
 }
 /* Hover styles need a pointer that hovers: after a tap, a touch screen keeps them until the
    next tap, so a control would look active when it isn't. */
-.btn { background: var(--control); box-shadow: inset 0 0 0 1px #4a4a4a; }
+.btn { background: var(--control); box-shadow: inset 0 0 0 1px var(--control-edge); }
 @media (hover: hover) { .btn:hover { background: var(--control-hover); } }
 .btn:active { background: var(--control-on); }
-.btn[aria-pressed="true"] { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; }
 .icon { flex: none; width: max(28px, var(--hit)); padding: 0; display: inline-grid; place-items: center; color: #cfcfcf; }
-@media (hover: hover) { .icon:hover { background: var(--control); color: #fff; } }
-.icon:active, .icon[aria-pressed="true"] { background: var(--control-on); color: #fff; }
+@media (hover: hover) { .icon:hover { background: var(--control); color: var(--ink-on); } }
+.icon:active, .icon:is([aria-pressed="true"], [aria-expanded="true"]) { background: var(--control-on); color: var(--ink-on); }
 /* An icon in a gray button: for what leads away from the work, at either end of the top bar. */
 @media (hover: hover) { .icon.btn:hover { background: var(--control-hover); } }
 .icon.btn:disabled { background: var(--control); }
@@ -173,8 +174,8 @@ button:disabled { opacity: .45; background: none; }
 /* One control with a few choices. */
 .seg { display: flex; padding: 1px; background: var(--field); border-radius: 5px; box-shadow: inset 0 0 0 1px #3a3a3a; }
 .seg button { flex: 1 1 auto; min-width: 0; height: var(--seg); padding: 0 8px; color: var(--ink-quiet); }
-@media (hover: hover) { .seg button:hover { color: #fff; } }
-.seg button[aria-pressed="true"] { background: var(--control-on); color: #fff; box-shadow: 0 1px 0 rgb(0 0 0 / .4); }
+@media (hover: hover) { .seg button:hover { color: var(--ink-on); } }
+.seg button[aria-pressed="true"] { background: var(--control-on); color: var(--ink-on); box-shadow: 0 1px 0 rgb(0 0 0 / .4); }
 .seg button:focus-visible { outline-offset: -1px; }
 
 /* Checkboxes */
@@ -197,13 +198,15 @@ input[type="range"] {
   --thumb-ring: #141414;
   --thumb-ring-w: 1px;
   --thumb-paint: radial-gradient(circle closest-side, var(--thumb-fill) calc(var(--thumb) / 2 - .5px), var(--thumb-ring) calc(var(--thumb) / 2) calc(var(--thumb) / 2 + var(--thumb-ring-w) - .5px), transparent calc(var(--thumb) / 2 + var(--thumb-ring-w)));
-  appearance: none; -webkit-appearance: none; display: block; width: 100%; min-width: 0; height: var(--field-h); background:
-    linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat,
-    linear-gradient(to right, var(--track) var(--x0), #cfcfcf var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat;
+  /* The track's layers: a tick at the value a reset goes back to, and the line, filled from there
+     to the thumb. */
+  --tick-mark: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat;
+  --fill-track: linear-gradient(to right, var(--track) var(--x0), var(--fill) var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat;
+  appearance: none; -webkit-appearance: none; display: block; width: 100%; min-width: 0; height: var(--field-h); background: var(--tick-mark), var(--fill-track);
 }
-input[type="range"].from-min { background: linear-gradient(to right, var(--track) var(--x0), #cfcfcf var(--x0) var(--x1), var(--track) var(--x1)) center / 100% 2px no-repeat; }
-#temperature { background: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat, linear-gradient(to right, #4f86cc, #6f6f6f 50%, #dcae4a) center / 100% 3px no-repeat; }
-#tint { background: linear-gradient(var(--tick), var(--tick)) center / 1px 8px no-repeat, linear-gradient(to right, #57a862, #6f6f6f 50%, #c063ae) center / 100% 3px no-repeat; }
+input[type="range"].from-min { background: var(--fill-track); }
+#temperature { background: var(--tick-mark), linear-gradient(to right, #4f86cc, #6f6f6f 50%, #dcae4a) center / 100% 3px no-repeat; }
+#tint { background: var(--tick-mark), linear-gradient(to right, #57a862, #6f6f6f 50%, #c063ae) center / 100% 3px no-repeat; }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; width: var(--thumb-hit); height: var(--thumb-hit); border-radius: 50%;
   background: var(--thumb-paint);
@@ -222,11 +225,11 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 /* A row that comes or goes is clipped by its moving edge. */
 .slider[data-moving] { overflow: hidden; }
 .val {
-  width: 100%; height: var(--field-h); padding: 0 4px; font-size: var(--val-text); text-align: right; border: 0; border-radius: 3px; background: none; color: var(--ink-quiet);
+  width: 100%; height: var(--field-h); padding: 0 4px; font-size: var(--text); text-align: right; border: 0; border-radius: 3px; background: none; color: var(--ink-quiet);
   -webkit-user-select: text; user-select: text; cursor: text;
 }
 @media (hover: hover) { .val:hover { box-shadow: inset 0 0 0 1px #4e4e4e; color: var(--ink); } }
-.val:focus { outline: none; background: var(--field); color: #fff; box-shadow: inset 0 0 0 1px var(--focus); }
+.val:focus { outline: none; background: var(--field); color: var(--ink-on); box-shadow: inset 0 0 0 1px var(--focus); }
 /* In the side panel, the label and value share a line and the track gets the panel's full width
    below them, for precision. A thumb taller than its line reaches up into the label's. */
 #dock .slider {
@@ -254,23 +257,21 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 @media (hover: hover) { :is(#frames-toggle, #choose-folder):not(:disabled):hover { background: var(--control); } }
 :is(#frames-toggle, #choose-folder) svg { color: var(--ink-quiet); transition: color var(--fade) var(--ease); }
 #frames-toggle[aria-expanded="true"] svg { color: var(--ink); }
-#folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+#folder, #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 0 0 10px; }
 #crop-open { display: none; }
-.icon[aria-expanded="true"] { background: var(--control-on); color: #fff; }
 #crop-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px 0 4px; min-width: 0; }
 #crop-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
 #crop-label { display: flex; align-items: center; gap: 6px; color: var(--ink-quiet); margin-right: 4px; }
 /* Straighten takes what the bar has left, for precision: 0.1° steps over ±10°. Its value,
    like −10.0°, is the widest, so its box is too. */
 #crop-tools .slider { flex: 1 1 260px; max-width: 440px; grid-template-columns: auto minmax(60px, 1fr) calc(var(--value) * 1.25); min-width: 110px; }
-#file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #save { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 10px; }
-.primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: #fff; font-weight: 500; white-space: nowrap; }
+.primary { padding: 0 14px; border: 0; border-radius: 4px; height: var(--control-h); background: var(--accent); color: var(--ink-on); font-weight: 500; white-space: nowrap; }
 @media (hover: hover) { .primary:not(:disabled):hover { background: #2a7ae0; } }
 .primary:not(:disabled):active { background: #1a61b8; }
 .primary:disabled { background: var(--control); opacity: .55; }
-#export.cancel { background-color: var(--control); background-image: linear-gradient(to right, rgb(255 255 255 / .16) var(--done, 0%), transparent 0); box-shadow: inset 0 0 0 1px #4a4a4a; font-weight: 400; font-variant-numeric: tabular-nums; }
+#export.cancel { background-color: var(--control); background-image: linear-gradient(to right, rgb(255 255 255 / .16) var(--done, 0%), transparent 0); box-shadow: inset 0 0 0 1px var(--control-edge); font-weight: 400; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { #export.cancel:hover { background-color: var(--control-hover); } }
 
 /* Frames */
@@ -287,13 +288,13 @@ body[data-frames="closed"] { grid-template-columns: 0 minmax(0, 1fr) var(--right
 #files li { display: flex; align-items: center; gap: 8px; height: var(--hit); padding-left: max(0px, calc(10px - (var(--check-hit) - var(--check)) / 2)); }
 #files .pick { flex: none; display: grid; place-items: center; width: var(--check-hit); align-self: stretch; }
 #roll-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; height: var(--head-h); padding: 0 4px; border-top: 1px solid var(--line); }
-#about-open { color: var(--ink-quiet); font-size: 11px; text-decoration-color: transparent; }
+#about-open { color: var(--ink-quiet); font-size: var(--text-small); text-decoration-color: transparent; }
 @media (hover: hover) { #files li:hover { background: var(--row-hover); } }
 #files li:has(button[aria-current="true"]) { background: var(--row-on); }
 #files button { flex: 1; min-width: 0; height: 100%; text-align: left; background: none; border: 0; padding: 0 10px 0 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #files button:focus-visible { outline-offset: -2px; }
-#files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#files .state { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
+#files .name, .roll-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#files .state { color: var(--ink-quiet); font-size: var(--text-small); white-space: nowrap; }
 #files .state.edited { color: var(--ink); }
 /* Dots: in front of a frame's state in the list, after a label once its choice departs from
    what's detected, and in the Show areas message as its legend. */
@@ -402,7 +403,7 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 #note-words { display: block; }
 #note[data-moving] #note-text { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--edge)), transparent); }
 #note-more { grid-area: more; max-height: 40vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; white-space: pre-line; overflow-wrap: anywhere; }
-.btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: #fff; }
+.btn.strong { background: var(--control-on); box-shadow: inset 0 0 0 1px #7a7a7a; color: var(--ink-on); }
 @media (hover: hover) { .btn.strong:hover { background: #606060; } }
 
 /* Histogram: in landscape, the top of the side panel. */
@@ -410,9 +411,9 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 #hist-body { position: relative; }
 /* In the side panel, the range warning lies over the top of the histogram, across its width, so it
    appears without moving a slider being dragged. It fades in and out. */
-#stored { position: absolute; top: 4px; left: 4px; right: 4px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: 11px; line-height: 14px; }
+#stored { position: absolute; top: 4px; left: 4px; right: 4px; margin: 0; padding: 3px 6px; border-radius: 3px; background: rgb(20 20 20 / .85); color: var(--warn); font-size: var(--text-small); line-height: 14px; }
 #histogram { width: 100%; height: 88px; display: block; background: var(--field); border-radius: 3px; }
-.clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 11px; color: var(--ink-quiet); margin-top: 4px; }
+.clip { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: var(--text-small); color: var(--ink-quiet); margin-top: 4px; }
 .clip .over { color: var(--warn); }
 /* An arrow toward the end of the histogram a number counts: left for shadows, right for highlights. */
 .clip-end { display: inline-block; width: 0; height: 0; border: 4px solid transparent; border-left-width: 0; border-right: 5px solid currentColor; margin-right: 4px; }
@@ -425,7 +426,7 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 .panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 4px 0 10px; background: var(--strip); border-block: 1px solid var(--seam); font-weight: 600; }
 .head-btn { height: calc(var(--control-h) - 4px); padding: 0 8px; background: none; border: 0; border-radius: 3px; color: var(--ink-quiet); font-weight: 400; }
 @media (hover: hover) { .head-btn:not(:disabled):hover { background: var(--control); color: var(--ink); } }
-.head-btn[aria-pressed="true"] { background: var(--control-on); color: #fff; }
+.head-btn[aria-pressed="true"] { background: var(--control-on); color: var(--ink-on); }
 
 #setup { flex: none; padding: 6px 10px 8px; }
 #develop section { padding: 8px 10px; }
@@ -456,18 +457,17 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
 #roll-flow p, #about p { line-height: 17px; margin: 0 0 8px; color: var(--ink-quiet); }
 #roll-flow .warn { color: var(--warn); }
 .progress { height: 3px; border-radius: 2px; background: var(--track); overflow: hidden; margin-bottom: 8px; }
-.progress div { height: 100%; width: 0; background: #cfcfcf; }
+.progress div { height: 100%; width: 0; background: var(--fill); }
 #roll-table { max-height: 42vh; overflow-y: auto; margin-bottom: 10px; background: var(--field); border-radius: 4px; }
 .roll-row { display: grid; grid-template-columns: var(--check) minmax(0, 1fr) auto; align-items: center; gap: 8px; height: max(26px, var(--hit)); padding: 0 10px; }
 .roll-row + .roll-row { border-top: 1px solid #2a2a2a; }
-.roll-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.roll-row .note { color: var(--ink-quiet); font-size: 11px; white-space: nowrap; }
+.roll-row .note { color: var(--ink-quiet); font-size: var(--text-small); white-space: nowrap; }
 .roll-row .note.warn { color: var(--warn); }
 #roll-result { margin-bottom: 12px; color: var(--ink-quiet); }
 #about { -webkit-user-select: text; user-select: text; }
 #about summary { margin-bottom: 8px; cursor: pointer; }
 @media (any-pointer: coarse) { #about summary { margin-bottom: 0; padding-block: 13px; } }
-#about pre { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: 11px; white-space: pre-wrap; color: var(--ink-quiet); }
+#about pre { max-height: 40vh; overflow: auto; margin: 0 0 12px; font-size: var(--text-small); white-space: pre-wrap; color: var(--ink-quiet); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Landscape from a small tablet up. */
@@ -505,10 +505,24 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   #bar[data-moving] { overflow: hidden; }
   #bar[data-moving] #crop-tools { display: flex; }
 }
-/* Portrait, and a phone: the histogram floats over the image's top right corner. Tapping it
-   folds it to an icon, which brings it back; the icon turns amber while the DNG can't store
-   every pixel. It steps aside while a tool works on the image, and waits for a picture. */
+/* Portrait, and a phone: one panel under the image, for the frames list or the tools, and the
+   histogram floats over the image's top right corner. */
 @media not all and (min-width: 600px), (orientation: portrait) {
+  /* The panel, or a phone's bar under it, is the page's foot. */
+  body { --stage-foot: 0px; }
+  /* The panel is as tall as what it shows, up to a limit, so a short list or a frame with no
+     color tools leaves the room to the image. */
+  #roll, #dock { grid-area: panel; border: 0; border-top: 1px solid var(--seam); }
+  #files { flex: 0 1 auto; min-height: 0; }
+  /* The panel's own top edge is the line above its headings. */
+  .panel-head { border-top: 0; }
+  body[data-frames="open"] #dock, body[data-frames="closed"] #roll { display: none; }
+  /* While the panel slides, the script moves the edge between it and the image; rows the panel
+     hasn't reached yet take its color, so that edge is the only one that moves. */
+  body[data-moving] { background: var(--panel); }
+  /* Tapping the histogram folds it to an icon, which brings it back; the icon turns amber while
+     the DNG can't store every pixel. It steps aside while a tool works on the image, and waits
+     for a picture. */
   #hist { grid-area: stage; justify-self: end; align-self: start; z-index: 4; width: var(--hist-w, 220px); margin: var(--float-gap); padding: var(--hist-pad); border: 0; border-radius: 6px; background: var(--veil); box-shadow: var(--veil-edge); text-shadow: var(--veil-text); }
   #histogram { height: var(--hist-h, 72px); background: none; filter: var(--veil-outline); }
   .clip { color: var(--ink); }
@@ -542,16 +556,9 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
 /* Portrait, from a small tablet up: the image takes the full width, and under it the tools
    in two columns, or the frames list in their place. */
 @media (min-width: 600px) and (orientation: portrait) {
-  /* The panel is as tall as what it shows, up to a limit, so a short list or a frame with no
-     color tools leaves the room to the image. */
-  body { --panel-h: min(500px, 46vh); --stage-foot: 0px; grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr); }
+  body { --panel-h: min(500px, 46vh); grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr); }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr); }
-  #roll, #dock { grid-area: panel; max-height: var(--panel-h); border: 0; border-top: 1px solid var(--seam); }
-  #files { flex: 0 1 auto; min-height: 0; }
-  /* The panel's own top edge is the line above its headings. */
-  .panel-head { border-top: 0; }
-  body[data-moving] { background: var(--panel); }
-  body[data-frames="open"] #dock, body[data-frames="closed"] #roll { display: none; }
+  #roll, #dock { max-height: var(--panel-h); }
   #dock { display: grid; grid-template: "devhead sethead" auto "tone setup" auto "tone color" 1fr / 1fr 1fr; align-content: start; overflow-y: auto; }
   #develop { display: contents; }
   /* With no box of its own, #develop dims through its groups. */
@@ -571,27 +578,23 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   :root { --stage-edge: 12px; }
   /* The bar at the bottom is the page's foot here. */
   #roll, #dock { padding-bottom: 0; }
-  body { --stage-foot: 0px; --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
+  body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
   #bar { display: contents; }
   #where { grid-area: where; margin: 0; padding: 0 6px; background: var(--bar); border-bottom: 1px solid var(--seam); }
-  #save { grid-area: save; align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
-  #roll, #dock, #frame-tools { grid-area: panel; }
+  #save { grid-area: save; background: var(--bar); border-bottom: 1px solid var(--seam); }
+  #frame-tools { grid-area: panel; }
   #crop-tools { grid-area: crop; }
   #dock { max-height: var(--panel-max); }
   #roll { max-height: var(--frames-h); }
-  #files { flex: 0 1 auto; min-height: 0; }
-  #roll, #dock { border: 0; border-top: 1px solid var(--seam); }
-  /* The panel's own top edge is the line above its heading. */
-  .panel-head { border-top: 0; }
-  body[data-frames="open"] :is(#dock, #frame-tools, #crop-tools), body[data-frames="closed"] #roll { display: none; }
+  body[data-frames="open"] :is(#frame-tools, #crop-tools) { display: none; }
   body:not([data-mode="crop"]) :is(#frame-tools, #crop-tools), body[data-mode="crop"] #dock { display: none; }
   #frame-tools { padding: 12px 12px 0; background: var(--panel); border-top: 1px solid var(--seam); }
   #crop-tools { flex-wrap: wrap; gap: 12px 8px; padding: 12px; background: var(--panel); }
   #crop-tools .sep { display: none; }
   /* The bar at the bottom already says Crop. */
   #crop-label { display: none; }
-  #crop-tools .seg { flex: 1 1 100%; display: flex; }
+  #crop-tools .seg { flex: 1 1 100%; }
   #crop-tools .seg button { flex: 1; }
   #crop-tools .slider { flex: 1 1 100%; max-width: none; }
   body[data-mode="setup"] :is(#develop-head, #develop) { display: none; }
@@ -599,12 +602,9 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   body[data-mode="color"] :is(#setup-head, #setup, #tone) { display: none; }
   #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: var(--foot); }
   /* Each tool's icon over its name. A 20 px icon keeps the 1.25 px stroke of the others. */
-  #modes button { flex: 1; height: 49px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-quiet); font-size: 11px; line-height: 13px; }
+  #modes button { flex: 1; height: 49px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-quiet); font-size: var(--text-small); line-height: 13px; }
   #modes svg { width: 20px; height: 20px; stroke-width: 1; }
-  #modes button[aria-pressed="true"] { color: #fff; font-weight: 600; }
-  /* While the panel slides, the script moves the edge between it and the image; rows the panel
-     hasn't reached yet take its color, so that edge is the only one that moves. */
-  body[data-moving] { background: var(--panel); }
+  #modes button[aria-pressed="true"] { color: var(--ink-on); font-weight: 600; }
   /* The bar names the panel. */
   #develop section h2 { display: none; }
 }
