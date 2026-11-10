@@ -1,10 +1,16 @@
 // This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 const $ = (id) => document.getElementById(id);
+// A button's pressed or open state, as assistive technology and the stylesheet read it.
+const press = (el, on) => el.setAttribute("aria-pressed", String(on));
+const expand = (el, on) => el.setAttribute("aria-expanded", String(on));
+// One choice per group, whose buttons are named `${group}-${choice}`.
+const pressOne = (group, choices, chosen) => { for (const choice of choices) press($(`${group}-${choice}`), choice === chosen); };
 const SLIDERS = ["exposure", "contrast", "highlights", "shadows", "whites", "blacks", "temperature", "tint", "saturation"];
 const COLOR_SLIDERS = ["temperature", "tint", "saturation"];
 const SAVE_SHORTCUT = navigator.platform.startsWith("Mac") ? "⌘S" : "Ctrl+S";
 const LOOKS = ["neutral", "flat", "hard"];
+const FILMS = ["color", "bw"];
 const LIST = new Intl.ListFormat("en", { type: "conjunction" });
 const TOOL_TEXT = {
   crop: "Drag to set crop for DNG export",
@@ -12,12 +18,14 @@ const TOOL_TEXT = {
   base: "Drag over clear, unexposed film, away from sprocket holes and edge markings",
 };
 
-let current = null;   // { file, auto, settings }
+let current = null;   // { file, settings }, and what the scan was read as
 let tool = null;      // null | "crop" | "area" | "base" | "show"
 let cropDraft = null;  // the open crop frame in scan coordinates; applied by Done or Enter
 let timer = null;
 let saveTimer = null;
 let opening = null;       // the frame being loaded
+// The frame on screen, or the one on its way there.
+const frameNow = () => opening ?? current?.file;
 let frames = [];          // what the frame list shows
 const selected = new Set();
 let lastChecked = null;   // for shift-click
@@ -32,16 +40,33 @@ let renderAgain = false;
 // with { busy }, reveal with { path }, export with { files }, and capabilities, which a shell
 // may answer with what it does differently from the Mac app's:
 //   export: it hands saved DNGs to other apps, where there's no file manager to show them in
+//   rolls: chooseFolder opens its start screen, with the rolls it keeps, so the way there
+//     stays in the bar
 // reveal and export say where their button is, as { from: [x, y, width, height] }, for a shell
 // that shows its choices next to it.
 const shell = window.webkit?.messageHandlers?.reversal;
+// Nothing, where there's no shell to hear it.
+const toShell = (action, more) => shell?.postMessage({ action, ...more });
 let shellCan = {};
 // A shell that doesn't answer returns nothing here, and one that does returns a promise.
-shell?.postMessage({ action: "capabilities" })?.then?.((can) => {
+toShell("capabilities")?.then?.((can) => {
   shellCan = can ?? {};
   if (shellCan.export) $("reveal").textContent = "Export…";
+  $("start-open").hidden = !shellCan.rolls;
   updateExportButton();
 });
+// An iPhone's number pads have no minus key, so its value fields that take one get the full
+// keyboard, where numbers and the minus are a tap away. An iPad's number pad has one.
+if (/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 600) {
+  for (const field of document.querySelectorAll("input.val")) {
+    if (field.id === "area-percent-val") continue;
+    field.inputMode = "text";
+    // It's a number: no suggestions, capitals or corrections.
+    field.autocapitalize = "off";
+    field.spellcheck = false;
+    field.setAttribute("autocorrect", "off");
+  }
+}
 const placeOf = (button) => { const r = button.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -52,6 +77,11 @@ async function api(path, body) {
   }
   return res;
 }
+// A request whose answer is JSON.
+const ask = async (path, body) => (await api(path, body)).json();
+const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
+// A count with its word: 1 frame, 2 frames.
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const adj = () => current.settings.adjust;
 const hints = () => current.settings.hints;
@@ -63,11 +93,15 @@ const filmNow = () => current.pendingFilm ?? current.settings.estimate.film;
 // appears or goes fades. The stylesheet animates what ends in one of its own states: a tool's bar,
 // the image and the tools' drawings, the range warning over the side panel's histogram, dialogs,
 // the frames column, and the room the image makes for a tool's bar. The script animates what
-// depends on measuring, all through move(): the panels' edge, a message's box, the floating
-// histogram's box and the words that come and go in them. With reduced motion set, both change at
+// depends on measuring, all through move(): the panels' edge, a row that comes or goes, a message's
+// box, the floating histogram's box and the words that come and go in them. With reduced motion set, both change at
 // once.
 const stillMotion = matchMedia("(prefers-reduced-motion: reduce)");
-const phoneLayout = matchMedia("not all and (min-width: 600px)");
+const PHONE_WIDE = "not all and (min-width: 600px)";
+const phoneLayout = matchMedia(PHONE_WIDE);
+// A phone, and portrait: the frames list and the tools share one panel under the image, and the
+// histogram floats over it.
+const panelUnderImage = matchMedia(`${PHONE_WIDE}, (orientation: portrait)`);
 const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 // A time token in milliseconds, whether written in s or ms.
 const cssTime = (name) => { const v = token(name); return (parseFloat(v) || 0) * (v.endsWith("ms") ? 1 : 1000); };
@@ -123,10 +157,9 @@ function fadeOut(el, then) {
 // A panel that changes height slides there rather than jumping. The edge it shares with the image
 // eases to its new place and the panel's contents ride that edge, so the image resizes smoothly
 // with it. What a panel shows changes at once: only the edge moves.
-function slidePanels(change) {
-  // On a phone the panels sit under the image in the page's grid. Elsewhere only the crop bar,
-  // under the top bar's row, changes height; the frames column slides by itself.
-  const grid = phoneLayout.matches ? document.body : $("bar");
+function slidePanels(change, grid = panelUnderImage.matches ? document.body : $("bar")) {
+  // On a phone and in portrait the panels sit under the image in the page's grid. Elsewhere only
+  // the crop bar, under the top bar's row, changes height; the frames column slides by itself.
   const rows = () => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
   // From where the edge is now, mid-slide or not.
   const from = rows();
@@ -135,15 +168,58 @@ function slidePanels(change) {
   const to = rows();
   const n = to.length;
   if (from.length !== n || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
-  // The page's rows are the bar, the image, the panel rows and the tool bar. Only the image's row
-  // moves: the panel rows under it fill from the top at their new heights and the last takes what's
-  // left, so the panel's contents ride its top edge and the tool bar covers what doesn't fit yet.
-  // The crop bar's two rows both move, and its contents ride their bottom edge.
+  // The page's rows are the bar, the image, the panel rows and, on a phone, the tool bar. Only the
+  // image's row moves: the panel rows under it fill from the top at their new heights and the last
+  // takes what's left, so the panel's contents ride its top edge and the tool bar covers what
+  // doesn't fit yet. The crop bar's two rows both move, and its contents ride their bottom edge.
+  const last = phoneLayout.matches ? n - 2 : n - 1;
   const template = grid === document.body
-    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === n - 2 ? "minmax(0px, 1fr)" : i > 1 && i < n - 1 ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
+    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
     : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
   move(grid, "size", { gridTemplateRows: [template(false), template(true)] }, motion("--slide"), { flags: ["moving"] });
 }
+
+// A row that comes or goes eases its height, so what's under it slides there rather than jumps.
+// `now` puts it in place at once.
+function slideRow(row, show, now = false) {
+  const going = motionTag(row, "size");
+  if ((going ? going === "in" : !row.hidden) === show) return;
+  const from = row.hidden ? 0 : row.getBoundingClientRect().height;
+  endMotion(row, "size");
+  row.hidden = false;
+  const full = row.getBoundingClientRect().height;
+  // Out of sight, in a panel that isn't shown, there's nothing to slide.
+  if (now || !full) { row.hidden = !show; return; }
+  const gap = parseFloat(getComputedStyle(row).marginTop) || 0;
+  const part = (share) => ({ height: `${full * share}px`, marginTop: `${gap * share}px`, opacity: share });
+  move(row, "size", [part(from / full), part(show ? 1 : 0)], motion("--slide"), {
+    flags: ["moving"],
+    tag: show ? "in" : "out",
+    after: (finished) => { if (finished && !show) row.hidden = true; },
+  });
+}
+
+// A double click, with a mouse or a finger. A touch screen sends none, so two short taps in one
+// place count as one.
+const TAP_MS = 300, TAP_SLIP = 10, DOUBLE_TAP_APART = 24;
+function onDouble(el, run) {
+  el.addEventListener("dblclick", run);
+  let down = null, last = null;
+  const near = (e, to, px) => Math.hypot(e.clientX - to.x, e.clientY - to.y) < px;
+  el.addEventListener("pointerdown", (e) => { down = e.pointerType === "mouse" ? null : { x: e.clientX, y: e.clientY, at: e.timeStamp }; });
+  el.addEventListener("pointerup", (e) => {
+    const tap = down && e.timeStamp - down.at < TAP_MS && near(e, down, TAP_SLIP) ? down : null;
+    down = null;
+    const second = tap && last && e.timeStamp - last.at < DOUBLE_CLICK_MS && near(e, last, DOUBLE_TAP_APART);
+    last = second ? null : tap;
+    if (second) run();
+  });
+}
+
+// The page is an app's window, not a document, and keeps its size. A pinch on a trackpad comes as
+// a wheel turn with Control held in some browsers and as a gesture in others.
+addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+for (const type of ["gesturestart", "gesturechange"]) addEventListener(type, (e) => e.preventDefault());
 
 // ---------- Messages ----------
 // Everything the app has to say floats at the foot of the image, one message at a time. A message
@@ -155,8 +231,19 @@ const READ_MS = 3500, READ_MS_PER_CHAR = 40, READ_FREE_CHARS = 40, READ_MAX_MS =
 const DOUBLE_CLICK_MS = 400;
 let noteTimer = 0, noteStays = false, dismissTimer = 0;
 let noteAction = null;  // what the message's own button does
+// An offer to finish a save that was cut short, as { text, label, reveal }, until it's answered:
+// taken, or put away by the user. Other messages come and go around it.
+let offer = null;
+let offerShown = false;  // the message on screen is the offer
 // `action` is { label, run }: one thing to do about the message, which closes it.
 function status(text = "", { stay = false, reveal = false, action = null } = {}) {
+  if (offer && !action?.offer) {
+    // A confirmation that would fade isn't worth losing the offer for, and nothing but the
+    // user puts the offer away. A message that needs reading takes its place for a while.
+    if (!text) { if (!offerShown) showOffer(); return; }
+    if (!stay && !text.includes("\n")) return;
+  }
+  offerShown = !!action?.offer;
   const [head, ...rest] = text.split("\n");
   clearTimeout(noteTimer);
   clearTimeout(dismissTimer);
@@ -179,6 +266,8 @@ function status(text = "", { stay = false, reveal = false, action = null } = {})
   });
   if (!noteStays) fadeLater(Math.min(READ_MAX_MS, READ_MS + READ_MS_PER_CHAR * Math.max(0, head.length - READ_FREE_CHARS)));
 }
+// What failed needs reading, so it stays.
+const couldNot = (what, e) => status(`Could not ${what}: ${e.message}`, { stay: true });
 // A message fades in, and one that follows it while it shows keeps the box: the words change at
 // once and the box takes their height, then eases to their width. Growing, it uncovers the words
 // in their final layout through a soft edge, which clears as it arrives.
@@ -219,7 +308,7 @@ function fadeLater(ms) {
 }
 function showDetails(on) {
   $("note-more").hidden = !on;
-  $("note-details").setAttribute("aria-expanded", String(on));
+  expand($("note-details"), on);
   // Reading the details keeps the message.
   if (on) { clearTimeout(noteTimer); noteStays = true; }
 }
@@ -229,22 +318,33 @@ $("note-details").addEventListener("click", () => showDetails($("note-more").hid
 $("note").addEventListener("click", (e) => {
   clearTimeout(dismissTimer);
   if (e.detail > 1 || e.target.closest("button, #note-more")) return;
-  dismissTimer = setTimeout(() => { if (getSelection().isCollapsed) status(); }, DOUBLE_CLICK_MS);
+  dismissTimer = setTimeout(() => { if (getSelection().isCollapsed) dismissNote(); }, DOUBLE_CLICK_MS);
 });
+// The user puts the message away. If it's the offer, that's its answer.
+function dismissNote() {
+  if (offerShown) forgetOffer();
+  status();
+}
 // For the keyboard and screen readers, which can't click the box.
-$("note-dismiss").addEventListener("click", () => status());
+$("note-dismiss").addEventListener("click", dismissNote);
 $("note-action").addEventListener("click", () => {
   const run = noteAction;
+  // Once: the message fades for a moment after it's answered. The offer waits for other work.
+  if (!run || (offerShown && batch)) return;
+  noteAction = null;
+  if (offerShown) offer = null;
   status();
-  run?.();
+  run();
 });
 
 
 // ---------- Files ----------
 async function loadFiles() {
-  const data = await (await api("/api/files")).json();
+  const data = await ask("/api/files");
   folderPath = data.folder;
   unfinished = data.unfinished ?? [];
+  // An offer has nothing left to save once the folder lists no such frames.
+  if (!unfinished.length) withdrawOffer();
   $("folder").textContent = data.folder.split("/").filter(Boolean).pop() ?? data.folder;
   $("choose-folder").title = shell ? `${data.folder}\nOpen another folder…` : data.folder;
   frames = data.files;
@@ -255,7 +355,7 @@ async function loadFiles() {
   list.replaceChildren(...frames.map(frameRow));
   list.scrollTop = scroll;
   if (!frames.length) $("message").textContent = "No raw files in this folder. Open a folder with NEF, CR2, CR3, ARW, RAF or DNG scans";
-  markCurrent(opening ?? current?.file);
+  markCurrent(frameNow());
   updateSaveButton();
 }
 
@@ -283,7 +383,17 @@ function frameRow(f) {
   const name = document.createElement("span"); name.className = "name"; name.textContent = f.name; name.title = f.name;
   const state = document.createElement("span");
   b.append(name, state);
-  b.addEventListener("click", () => open(f.name));
+  // Where the list takes the tools' place, a tap shows the frame and a tap on the frame that's
+  // shown goes on to its tools: the list stays for looking through a roll, and gives way to work
+  // on one frame.
+  b.addEventListener("click", () => {
+    if (panelUnderImage.matches && f.name === frameNow()) {
+      // The row goes out of sight with the list, and keyboard focus goes to what brings it back.
+      const focused = document.activeElement === b;
+      slidePanels(() => showFrames(false));
+      if (focused) $("frames-toggle").focus();
+    } else open(f.name);
+  });
   li.append(pick, b);
   showFrameState(f, state);
   return li;
@@ -310,21 +420,27 @@ function checkFrame(name, on, range) {
   const span = from < 0 ? [name] : names.slice(Math.min(from, at), Math.max(from, at) + 1);
   for (const n of span) on ? selected.add(n) : selected.delete(n);
   lastChecked = name;
+  showSelection();
+}
+
+// The checkboxes and what depends on them follow the selection.
+function showSelection() {
   for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
   updateSaveButton();
 }
+// The selected frames, in the list's order.
+const selectedNames = () => frames.map((f) => f.name).filter((name) => selected.has(name));
 
 $("select-all-box").addEventListener("change", (e) => {
   selected.clear();
   if (e.target.checked) for (const f of frames) selected.add(f.name);
-  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
-  updateSaveButton();
+  showSelection();
 });
 
 // The open frame's place in the roll, or how many are selected.
 let shownName = null;
 // Where a shell hands DNGs to other apps, any saved frame can go at any time: the selected ones,
-// or the open one. The button after a save only covers what that save wrote, and fades.
+// or the open one. The button after a save only covers what that save wrote.
 function exportable() {
   const wanted = selected.size ? frames.filter((f) => selected.has(f.name)) : frames.filter((f) => f.name === shownName);
   return wanted.filter((f) => f.saved).map((f) => f.name);
@@ -335,35 +451,39 @@ function updateExportButton() {
 }
 $("export-dngs").addEventListener("click", (e) => {
   const files = exportable();
-  if (files.length) shell.postMessage({ action: "export", files, from: placeOf(e.currentTarget) });
+  if (files.length) toShell("export", { files, from: placeOf(e.currentTarget) });
 });
 
 function showCount() {
   updateExportButton();
   const at = frames.findIndex((f) => f.name === shownName), n = frames.length;
-  $("frame-count").textContent = !n ? "" : selected.size ? `${selected.size} of ${n} selected` : at >= 0 ? `${at + 1} of ${n}` : `${n} frame${n > 1 ? "s" : ""}`;
+  $("frame-count").textContent = !n ? "" : selected.size ? `${selected.size} of ${n} selected` : at >= 0 ? `${at + 1} of ${n}` : plural(n, "frame");
 }
+
+// A batch's progress: the frame it's on, counting from 1, and the percent it has finished.
+const frameInWork = ({ done = 0, failed = 0, total = 1 }) => Math.min(done + failed + 1, total);
+const shareDone = ({ done = 0, failed = 0, total = 1 }) => 100 * (done + failed) / total;
 
 // While saving, the button stops the save and fills as frames finish.
 function updateSaveButton() {
   const button = $("export");
-  shell?.postMessage({ action: "busy", busy: !!batch });
+  toShell("busy", { busy: !!batch });
   showCount();
   const saving = batch?.task === "save";
   button.classList.toggle("cancel", saving);
   button.title = saving ? "Finish the frames being saved, then stop." : SAVE_SHORTCUT;
   if (saving) {
-    const { done = 0, failed = 0, total = 1 } = batch;
-    button.textContent = total > 1 ? `Stop · ${Math.min(done + failed + 1, total)} of ${total}` : "Stop saving";
-    button.style.setProperty("--done", `${100 * (done + failed) / total}%`);
+    const { total = 1 } = batch;
+    button.textContent = total > 1 ? `Stop · ${frameInWork(batch)} of ${total}` : "Stop saving";
+    button.style.setProperty("--done", `${shareDone(batch)}%`);
     // The button isn't announced as it changes, so progress is told separately.
-    const told = `Saving ${Math.min(done + failed + 1, total)} of ${total}`;
+    const told = `Saving ${frameInWork(batch)} of ${total}`;
     if ($("save-progress").textContent !== told) $("save-progress").textContent = told;
     button.disabled = false;
     return;
   }
   $("save-progress").textContent = "";
-  button.textContent = selected.size ? `Save ${selected.size} DNG${selected.size > 1 ? "s" : ""}` : "Save DNG";
+  button.textContent = selected.size ? `Save ${plural(selected.size, "DNG")}` : "Save DNG";
   button.disabled = !!batch || (!selected.size && !current);
   const box = $("select-all-box");
   box.checked = frames.length > 0 && selected.size === frames.length;
@@ -386,39 +506,39 @@ function markCurrent(name) {
 // in place of the tools under it in portrait, so the frame being chosen shows above the list.
 // On a phone, the bar at the bottom picks which tools show, and closes the list. The column stays
 // as it was left; turning the device to portrait with a frame open shows the tools instead.
-// The same layouts float the histogram over the image.
-const framesInPlaceOfTools = matchMedia("not all and (min-width: 600px), (orientation: portrait)");
 let framesColumn = true;
 function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
-  $("frames-toggle").setAttribute("aria-expanded", String(on));
-  if (!framesInPlaceOfTools.matches) framesColumn = on;
+  expand($("frames-toggle"), on);
+  if (!panelUnderImage.matches) framesColumn = on;
   pressModes();
 }
 // On a phone the list takes the tools' place, so no group of tools reads as shown.
 function pressModes() {
   const listShown = document.body.dataset.frames === "open";
   for (const button of document.querySelectorAll("#modes button")) {
-    button.setAttribute("aria-pressed", String(!listShown && button.dataset.mode === document.body.dataset.mode));
+    press(button, !listShown && button.dataset.mode === document.body.dataset.mode);
   }
 }
 $("frames-toggle").addEventListener("click", () => slidePanels(() => showFrames(document.body.dataset.frames !== "open")));
-framesInPlaceOfTools.addEventListener("change", () => showFrames(framesInPlaceOfTools.matches ? !shownName : framesColumn));
+panelUnderImage.addEventListener("change", () => showFrames(panelUnderImage.matches ? !shownName : framesColumn));
 // A motion measured for one layout finishes at once when the layout changes, so what was going
 // goes, and the histogram's rows follow.
-for (const layout of [phoneLayout, framesInPlaceOfTools]) {
+for (const layout of [phoneLayout, panelUnderImage]) {
   layout.addEventListener("change", () => {
     for (const el of [document.body, $("bar"), $("hist"), $("note")]) endMotion(el, "", true);
     showHistRows(histRows.clip, histRows.stored, { now: true });
   });
 }
 $("crop-open").addEventListener("click", () => slidePanels(() => {
-  $("crop-open").setAttribute("aria-expanded", String($("crop-open").getAttribute("aria-expanded") !== "true"));
-}));
+  expand($("crop-open"), $("crop-open").getAttribute("aria-expanded") !== "true");
+}, $("bar")));
 for (const button of document.querySelectorAll("#modes button")) {
   button.addEventListener("click", () => slidePanels(() => {
     document.body.dataset.mode = button.dataset.mode;
     showFrames(false);
+    // Each panel from its top: scrolled as the last one was, its heading would be out of view.
+    $("dock").scrollTop = 0;
   }));
 }
 
@@ -441,7 +561,7 @@ function foldHist(folded) {
   const { bodyWidth, stops } = histStops();
   if (folded) hist.toggleAttribute("data-folded", true);
   const end = box(hist.getBoundingClientRect());
-  $("hist-fold").setAttribute("aria-expanded", String(!folded));
+  expand($("hist-fold"), !folded);
   // From where the box is now, through the stops still ahead of it.
   const path = folded
     ? [from, ...[...stops].reverse().filter((s) => s.height < from.height - 0.5), end]
@@ -483,7 +603,7 @@ const histRows = { clip: false, stored: false };
 const STEPPED_ASIDE = 'body:not([data-tool=""]) #hist, body:has(#view[hidden]) #hist';
 function showHistRows(clip, stored, { now = false } = {}) {
   Object.assign(histRows, { clip, stored });
-  const hist = $("hist"), floating = framesInPlaceOfTools.matches;
+  const hist = $("hist"), floating = panelUnderImage.matches;
   const rows = [[$("clip"), clip || !floating], [$("stored"), stored]];
   const shown = floating && !hist.hasAttribute("data-folded") && hist.getClientRects().length > 0 && !hist.matches(STEPPED_ASIDE);
   if (now || !shown || motionTag(hist, "size") === "fold") {
@@ -542,7 +662,7 @@ async function rememberSettings(leaving = false) {
   const { file, settings } = frame;
   const json = JSON.stringify(settings);
   if (json === frame.remembered) return;
-  const state = await (await api("/api/settings", { file, settings, adjust_only: rolling })).json();
+  const state = await ask("/api/settings", { file, settings, adjust_only: rolling });
   frame.remembered = json;
   const f = frames.find((x) => x.name === file);
   if (f) { Object.assign(f, state); showFrameStates(); }
@@ -550,7 +670,7 @@ async function rememberSettings(leaving = false) {
 
 function rememberSoon() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => rememberSettings().catch((e) => status(`Could not save settings: ${e.message}`, { stay: true })), 300);
+  saveTimer = setTimeout(() => rememberSettings().catch((e) => couldNot("save settings", e)), 300);
 }
 
 async function open(name) {
@@ -559,7 +679,7 @@ async function open(name) {
     await measureSettled();
     await rememberSettings(true);
   } catch (e) {
-    status(`Could not save settings, so this frame stays open: ${e.message}`, { stay: true });
+    couldNot("save settings, so this frame stays open", e);
     return;
   }
   clearTimeout(timer);
@@ -575,9 +695,9 @@ async function open(name) {
   $("view").hidden = true;
   setBusy(true);
   try {
-    const data = await (await api(`/api/load?file=${encodeURIComponent(name)}`)).json();
+    const data = await ask(`/api/load?file=${encodeURIComponent(name)}`);
     if (opening !== name) return;  // another frame was chosen meanwhile
-    current = { file: name, auto: data.auto, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent, warning: data.warning, baseFound: data.baseFound, filmDetected: data.filmDetected };
+    current = { file: name, settings: data.settings, defaultAreaPercent: data.defaultAreaPercent, warning: data.warning, baseFound: data.baseFound, filmDetected: data.filmDetected };
     current.settings.hints ??= {};
     current.remembered = JSON.stringify(current.settings);
     syncControls();
@@ -632,13 +752,23 @@ function showSetupNote() {
   $("setup-note").hidden = !note;
 }
 
+let syncedFrame = null;  // the frame the controls last showed
 function syncControls() {
+  const film = filmNow();
+  // The panel under the image is as tall as what it shows, so its edge slides when the film type
+  // changes that, to where everything else that changes with it leaves the panel.
+  if (document.body.dataset.film !== film) slidePanels(() => showControls(film));
+  else showControls(film);
+}
+function showControls(film) {
   const a = adj();
   // Black and white has only Tone to develop. On a phone, its Color panel gives way to Tone.
-  const film = filmNow();
   document.body.dataset.film = film;
-  $("film-color").setAttribute("aria-pressed", String(film === "color"));
-  $("film-bw").setAttribute("aria-pressed", String(film === "bw"));
+  if (film === "bw" && document.body.dataset.mode === "color") {
+    document.body.dataset.mode = "tone";
+    pressModes();
+  }
+  pressOne("film", FILMS, film);
   const chosen = !!hints().film;
   const reads = current.filmDetected === "bw" ? "black and white" : "color";
   // A label's dot says its choice departs from what's detected, in the color its area is drawn in.
@@ -649,29 +779,26 @@ function syncControls() {
   $("film-seg").title = chosen
     ? `Chosen for this frame. The scan reads as ${reads}; choose that to go back to detecting.`
     : "Detected from the scan. Choose the other type to convert this frame as that instead.";
-  if (film === "bw" && document.body.dataset.mode === "color") {
-    document.body.dataset.mode = "tone";
-    pressModes();
-  }
   for (const id of [...SLIDERS, "straighten"]) showValue(id, a[id]);
-  for (const look of LOOKS) $(`look-${look}`).setAttribute("aria-pressed", String(a.look === look));
+  pressOne("look", LOOKS, a.look);
   const percent = hints().area_percent ?? current.defaultAreaPercent;
   showValue("area-percent", percent);
-  $("flip").setAttribute("aria-pressed", String(a.flip_h));
+  press($("flip"), a.flip_h);
   // One choice per group: the tool being used, otherwise what the frame uses now.
   const cropMode = tool === "crop" || isCustomCrop(a.crop) ? "draw" : a.crop ? "frame" : "full";
-  for (const m of ["full", "frame", "draw"]) $(`crop-${m}`).setAttribute("aria-pressed", String(cropMode === m));
+  pressOne("crop", ["full", "frame", "draw"], cropMode);
   const customArea = tool === "area" || !!hints().analysis;
-  $("area-auto").setAttribute("aria-pressed", String(!customArea));
-  $("area-draw").setAttribute("aria-pressed", String(customArea));
-  $("area-percent-row").hidden = customArea;
+  pressOne("area", ["auto", "draw"], customArea ? "draw" : "auto");
+  // Another frame shows its own at once; a choice made on this one slides the row in or out.
+  slideRow($("area-percent-row"), !customArea, syncedFrame !== current.file);
+  syncedFrame = current.file;
   showLegend();
   const customBase = tool === "base" || !!hints().base;
-  $("base-auto").setAttribute("aria-pressed", String(!customBase && !hints().base_rgb));
+  press($("base-auto"), !customBase && !hints().base_rgb);
   $("roll-state").hidden = !!hints().base || !hints().base_rgb;
   showSetupNote();
-  $("base-draw").setAttribute("aria-pressed", String(customBase));
-  $("show-areas").setAttribute("aria-pressed", String(tool === "show"));
+  press($("base-draw"), customBase);
+  press($("show-areas"), tool === "show");
 }
 
 const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a[k] - b[k]) < 1e-4);
@@ -687,7 +814,8 @@ function changed(delay = 0) {
 for (const id of [...SLIDERS, "straighten"]) {
   $(id).title = "Double-click to reset";
   $(id).addEventListener("input", (e) => { if (current) { adj()[id] = Number(e.target.value); if (id === "straighten") straightenMoved(); changed(); } });
-  $(id).addEventListener("dblclick", () => { if (current) { adj()[id] = 0; if (id === "straighten") straightenMoved(); changed(0); } });
+  const reset = () => { if (current) { adj()[id] = 0; if (id === "straighten") straightenMoved(); changed(0); } };
+  onDouble($(id), reset);
 }
 
 // A new angle closes the areas, which no longer fit, but not the crop frame, since straightening and
@@ -735,8 +863,9 @@ function setAreaPercent(percent) {
   clearTimeout(areaTimer);
   areaTimer = setTimeout(() => setHint("analysis", null), 150);
 }
+$("area-percent").title = "Double-click to reset";
 $("area-percent").addEventListener("input", (e) => setAreaPercent(Number(e.target.value)));
-$("area-percent").addEventListener("dblclick", () => setAreaPercent(null));
+onDouble($("area-percent"), () => setAreaPercent(null));
 
 // A value box drives its slider, so a typed number goes the same way as a drag.
 for (const id of [...SLIDERS, "straighten", "area-percent"]) {
@@ -747,7 +876,7 @@ for (const id of [...SLIDERS, "straighten", "area-percent"]) {
     if (!box.disabled) box.focus();
   });
   const set = (v) => {
-    const clamped = Math.min(Number(range.max), Math.max(Number(range.min), v));
+    const clamped = clamp(v, Number(range.min), Number(range.max));
     if (clamped === Number(range.value)) return;
     range.value = clamped;
     range.dispatchEvent(new Event("input"));
@@ -820,7 +949,7 @@ $("base-auto").addEventListener("click", () => {
   if (current && (hints().base || hints().base_rgb)) setHint("base", null);
 });
 $("base-roll").addEventListener("click", openRollFlow);
-for (const film of ["color", "bw"]) $(`film-${film}`).addEventListener("click", () => setFilm(film));
+for (const film of FILMS) $(`film-${film}`).addEventListener("click", () => setFilm(film));
 $("tool-cancel").addEventListener("click", () => setTool(null));
 $("tool-done").addEventListener("click", () => { if (tool === "crop") applyCrop(); else setTool(null); });
 document.addEventListener("keydown", (e) => {
@@ -828,7 +957,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     // One step back: out of a tool first, and only then away from a message.
     if (tool) setTool(null);
-    else status();
+    else dismissNote();
     return;
   }
   // ⌘S or Ctrl+S saves, and never stops a save already running.
@@ -854,9 +983,9 @@ document.addEventListener("keydown", (e) => {
   // Up and down walk the frames, unless a slider or text box has the keys.
   if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.target.matches("input[type=range], input[type=text]")) {
     e.preventDefault();
-    const at = frames.findIndex((f) => f.name === (opening ?? current?.file));
+    const at = frames.findIndex((f) => f.name === frameNow());
     const next = frames[e.key === "ArrowUp" ? Math.max(at - 1, 0) : Math.min(at + 1, frames.length - 1)];
-    if (next && next.name !== (opening ?? current?.file)) open(next.name);
+    if (next && next.name !== frameNow()) open(next.name);
   }
 });
 // In the app, a right-click shouldn't offer a web page's Reload.
@@ -878,7 +1007,7 @@ $("export").addEventListener("click", async () => {
     return;
   }
   applyOpenCrop();
-  const files = selected.size ? frames.map((f) => f.name).filter((n) => selected.has(n)) : current ? [current.file] : [];
+  const files = selected.size ? selectedNames() : current ? [current.file] : [];
   if (files.length) save(files);
 });
 
@@ -887,33 +1016,51 @@ async function save(files) {
   try {
     await measureSettled();
     await rememberSettings();
-    batch = await (await api("/api/export", { files })).json();
+    batch = await ask("/api/export", { files });
+    // A save lists its own frames, in place of what an earlier one left.
+    unfinished = [];
+    withdrawOffer();
     updateSaveButton();
     followBatch();
   } catch (e) {
-    status(`Could not save: ${e.message}`, { stay: true });
+    couldNot("save", e);
   }
 }
 
 // A save that was cut short, by the app being closed or the device needing a rest, left frames
-// unsaved. They're offered once: asked and not taken up, the user has moved on.
-function restOfSave(label) {
+// unsaved, and the folder lists them. They're offered until the user takes the offer, puts it
+// away, or saves something else: the list is only dropped then, so that closing the app or
+// leaving the folder with the offer on screen loses nothing.
+function offerRest(text, label, reveal = false) {
+  if (!unfinished.length) return false;
+  offer = { text, label, reveal };
+  showOffer();
+  return true;
+}
+function showOffer() {
   const files = unfinished;
-  if (!files.length) return null;
+  status(offer.text, { stay: true, reveal: offer.reveal, action: { label: offer.label, offer: true, run: () => save(files) } });
+}
+// The offer goes without an answer: there's nothing left for it to save.
+function withdrawOffer() {
+  if (!offer) return;
+  offer = null;
+  if (offerShown) status();
+}
+function forgetOffer() {
+  offer = null;
   unfinished = [];
   api("/api/export/forget", {}).catch(() => {});
-  return { label: label ?? (files.length > 1 ? "Save them" : "Save it"), run: () => save(files) };
 }
 
 // ---------- Matching the film base across a roll ----------
 // Three steps, because this reaches past the frame on screen: say what will happen, read every
 // frame without changing anything, then let the user choose which readings count.
-let roll = null;  // { step, files, readings, ticked, voted }
+let roll = null;  // { step, files, readings, issues, ticked, voted }
 const SOURCE = { picked: "Custom", detected: "Detected", unsure: "No clear film" };
 
 function rollFrames() {
-  const names = frames.map((f) => f.name);
-  return selected.size ? names.filter((n) => selected.has(n)) : names;
+  return selected.size ? selectedNames() : frames.map((f) => f.name);
 }
 
 function openRollFlow() {
@@ -928,6 +1075,10 @@ function closeRollFlow() {
   roll = null;
   if ($("roll-flow").open) $("roll-flow").close();
 }
+function rollFailed(e) {
+  closeRollFlow();
+  couldNot("measure the roll", e);
+}
 
 function rollButtons(cancel, go, enabled = true) {
   $("roll-cancel").textContent = cancel;
@@ -940,14 +1091,14 @@ function showRollFlow() {
   const body = $("roll-body");
   const count = roll.files?.length ?? 0;
   if (roll.step === "intro") {
-    const frameWord = `${count} frame${count === 1 ? "" : "s"}`;
+    const frameWord = plural(count, "frame");
     const scope = count < frames.length ? `the selected ${frameWord}` : `all ${frameWord}`;
     body.innerHTML = `<p>Give every frame the same film base, taken from several frames. Use it for a consistent roll, or when some scans show no clear film edge.</p>
       <p>Reversal first measures the film base on <b></b>, without changing them. Then you choose which results to use, and apply.</p>
       <p>It does not change custom film base settings, color measurement, and Develop settings of each frame.</p>`;
     body.querySelector("b").textContent = scope;
     if (count < 2) body.insertAdjacentHTML("beforeend", `<p class="warn">Select at least two frames, or none to use the whole folder.</p>`);
-    rollButtons("Cancel", `Measure ${count} frame${count === 1 ? "" : "s"}`, count >= 2);
+    rollButtons("Cancel", `Measure ${frameWord}`, count >= 2);
   } else if (roll.step === "reading" || roll.step === "applying") {
     body.innerHTML = `<p id="roll-progress"></p><div class="progress"><div></div></div>`;
     showRollProgress();
@@ -961,8 +1112,8 @@ function showRollProgress() {
   const progress = $("roll-progress");
   if (!progress || !batch) return;
   const verb = roll.step === "reading" ? "Measuring the film base on frame" : "Applying the film base to frame";
-  progress.textContent = `${verb} ${Math.min(batch.done + batch.failed + 1, batch.total)} of ${batch.total}…`;
-  progress.nextElementSibling.firstElementChild.style.width = `${100 * (batch.done + batch.failed) / batch.total}%`;
+  progress.textContent = `${verb} ${frameInWork(batch)} of ${batch.total}…`;
+  progress.nextElementSibling.firstElementChild.style.width = `${shareDone(batch)}%`;
 }
 
 function showRollReview() {
@@ -975,9 +1126,9 @@ function showRollReview() {
       ? `<span class="warn">No clear film detected on any frame.</span> Cancel, set a custom film base on a frame that shows clear film, and start again.`
       : "Selected frames set the film base for the roll. Deselect any that look wrong."}</p>
     ${lost}<div id="roll-table"></div><div id="roll-result"></div>`;
-  if (lost) body.querySelector("#roll-issues").textContent = roll.issues.map((i) => `${i.file}: ${i.message}`).join("\n");
+  if (lost) body.querySelector("#roll-issues").textContent = issueLines(roll.issues).join("\n");
   const table = body.querySelector("#roll-table");
-  roll.readings.forEach((r, i) => {
+  roll.readings.forEach((r) => {
     const row = document.createElement("label");
     row.className = "roll-row";
     const box = document.createElement("input");
@@ -1003,11 +1154,11 @@ function showRollReview() {
   const voters = roll.ticked.size;
   if (roll.voted?.base_rgb && voters) {
     const keeps = roll.readings.length - applied.length;
-    result.textContent = `Film base from ${voters} frame${voters > 1 ? "s" : ""}.${keeps ? ` ${keeps} with a custom film base keep${keeps > 1 ? "" : "s"} it.` : ""}`;
+    result.textContent = `Film base from ${plural(voters, "frame")}.${keeps ? ` ${keeps} with a custom film base keep${keeps > 1 ? "" : "s"} it.` : ""}`;
   } else {
     result.textContent = "Select at least one frame.";
   }
-  rollButtons("Cancel", `Apply to ${applied.length} frame${applied.length === 1 ? "" : "s"}`, voters > 0 && applied.length > 0);
+  rollButtons("Cancel", `Apply to ${plural(applied.length, "frame")}`, voters > 0 && applied.length > 0);
 }
 
 // The median and what strays from it come from the engine, like every other measurement.
@@ -1016,13 +1167,12 @@ async function voteRoll() {
   const voters = review.readings.filter((r) => review.ticked.has(r.file));
   if (!voters.length) { review.voted = null; showRollReview(); return; }
   try {
-    const { base_rgb, differs } = await (await api("/api/roll/vote", { bases: voters.map((r) => r.base_rgb), readings: review.readings.map((r) => r.base_rgb) })).json();
+    const { base_rgb, differs } = await ask("/api/roll/vote", { bases: voters.map((r) => r.base_rgb), readings: review.readings.map((r) => r.base_rgb) });
     if (roll !== review) return;
     review.voted = { base_rgb, differs: Object.fromEntries(review.readings.map((r, i) => [r.file, differs[i]])) };
     showRollReview();
   } catch (e) {
-    closeRollFlow();
-    status(`Could not measure the roll: ${e.message}`, { stay: true });
+    rollFailed(e);
   }
 }
 
@@ -1031,12 +1181,11 @@ async function startRollTask(step, url, body) {
   showRollFlow();
   try {
     await rememberSettings();
-    batch = await (await api(url, body)).json();
+    batch = await ask(url, body);
     updateSaveButton();
     followBatch();
   } catch (e) {
-    closeRollFlow();
-    status(`Could not measure the roll: ${e.message}`, { stay: true });
+    rollFailed(e);
   }
 }
 
@@ -1052,7 +1201,9 @@ function cancelRollFlow() {
   if (roll?.step === "reading" || roll?.step === "applying") {
     $("roll-cancel").disabled = true;
     $("roll-cancel").textContent = "Stopping…";
-    api("/api/export/cancel", {}).catch(() => {});
+    // Measuring a roll saves nothing, so stopping it leaves the frames an earlier save didn't
+    // reach as they are listed.
+    api("/api/export/cancel", { later: true }).catch(() => {});
   } else {
     closeRollFlow();
   }
@@ -1068,7 +1219,7 @@ async function rollReadingsDone(finished) {
     status("Stopped. No frame changed");
     return;
   }
-  const readings = await (await api("/api/roll/readings")).json();
+  const readings = await ask("/api/roll/readings");
   // Frames in list order, whichever finished first; a frame with no clear film gets no say.
   const order = frames.map((f) => f.name);
   readings.sort((a, b) => order.indexOf(a.file) - order.indexOf(b.file));
@@ -1081,11 +1232,11 @@ async function rollReadingsDone(finished) {
 
 async function followBatch() {
   try {
-    batch = await (await api("/api/export/status")).json();
+    batch = await ask("/api/export/status");
   } catch (e) {
     batch = null;
     updateSaveButton();
-    status(`Could not get save progress: ${e.message}`, { stay: true });
+    couldNot("get save progress", e);
     return;
   }
   const inRoll = batch.task === "roll" || batch.task === "roll-read";
@@ -1109,10 +1260,7 @@ async function followBatch() {
   batch = null;
   if (finished.task === "roll-read") {
     updateSaveButton();
-    rollReadingsDone(finished).catch((e) => {
-      closeRollFlow();
-      status(`Could not measure the roll: ${e.message}`, { stay: true });
-    });
+    rollReadingsDone(finished).catch(rollFailed);
     return;
   }
   if (inRoll) { $("roll-cancel").disabled = false; closeRollFlow(); }
@@ -1122,14 +1270,16 @@ async function followBatch() {
     status(rollSummary(finished));
     return;
   }
-  if (finished.done === finished.total) selected.clear();
-  updateSaveButton();
-  for (const box of document.querySelectorAll("#files input")) box.checked = selected.has(box.dataset.name);
+  // Where DNGs leave through the shell, the frames stay selected: Export… is the next step.
+  if (finished.done === finished.total && !shellCan.export) selected.clear();
+  showSelection();
   lastPath = finished.last_path;
+  const reveal = !!(shell && lastPath);
   // Stopped for now, not by the user: the rest is still wanted.
-  const rest = finished.canceled ? restOfSave("Save the rest") : null;
-  // Like any message, a save's result fades unless it has problems to read or a rest to save.
-  status(batchSummary(finished), { reveal: !!(shell && lastPath), stay: !!rest, action: rest });
+  if (finished.canceled && offerRest(batchSummary(finished), "Save the rest", reveal)) return;
+  // Like any message, a save's result fades unless it has problems to read. Where its button
+  // is the way out for the DNG, it waits to be used or put away.
+  status(batchSummary(finished), { reveal, stay: reveal && !!shellCan.export });
 }
 
 // The open frame's base and measurements changed on disk: read them back, and keep the slider
@@ -1146,11 +1296,11 @@ async function reopenAfterRoll() {
   }
 }
 
-function rollSummary({ done, total, issues, canceled }) {
+function rollSummary({ total, issues, canceled }) {
   const head = canceled ? "Stopped. No frame changed"
     : issues.length ? "Could not apply the film base to every frame"
     : `${total} frames now share one film base. Choose Detect on a frame to measure its own`;
-  return [head, ...issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message))].join("\n");
+  return [head, ...issueLines(issues)].join("\n");
 }
 
 // A file in the open folder goes by its path from there: the folder is named on screen, and an
@@ -1159,18 +1309,30 @@ function inFolder(path) {
   return folderPath && path.startsWith(`${folderPath}/`) ? path.slice(folderPath.length + 1) : path;
 }
 
+// What went wrong, a line for each frame, or for the whole task where no frame is named.
+const issueLines = (issues) => issues.map((i) => (i.file ? `${i.file}: ${i.message}` : i.message));
+
 function batchSummary({ done, total, issues, canceled, last_path }) {
   const saved = last_path && inFolder(last_path);
-  const where = saved ? ` to ${saved.slice(0, saved.lastIndexOf("/"))}` : "";
-  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${saved}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
-  return [head, ...issues.map((i) => `${i.file}: ${i.message}`)].join("\n");
+  // Where DNGs leave through the shell, the folder they're kept in is no news: the name will do.
+  const name = saved && shellCan.export ? saved.slice(saved.lastIndexOf("/") + 1) : saved;
+  const where = saved && !shellCan.export ? ` to ${saved.slice(0, saved.lastIndexOf("/"))}` : "";
+  const head = total === 1 && done === 0 ? "Could not save the DNG" : total === 1 && done === 1 ? `Saved ${name}` : `Saved ${done === total ? done : `${done} of ${total}`} DNGs${where}${canceled ? ", then stopped" : ""}`;
+  return [head, ...issueLines(issues)].join("\n");
 }
 
-$("reveal").addEventListener("click", (e) => { if (shell && lastPath) shell.postMessage({ action: "reveal", path: lastPath, from: placeOf(e.currentTarget) }); });
+$("reveal").addEventListener("click", (e) => { if (lastPath) toShell("reveal", { path: lastPath, from: placeOf(e.currentTarget) }); });
+
+// Measuring a roll reads every frame's settings, so they wait until it's done.
+function rollBusy() {
+  if (batch?.task !== "roll") return false;
+  status("Matching the film base. Try again when it's done");
+  return true;
+}
 
 async function setHint(key, rect) {
   if (!current) return;
-  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done"); return; }
+  if (rollBusy()) return;
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
   measure(key === "base" ? (rect ? "Custom film base set" : "Film base set to Detect")
@@ -1181,7 +1343,7 @@ async function setHint(key, rect) {
 // A choice shows at once and holds while it's measured, so a second click compares with it.
 function setFilm(film) {
   if (!current || filmNow() === film) return;
-  if (batch?.task === "roll") { status("Matching the film base. Try again when it's done"); return; }
+  if (rollBusy()) return;
   hints().film = film === current.filmDetected ? null : film;
   current.pendingFilm = film;
   syncControls();
@@ -1202,7 +1364,7 @@ async function measureNow(done, clearsWarning) {
   try {
     // Measuring again keeps the film type, so moving an area can't switch the conversion.
     const film = filmNow();
-    const { estimate, baseFound, filmDetected } = await (await api("/api/estimate", { file, hints: hints(), straighten: adj().straighten, film })).json();
+    const { estimate, baseFound, filmDetected } = await ask("/api/estimate", { file, hints: hints(), straighten: adj().straighten, film });
     if (current?.file !== file || id !== latestMeasure) return true;
     current.settings.estimate = estimate;
     current.baseFound = baseFound;
@@ -1218,7 +1380,7 @@ async function measureNow(done, clearsWarning) {
     // The frame still converts as it did, so show that.
     current.pendingFilm = null;
     syncControls();
-    status(`Could not measure: ${e.message}`, { stay: true });
+    couldNot("measure", e);
     return false;
   }
   changed(0);
@@ -1275,6 +1437,7 @@ function rectFromPoints(p, q) {
   return { x0: Math.min(p[0], q[0]), y0: Math.min(p[1], q[1]), x1: Math.max(p[0], q[0]), y1: Math.max(p[1], q[1]) };
 }
 const rectInView = (r, a) => rectFromPoints(scanToView([r.x0, r.y0], a), scanToView([r.x1, r.y1], a));
+const rectInScan = (v, a) => rectFromPoints(viewToScan([v.x0, v.y0], a), viewToScan([v.x1, v.y1], a));
 function svgRect(r, cls) {
   const v = rectInView(r, adj());
   return `<rect class="${cls}" x="${v.x0}" y="${v.y0}" width="${v.x1 - v.x0}" height="${v.y1 - v.y0}"/>`;
@@ -1318,10 +1481,10 @@ async function loadHolder() {
   if (current.holder?.key === key) return;
   const { base_rgb } = current.settings.estimate;
   try {
-    const { areas } = await (await api("/api/holder", { file, base_rgb, straighten: adj().straighten })).json();
+    const { areas } = await ask("/api/holder", { file, base_rgb, straighten: adj().straighten });
     if (current?.file === file) current.holder = { key, areas };
   } catch (e) {
-    if (current?.file === file) status(`Could not find the film holder: ${e.message}`, { stay: true });
+    if (current?.file === file) couldNot("find the film holder", e);
   }
 }
 function drawOverlay(drag) {
@@ -1342,26 +1505,31 @@ function drawOverlay(drag) {
   showLegend();
 }
 
-let dragStart = null;
+let dragStart = null;  // where an area is being drawn from, with the pointer that draws it
 const eventPoint = (ev) => {
   const b = $("view").getBoundingClientRect();
-  return [Math.min(1, Math.max(0, (ev.clientX - b.left) / b.width)), Math.min(1, Math.max(0, (ev.clientY - b.top) / b.height))];
+  return [clamp((ev.clientX - b.left) / b.width, 0, 1), clamp((ev.clientY - b.top) / b.height, 0, 1)];
 };
 $("overlay").addEventListener("pointerdown", (ev) => {
-  if (!["area", "base"].includes(tool)) return;
-  dragStart = eventPoint(ev);
+  if (!["area", "base"].includes(tool) || ev.button !== 0 || dragStart) return;
+  dragStart = { pointer: ev.pointerId, at: eventPoint(ev) };
   $("overlay").setPointerCapture(ev.pointerId);
 });
 $("overlay").addEventListener("pointermove", (ev) => {
-  if (dragStart) drawOverlay(rectFromPoints(dragStart, eventPoint(ev)));
+  if (dragStart?.pointer === ev.pointerId) drawOverlay(rectFromPoints(dragStart.at, eventPoint(ev)));
+});
+// A drag the system takes over, as for a scroll, draws nothing.
+$("overlay").addEventListener("pointercancel", (ev) => {
+  if (dragStart?.pointer !== ev.pointerId) return;
+  dragStart = null;
+  drawOverlay();
 });
 $("overlay").addEventListener("pointerup", (ev) => {
-  if (!dragStart) return;
-  const view = rectFromPoints(dragStart, eventPoint(ev));
+  if (dragStart?.pointer !== ev.pointerId) return;
+  const view = rectFromPoints(dragStart.at, eventPoint(ev));
   dragStart = null;
   if (view.x1 - view.x0 < 0.005 || view.y1 - view.y0 < 0.005) { drawOverlay(); return; }
-  const a = adj();
-  const scan = rectFromPoints(viewToScan([view.x0, view.y0], a), viewToScan([view.x1, view.y1], a));
+  const scan = rectInScan(view, adj());
   const t = tool;
   setTool(null);
   setHint(t === "area" ? "analysis" : "base", scan);
@@ -1393,13 +1561,12 @@ function applyCrop() {
 function applyOpenCrop() {
   if (tool === "crop" && current) applyCrop();
 }
-const clamp = (v, low, high) => Math.min(high, Math.max(low, v));
 function cropView() {
   return rectInView(cropDraft, adj());
 }
 function setCropView(v) {
   const a = adj();
-  cropDraft = rectFromPoints(viewToScan([v.x0, v.y0], a), viewToScan([v.x1, v.y1], a));
+  cropDraft = rectInScan(v, a);
   drawCropFrame();
 }
 const cropFills = (v) => v.x1 - v.x0 > 0.999 && v.y1 - v.y0 > 0.999;
@@ -1517,7 +1684,7 @@ async function refresh() {
     if (full) drawOverlay();
     histogram(img, clipped);
   } catch (e) {
-    if (file === current?.file) status(`Could not update the preview: ${e.message}`, { stay: true });
+    if (file === current?.file) couldNot("update the preview", e);
   } finally {
     rendering = false;
     if (renderAgain) { renderAgain = false; refresh(); }
@@ -1547,6 +1714,9 @@ function fit() {
 new ResizeObserver(fit).observe($("stage"));
 
 const histCanvas = document.createElement("canvas");
+// The share of the preview's pixels at one end that's worth a warning, and the share of the DNG's
+// that's worth a line of its own.
+const CLIP_SHOWN = 0.005, CLIP_STORED = 0.0005;
 function histogram(img, storedClipped) {
   const w = Math.min(400, img.naturalWidth), h = Math.round(img.naturalHeight * w / img.naturalWidth);
   histCanvas.width = w; histCanvas.height = h;
@@ -1581,22 +1751,44 @@ function histogram(img, storedClipped) {
   const pct = (v) => `${(100 * v / n).toFixed(v / n < 0.01 ? 2 : 1)}%`;
   $("clip-low").querySelector(".clip-pct").textContent = pct(low);
   $("clip-high").querySelector(".clip-pct").textContent = pct(high);
-  $("clip-low").classList.toggle("over", low / n > 0.005);
-  $("clip-high").classList.toggle("over", high / n > 0.005);
-  $("clip-high").title = high / n > 0.005 && storedClipped < 0.0005 ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
+  const lowOver = low / n > CLIP_SHOWN, highOver = high / n > CLIP_SHOWN, storedOver = storedClipped >= CLIP_STORED;
+  $("clip-low").classList.toggle("over", lowOver);
+  $("clip-high").classList.toggle("over", highOver);
+  $("clip-high").title = highOver && !storedOver ? "The DNG keeps these. Lower Whites or use Flat to see them." : "";
   // "Clipped" above is only the preview's and the DNG keeps it; these pixels are gone for good.
   // The words go in first, so the box grows to their height.
   $("stored").textContent = `${(storedClipped * 100).toFixed(2)}% of highlights beyond DNG range`;
   $("stored").title = "Brighter than the DNG can store. Lower Exposure to keep them.";
-  showHistRows(low / n > 0.005 || high / n > 0.005, storedClipped >= 0.0005);
+  showHistRows(lowOver || highOver, storedOver);
 }
 
-api("/api/version").then((r) => r.json()).then(({ version, commit }) => {
+ask("/api/version").then(({ version, commit }) => {
   const label = commit ? `${version} · ${commit}` : version;
   $("about-open").textContent = label;
   $("about-title").textContent = `Reversal ${label}`;
 }).catch(() => {});
-$("about-open").addEventListener("click", () => $("about").showModal());
+$("about-open").addEventListener("click", () => { $("about").showModal(); showNotices(); });
+// An app carries the notices of what's built into it, and this is where they can be read.
+// Each is fetched when it's opened.
+let noticesShown = false;
+async function showNotices() {
+  if (noticesShown) return;
+  noticesShown = true;
+  try {
+    const { notices } = await ask("/api/notices");
+    $("about-notices").replaceChildren(...notices.map((name) => {
+      const notice = document.createElement("details"), title = document.createElement("summary"), text = document.createElement("pre");
+      title.textContent = name.replace(/\.txt$/, "");
+      notice.append(title, text);
+      notice.addEventListener("toggle", () => {
+        if (!text.textContent) api(`/api/notice?name=${encodeURIComponent(name)}`).then((r) => r.text()).then((t) => { text.textContent = t; }).catch(() => {});
+      });
+      return notice;
+    }));
+  } catch {
+    noticesShown = false;
+  }
+}
 $("about-close").addEventListener("click", () => $("about").close());
 $("about-details").addEventListener("toggle", () => {
   if ($("about-license").textContent) return;
@@ -1607,12 +1799,14 @@ $("choose-folder").disabled = !shell;
 updateSaveButton();
 setBusy(false);
 showHistRows(false, false, { now: true });
-$("choose-folder").addEventListener("click", () => shell.postMessage({ action: "chooseFolder" }));
+for (const id of ["choose-folder", "start-open"]) $(id).addEventListener("click", () => toShell("chooseFolder"));
 
 loadFiles().then(() => {
-  const left = unfinished.length, rest = restOfSave();
-  if (rest) status(`Saving stopped with ${left} frame${left > 1 ? "s" : ""} left`, { stay: true, action: rest });
+  // A folder opens on its first frame: an empty stage only asks for a tap that's always the same.
+  if (!current && !opening && frames.length) open(frames[0].name);
+  const left = unfinished.length;
+  offerRest(`Saving stopped with ${plural(left, "frame")} left`, left > 1 ? "Save them" : "Save it");
 }).catch((e) => { $("message").textContent = `Could not list files: ${e.message}`; });
 // Reloaded while saving: pick the progress back up.
-api("/api/export/status").then((r) => r.json()).then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
+ask("/api/export/status").then((s) => { if (s.running) { batch = s; updateSaveButton(); followBatch(); } }).catch(() => {});
 addEventListener("pagehide", () => { rememberSettings(true).catch(() => {}); });

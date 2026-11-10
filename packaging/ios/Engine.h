@@ -17,7 +17,8 @@ typedef struct {
 
 /// Opens `folder` in place of the one that was open, as reversal_engine_close would close it.
 /// If that fails, no folder is open.
-bool reversal_engine_open(const char *folder);
+/// `notices` is the folder of license notices the app carries, for the page to show, or null.
+bool reversal_engine_open(const char *folder, const char *notices);
 /// Closes the folder. Frames being saved finish; the rest of a save doesn't start.
 void reversal_engine_close(void);
 /// Lets go of the frames the engine keeps ready to show, when the system is short of memory.

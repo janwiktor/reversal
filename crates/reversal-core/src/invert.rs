@@ -1174,9 +1174,29 @@ mod tests {
                 ..Adjust::default()
             };
             let s = Settings::new(est(), adjust);
-            let (kept, owned) = (convert(&scan, &s), convert_owned(scan.clone(), &s));
-            assert_eq!((kept.width, kept.height), (owned.width, owned.height));
-            assert_eq!(kept.data, owned.data);
+            // The conversion as it was before it worked in place: a copy for each step.
+            let a = &s.adjust;
+            let straight = scan.straighten(a.straighten);
+            let pixels = a.crop.unwrap_or(NRect::FULL);
+            let mut copied = straight.crop(pixels.to_pixels(straight.width, straight.height));
+            let (gains, weights) = (gains_ev(Film::Color, a), silver_weights(BASE));
+            for px in copied.data.as_chunks_mut::<3>().0 {
+                *px = saturate(
+                    positive_with(*px, &s.estimate, gains, weights),
+                    a.saturation_gain(),
+                );
+            }
+            if a.flip_h {
+                copied = copied.flip_h();
+            }
+            let copied = copied.rotate_cw(a.rotate);
+            for converted in [convert(&scan, &s), convert_owned(scan.clone(), &s)] {
+                assert_eq!(
+                    (converted.width, converted.height),
+                    (copied.width, copied.height)
+                );
+                assert_eq!(converted.data, copied.data);
+            }
         }
     }
 

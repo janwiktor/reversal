@@ -8,6 +8,9 @@
 //! GET  /, /app.js, /style.css             the page
 //! GET  /api/version                        version and the commit it was built from
 //! GET  /api/license                        the license text
+//! GET  /api/notices                        names of the notices an app carries for what's
+//!                                          built into it, where it has them to show
+//! GET  /api/notice?name=NAME               one of them, as text
 //! GET  /api/files                          raw files in the folder, and the frames a save was
 //!                                          cut short before
 //! GET  /api/load?file=NAME                 decode (cached), auto and saved settings, warning,
@@ -152,8 +155,12 @@ fn cache_budget() -> usize {
 
 struct State {
     served: Served,
+    /// A folder of license and copyright notices for what an app has built in, to show in About.
+    notices: Option<PathBuf>,
     folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
+    /// The frame last asked for: the one on screen.
+    shown: Option<String>,
     batch: Batch,
     roll_readings: Arc<Mutex<Vec<RollReading>>>,
 }
@@ -227,8 +234,10 @@ pub fn serve(
     dir: PathBuf,
     port: u16,
     exit_with_stdin: bool,
+    notices: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (server, mut state, port) = bind(dir, port)?;
+    state.notices = notices;
     if exit_with_stdin {
         std::thread::spawn(|| {
             let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
@@ -251,8 +260,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn open(dir: PathBuf) -> std::io::Result<Self> {
-        let state = State::new(dir.canonicalize()?, Served::App);
+    /// `notices` is a folder of license and copyright notices for what the app has built in.
+    pub fn open(dir: PathBuf, notices: Option<PathBuf>) -> std::io::Result<Self> {
+        let mut state = State::new(dir.canonicalize()?, Served::App);
+        state.notices = notices;
         Ok(Engine { state })
     }
 
@@ -262,9 +273,15 @@ impl Engine {
     }
 
     /// Lets go of the frames kept ready to show, when the system is short of memory. They are
-    /// decoded again when opened.
+    /// decoded again when opened. The frame on screen stays: decoding it again at the next
+    /// slider move would take the most memory at the worst time.
     pub fn trim(&mut self) {
-        self.state.cache = HashMap::new();
+        let state = &mut self.state;
+        let shown = state
+            .shown
+            .as_ref()
+            .and_then(|file| state.cache.remove_entry(file));
+        state.cache = shown.into_iter().collect();
     }
 }
 
@@ -428,6 +445,8 @@ impl State {
     fn new(dir: PathBuf, served: Served) -> Self {
         State {
             served,
+            notices: None,
+            shown: None,
             folder: Arc::new(Folder::new(dir)),
             cache: HashMap::new(),
             batch: Batch::default(),
@@ -475,6 +494,20 @@ impl State {
                 "text/plain; charset=utf-8",
                 LICENSE_TEXT.as_bytes().to_vec(),
             )),
+            (Method::Get, "/api/notices") => {
+                Ok(json_resp(200, &json!({ "notices": self.notice_names() })))
+            }
+            (Method::Get, "/api/notice") => {
+                let name = query_param(url, "name").ok_or((400, "missing name".to_string()))?;
+                // Only what the list names, so a name can't lead out of the folder.
+                let dir = self
+                    .notices
+                    .as_ref()
+                    .filter(|_| self.notice_names().contains(&name));
+                let text = dir.and_then(|dir| std::fs::read(dir.join(&name)).ok());
+                let text = text.ok_or((404, format!("no such notice: {name}")))?;
+                Ok(Response::new("text/plain; charset=utf-8", text))
+            }
             (Method::Get, "/api/files") => self.files(),
             (Method::Get, "/api/load") => {
                 let file = query_param(url, "file").ok_or((400, "missing file".to_string()))?;
@@ -544,7 +577,11 @@ impl State {
                 let job: ExportJob = read_body(req)?;
                 let mut paths = Vec::new();
                 for file in &job.files {
-                    self.folder.resolve(file)?;
+                    // A frame that left the folder since the page listed it has no DNG to
+                    // offer, and mustn't keep the others from being found.
+                    if self.folder.resolve(file).is_err() {
+                        continue;
+                    }
                     let dng = self.folder.output_path(file);
                     if dng.is_file() {
                         paths.push(dng.display().to_string());
@@ -566,6 +603,24 @@ impl State {
             }
             _ => Err((404, format!("not found: {path}"))),
         }
+    }
+
+    /// The files in the notices folder, by name.
+    fn notice_names(&self) -> Vec<String> {
+        let entries = self
+            .notices
+            .as_ref()
+            .and_then(|dir| std::fs::read_dir(dir).ok());
+        let mut names: Vec<String> = entries
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_file())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| !name.starts_with('.'))
+            .collect();
+        names.sort();
+        names
     }
 
     fn files(&self) -> Handled {
@@ -597,6 +652,7 @@ impl State {
     }
 
     fn ensure_loaded(&mut self, file: &str) -> Result<&Loaded, (u16, String)> {
+        self.shown = Some(file.to_string());
         if !self.cache.contains_key(file) {
             let path = self.folder.resolve(file)?;
             let t = Instant::now();
@@ -680,9 +736,10 @@ impl State {
         self.batch
             .start(files, export_workers(), move |file| {
                 let t = Instant::now();
-                let exported = folder.export_frame(file);
-                folder.saving_reached(file);
-                let (out, bytes, warning) = exported?;
+                // Also when the conversion panics: the save was through with the frame, and it
+                // mustn't be offered as one the save never reached.
+                let _reached = Reached(&folder, file);
+                let (out, bytes, warning) = folder.export_frame(file)?;
                 println!(
                     "exported {} ({:.1} MB, {:.1} s)",
                     out.display(),
@@ -760,6 +817,15 @@ impl State {
             )
             .map_err(|e| (409, e))?;
         Ok(json_resp(200, &self.batch.status()))
+    }
+}
+
+/// Takes a frame off the list of those a save hasn't reached, when the save lets go of it.
+struct Reached<'a>(&'a Folder, &'a str);
+
+impl Drop for Reached<'_> {
+    fn drop(&mut self) {
+        self.0.saving_reached(self.1);
     }
 }
 
@@ -905,7 +971,27 @@ mod tests {
     fn an_app_gets_the_page_and_the_api_without_a_server() {
         let dir = std::env::temp_dir().join(format!("reversal-engine-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut engine = Engine::open(dir.clone()).unwrap();
+        let notices = dir.join("notices");
+        std::fs::create_dir_all(notices.join("inner")).unwrap();
+        std::fs::write(notices.join("Rust crates.txt"), "serde, MIT").unwrap();
+        std::fs::write(dir.join("secret.txt"), "not a notice").unwrap();
+        let mut engine = Engine::open(dir.clone(), Some(notices)).unwrap();
+
+        // An app's notices are listed and read by name, and nothing else is.
+        let listed = engine.respond(&request(Method::Get, "/api/notices", &[], ""));
+        let listed: serde_json::Value = serde_json::from_slice(&listed.body).unwrap();
+        assert_eq!(listed["notices"], json!(["Rust crates.txt"]));
+        let get = |engine: &mut Engine, name: &str| {
+            engine.respond(&request(
+                Method::Get,
+                &format!("/api/notice?name={name}"),
+                &[],
+                "",
+            ))
+        };
+        assert_eq!(get(&mut engine, "Rust%20crates.txt").body, b"serde, MIT");
+        assert_eq!(get(&mut engine, "..%2Fsecret.txt").status, 404);
+        assert_eq!(get(&mut engine, "inner").status, 404);
 
         let page = engine.respond(&request(Method::Get, "/", &[], ""));
         assert_eq!(page.status, 200);
@@ -946,9 +1032,49 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with("positives/a-positive.dng"));
-        let other = r#"{"files":["../a.NEF"]}"#;
-        let outside = engine.respond(&request(Method::Post, "/api/positives", &own, other));
-        assert_eq!(outside.status, 404);
+        // A name that isn't a frame of the folder, or leads out of it, finds nothing.
+        let other = r#"{"files":["../a.NEF","gone.NEF","a.NEF"]}"#;
+        let found = engine.respond(&request(Method::Post, "/api/positives", &own, other));
+        let found: serde_json::Value = serde_json::from_slice(&found.body).unwrap();
+        assert_eq!(found["paths"].as_array().unwrap().len(), 1);
+
+        // Frames a save was cut short before are listed until they're let go: by a Stop, or
+        // by the page when its offer is turned down. Stopping for later keeps them.
+        let left = ["a.NEF".to_string(), "b.NEF".to_string()];
+        let unfinished = |engine: &mut Engine| {
+            let files = engine.respond(&request(Method::Get, "/api/files", &[], ""));
+            let files: serde_json::Value = serde_json::from_slice(&files.body).unwrap();
+            files["unfinished"].clone()
+        };
+        let post = |engine: &mut Engine, url: &str, body: &str| {
+            engine
+                .respond(&request(Method::Post, url, &own, body))
+                .status
+        };
+        engine.state.folder.saving_starts(&left);
+        assert_eq!(unfinished(&mut engine), json!(["a.NEF", "b.NEF"]));
+        assert_eq!(
+            post(&mut engine, "/api/export/cancel", r#"{"later":true}"#),
+            200
+        );
+        assert_eq!(unfinished(&mut engine), json!(["a.NEF", "b.NEF"]));
+        assert_eq!(post(&mut engine, "/api/export/cancel", "{}"), 200);
+        assert_eq!(unfinished(&mut engine), json!([]));
+        engine.state.folder.saving_starts(&left);
+        assert_eq!(post(&mut engine, "/api/export/forget", "{}"), 200);
+        assert_eq!(unfinished(&mut engine), json!([]));
+        // A save that gets through its frames leaves no list, also when every frame fails:
+        // these aren't raw files.
+        assert_eq!(post(&mut engine, "/api/export", both), 200);
+        for _ in 0..500 {
+            if !engine.state.batch.is_running() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!engine.state.batch.is_running());
+        assert_eq!(unfinished(&mut engine), json!([]));
+        assert!(!dir.join("positives/.reversal-saving.json").exists());
 
         // Mistakes come back as JSON, not as a panic: a bad body, a path or a method unknown.
         let bad = engine.respond(&request(Method::Post, "/api/roll/vote", &own, "{"));

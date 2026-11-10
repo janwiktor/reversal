@@ -47,6 +47,9 @@ enum Command {
         /// Exit when stdin closes. For an app that starts this as its engine.
         #[arg(long, hide = true)]
         exit_with_stdin: bool,
+        /// A folder of license notices for the page to show. For an app that carries them.
+        #[arg(long, hide = true)]
+        notices: Option<PathBuf>,
     },
 }
 
@@ -144,7 +147,8 @@ fn main() {
             dir,
             port,
             exit_with_stdin,
-        } => ui::serve(dir, port, exit_with_stdin),
+            notices,
+        } => ui::serve(dir, port, exit_with_stdin, notices),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");

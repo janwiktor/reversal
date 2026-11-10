@@ -16,8 +16,8 @@ final class BackgroundWork {
     private var short = UIBackgroundTaskIdentifier.invalid
     /// A `BGContinuedProcessingTask`, once the system has started the one asked for.
     private var long: Any?
-    /// The system took the time back, and the work has been told to stop for now.
-    var onExpired: () -> Void = {}
+    /// The system took the time back: tell the work to stop for now, then call back.
+    var onExpired: (_ stopped: @escaping () -> Void) -> Void = { $0() }
 
     private static var registered = false
     private static weak var current: BackgroundWork?
@@ -81,18 +81,26 @@ final class BackgroundWork {
         // Now or not at all: the work runs either way, and a task that started later would
         // have nothing left to cover.
         request.strategy = .fail
-        // Declined, or not offered on this device: the short task still covers a brief absence.
-        try? BGTaskScheduler.shared.submit(request)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            // Declined, or not offered on this device: the short task still covers a brief
+            // absence. Said in the log, since nothing on screen would show it.
+            print("No continued processing task: \(error)")
+        }
     }
 
     @available(iOS 26.0, *)
     private func adopt(_ task: BGContinuedProcessingTask) {
+        // One at a time: an earlier one has nothing left to cover.
+        (long as? BGContinuedProcessingTask)?.setTaskCompleted(success: true)
         long = task
         task.expirationHandler = { [weak self] in
             DispatchQueue.main.async {
                 guard let self, self.poll != nil else { return }
-                self.onExpired()
-                self.end(success: false)
+                // The task ends once the engine has heard, or the app may be put to sleep
+                // with the stop still waiting.
+                self.onExpired { self.end(success: false) }
             }
         }
     }

@@ -5,18 +5,52 @@
 
 import Foundation
 import PhotosUI
+import UIKit
 import UniformTypeIdentifiers
 
 func isScan(_ name: String) -> Bool {
     name.withCString { reversal_is_scan($0) }
 }
 
+/// A count with its word: "1 scan", "36 scans".
+func counted(_ n: Int, _ word: String) -> String {
+    "\(n) \(word)\(n == 1 ? "" : "s")"
+}
+
+/// "iPad" or "iPhone", for messages that name the device.
+var deviceName: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
+
 /// A roll imported into the app.
 struct Roll: Identifiable {
     let url: URL
     let frames: Int
+    /// The DNGs saved from it, in its positives folder.
+    let dngs: Int
+    /// Everything in it: scans, DNGs and settings.
+    let bytes: Int64
     var id: URL { url }
     var name: String { url.lastPathComponent }
+
+    /// Such as "36 scans, 12 DNGs".
+    var contents: String {
+        let scans = counted(frames, "scan")
+        return dngs == 0 ? scans : "\(scans), \(counted(dngs, "DNG"))"
+    }
+
+    static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// The DNGs themselves, in name order.
+    func dngFiles() -> [URL] { Roll.dngFiles(in: url) }
+
+    static func dngFiles(in roll: URL) -> [URL] {
+        let positives = roll.appendingPathComponent("positives", isDirectory: true)
+        let files = (try? FileManager.default.contentsOfDirectory(at: positives, includingPropertiesForKeys: nil)) ?? []
+        return files
+            .filter { $0.pathExtension.lowercased() == "dng" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
 }
 
 enum Library {
@@ -32,9 +66,17 @@ enum Library {
             at: documents, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         return folders
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            // Not the system's own: its inbox for files other apps send, and what Files hides.
+            .filter { canName(roll: $0.lastPathComponent) }
             .map { folder in
                 let names = (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
-                return Roll(url: folder, frames: names.filter(isScan).count)
+                var bytes: Int64 = 0
+                for case let file as URL in fm.enumerator(at: folder, includingPropertiesForKeys: [.fileSizeKey]) ?? .init() {
+                    bytes += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+                }
+                return Roll(
+                    url: folder, frames: names.filter(isScan).count,
+                    dngs: Roll.dngFiles(in: folder).count, bytes: bytes)
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -53,8 +95,57 @@ enum Library {
         return try? URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &stale)
     }
 
+    /// Where iOS puts copies of files that other apps send. The app may read and delete there.
+    static var inbox: URL { documents.appendingPathComponent("Inbox", isDirectory: true) }
+
+    static func isSystemFolder(_ name: String) -> Bool {
+        name.caseInsensitiveCompare("Inbox") == .orderedSame
+    }
+
+    /// Whether a folder of that name can be a roll: the start screen lists it, and it isn't
+    /// the inbox itself.
+    static func canName(roll name: String) -> Bool {
+        !name.isEmpty && !name.contains("/") && !name.hasPrefix(".") && !isSystemFolder(name)
+    }
+
+    /// The name for a roll of scans from a folder of that name, which a roll may not be able
+    /// to take.
+    static func rollName(from folder: String) -> String {
+        canName(roll: folder) ? folder : "Imported \(today())"
+    }
+
+    static func isInInbox(_ url: URL) -> Bool { isInside(url, inbox) }
+
+    /// Whether a file or folder lies somewhere in a folder, which itself doesn't count.
+    private static func isInside(_ url: URL, _ folder: URL) -> Bool {
+        url.resolvingSymlinksInPath().path.hasPrefix(folder.resolvingSymlinksInPath().path + "/")
+    }
+
+    /// The day here, not in Greenwich, to name a roll of things that came without a folder.
+    static func today() -> String {
+        Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+    }
+
+    /// A name a roll can take: one folder's worth, and not another roll's.
+    static func canRename(_ roll: Roll, to name: String) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard canName(roll: name), name != roll.name else { return false }
+        return !FileManager.default.fileExists(atPath: documents.appendingPathComponent(name).path)
+    }
+
+    static func rename(_ roll: Roll, to name: String) throws -> URL {
+        let target = documents.appendingPathComponent(name.trimmingCharacters(in: .whitespaces), isDirectory: true)
+        try FileManager.default.moveItem(at: roll.url, to: target)
+        return target
+    }
+
+    static func delete(_ roll: Roll) throws {
+        try FileManager.default.removeItem(at: roll.url)
+    }
+
+    /// The app's own folder of rolls counts, as do the rolls in it.
     static func isInApp(_ url: URL) -> Bool {
-        url.resolvingSymlinksInPath().path.hasPrefix(documents.resolvingSymlinksInPath().path)
+        url.resolvingSymlinksInPath() == documents.resolvingSymlinksInPath() || isInside(url, documents)
     }
 }
 
@@ -86,12 +177,23 @@ final class Importer {
         DispatchQueue.global(qos: .userInitiated).async {
             let scoped = sources.filter { $0.startAccessingSecurityScopedResource() }
             defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
-            let roll = Library.documents.appendingPathComponent(rollName, isDirectory: true)
+            let roll = Library.documents.appendingPathComponent(
+                Library.rollName(from: rollName), isDirectory: true)
             var (copied, skipped) = (0, 0)
             var failed: [String] = []
+            // A copy another app sent is ours to clear away, whether or not it reached a roll:
+            // nothing lists the inbox, so what stayed there would take room unseen.
+            defer {
+                for source in sources where Library.isInInbox(source) {
+                    try? FileManager.default.removeItem(at: source)
+                }
+            }
             do {
-                try FileManager.default.createDirectory(at: roll, withIntermediateDirectories: true)
                 let files = sources.flatMap(Self.scans)
+                // No roll for nothing to put in it.
+                if !files.isEmpty {
+                    try FileManager.default.createDirectory(at: roll, withIntermediateDirectories: true)
+                }
                 DispatchQueue.main.async { progress(0, files.count) }
                 for (index, file) in files.enumerated() where !self.isCanceled {
                     do {
@@ -115,7 +217,8 @@ final class Importer {
     private static func scans(in source: URL) -> [URL] {
         let keys: [URLResourceKey] = [.isDirectoryKey]
         guard (try? source.resourceValues(forKeys: Set(keys)))?.isDirectory == true else {
-            return [source]
+            // A file on its own has to be a scan too: a saved positive, say, isn't one.
+            return isScan(source.lastPathComponent) ? [source] : []
         }
         guard let walk = FileManager.default.enumerator(at: source, includingPropertiesForKeys: keys)
         else { return [] }
@@ -168,6 +271,16 @@ final class Importer {
     }
 }
 
+/// A raw file of a kind the engine doesn't list as a scan.
+struct NotReadable: LocalizedError {
+    var errorDescription: String? { "Reversal doesn't read this raw format" }
+}
+
+extension Notification.Name {
+    /// The rolls in the app changed while the start screen may be showing them.
+    static let rollsChanged = Notification.Name("rollsChanged")
+}
+
 /// Copies raw photos chosen from the photo library into a roll in the app. The system's picker
 /// runs outside the app and hands over only what was chosen, so this needs no access to the
 /// library. Photos that aren't raw are left out: a JPEG or HEIC of a negative has lost what the
@@ -175,9 +288,12 @@ final class Importer {
 final class PhotosImporter {
     private let lock = NSLock()
     private var canceled = false
+    /// The photo on its way, which may be coming down from iCloud.
+    private var loading: Progress?
 
     func cancel() {
         lock.withLock { canceled = true }
+        loading?.cancel()
     }
 
     private var isCanceled: Bool { lock.withLock { canceled } }
@@ -216,10 +332,12 @@ final class PhotosImporter {
         func next(_ index: Int) {
             guard index < raws.count, !isCanceled else { return finish() }
             let (photo, type) = raws[index]
-            photo.loadFileRepresentation(forTypeIdentifier: type) { file, error in
+            self.loading = photo.loadFileRepresentation(forTypeIdentifier: type) { file, error in
                 // The file is the picker's copy, and is gone when this returns.
                 var outcome: Result<Bool, Error> = .failure(error ?? CocoaError(.fileReadUnknown))
-                if let file {
+                if let file, !isScan(file.lastPathComponent) {
+                    outcome = .failure(NotReadable())
+                } else if let file {
                     outcome = Result { try Importer.copyCoordinated(file, named: file.lastPathComponent, into: roll) }
                 }
                 DispatchQueue.main.async {
