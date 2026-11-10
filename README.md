@@ -114,6 +114,12 @@ Frames of one roll can share a film base. Choose Match film base… under Setup,
 
 ### On iPhone and iPad
 
+<p align="center">
+  <img src="docs/images/ipad-landscape.webp" width="50%" alt="Reversal on an iPad in landscape: the frames list, a converted color negative, and the Setup and Develop controls">
+  <img src="docs/images/ipad-portrait.webp" width="24%" alt="Reversal on an iPad in portrait: the image above the Develop and Setup controls">
+  <img src="docs/images/iphone.webp" width="16%" alt="Reversal on an iPhone: the image above the Color panel, with Crop, Setup, Tone and Color in a bar at the bottom">
+</p>
+
 The prototype shows the same controls, laid out for the screen: on a phone, the image with one panel of tools under it. Scans reach it four ways:
 
 - **Open a folder** in Files or on a card, and work on it in place.
@@ -160,7 +166,7 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 
 ## License
 
-Copyright © 2026 Jan Ambroziewicz. Reversal is under the [Mozilla Public License 2.0](LICENSE), with no warranty. If you share a changed version, your changes to existing files stay open under the same license; new files of your own may be under other terms. The photo in the screenshot isn't covered by this license. Releases 0.1.0 to 0.1.2 remain available under the GPL they were published with.
+Copyright © 2026 Jan Ambroziewicz. Reversal is under the [Mozilla Public License 2.0](LICENSE), with no warranty. If you share a changed version, your changes to existing files stay open under the same license; new files of your own may be under other terms. The photos in the screenshots aren't covered by this license. Releases 0.1.0 to 0.1.2 remain available under the GPL they were published with.
 
 This product includes DNG technology under license by Adobe.
 

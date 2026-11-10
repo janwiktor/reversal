@@ -262,7 +262,7 @@ An iOS app for iPhone and iPad is a prototype and isn't released. It shows the s
 | Settings and arguments | `serde`, `serde_json`, `clap` |  |
 | Web UI | Plain HTML, CSS and JS | No frontend build step |
 | Mac app | Swift, Cocoa and WKWebView | arm64, macOS 13 or later, ad hoc signed; building it needs Xcode |
-| License | Mozilla Public License 2.0 | Open source, can be sold in app stores, and improvements to existing files stay open; the photo in the README screenshot isn't covered |
+| License | Mozilla Public License 2.0 | Open source, can be sold in app stores, and improvements to existing files stay open; the photos in the README screenshots aren't covered |
 | Tests | `cargo test`, on small synthetic images | CI runs them on Linux and macOS; golden reference images aren't built yet |
 
 ## Known limits
