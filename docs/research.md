@@ -258,7 +258,7 @@ An iPhone 16 Pro Max (iOS 27.0.1) allows about 3.4 GB. Each frame below was open
 | 45 megapixels, written DNG | 1,368 MB | 1,381 MB |
 | 60 megapixels, written DNG | 1,806 MB | 1,854 MB |
 
-So a 60-megapixel frame fits there with 1.5 GB to spare, and above 24 megapixels opening a frame costs as much as saving it. After a large save the app can hold up to 1.1 GB for more than a minute: freed memory that neither the allocator gives back when asked nor the engine holds in its cache. It doesn't add up. Saves of 45, 60, 60, 45 and 16 megapixels in a row peaked at 2,093 MB, 240 MB above the largest alone, and the app was at 23 MB within a minute of the last. Phones with less memory are still to measure.
+So a 60-megapixel frame fits there with 1.5 GB to spare, and above 24 megapixels opening a frame costs as much as saving it. After a large save the app can hold up to 1.1 GB for more than a minute: freed memory that neither the allocator gives back when asked nor the engine holds in its cache. It's reused, not added to. Saves of 45, 60, 60, 45 and 16 megapixels in a row peaked at 2,093 MB, 240 MB above the largest alone, and the app was at 23 MB within a minute of the last. Phones with less memory are still to measure.
 
 ### Threads and saving off screen on iOS
 

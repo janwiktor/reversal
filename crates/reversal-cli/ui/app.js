@@ -44,7 +44,6 @@ shell?.postMessage({ action: "capabilities" })?.then?.((can) => {
   if (shellCan.export) $("reveal").textContent = "Export…";
   $("start-open").hidden = !shellCan.rolls;
   updateExportButton();
-  updateExportButton();
 });
 // An iPhone's number pads have no minus key, so its value fields that take one get the full
 // keyboard, where numbers and the minus are a tap away. An iPad's number pad has one.
@@ -184,13 +183,17 @@ function slideRow(row, show, now = false) {
 }
 
 // A touch screen sends no double click, so two short taps in one place count as one.
+const TAP_MS = 300, TAP_SLIP = 10, DOUBLE_TAP_APART = 24;
 function onDoubleTap(el, run) {
-  let down = null, last = 0;
+  let down = null, last = null;
+  const near = (e, to, px) => Math.hypot(e.clientX - to.x, e.clientY - to.y) < px;
   el.addEventListener("pointerdown", (e) => { down = e.pointerType === "mouse" ? null : { x: e.clientX, y: e.clientY, at: e.timeStamp }; });
   el.addEventListener("pointerup", (e) => {
-    const tap = down && e.timeStamp - down.at < 300 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 10;
+    const tap = down && e.timeStamp - down.at < TAP_MS && near(e, down, TAP_SLIP) ? down : null;
     down = null;
-    if (tap && e.timeStamp - last < DOUBLE_CLICK_MS) { last = 0; run(); } else last = tap ? e.timeStamp : 0;
+    const second = tap && last && e.timeStamp - last.at < DOUBLE_CLICK_MS && near(e, last, DOUBLE_TAP_APART);
+    last = second ? null : tap;
+    if (second) run();
   });
 }
 
@@ -319,6 +322,8 @@ async function loadFiles() {
   const data = await (await api("/api/files")).json();
   folderPath = data.folder;
   unfinished = data.unfinished ?? [];
+  // An offer has nothing left to save once the folder lists no such frames.
+  if (offer && !unfinished.length) { offer = null; if (offerShown) status(); }
   $("folder").textContent = data.folder.split("/").filter(Boolean).pop() ?? data.folder;
   $("choose-folder").title = shell ? `${data.folder}\nOpen another folder…` : data.folder;
   frames = data.files;
@@ -361,8 +366,12 @@ function frameRow(f) {
   // shown goes on to its tools: the list stays for looking through a roll, and gives way to work
   // on one frame.
   b.addEventListener("click", () => {
-    if (panelUnderImage.matches && f.name === (opening ?? current?.file)) slidePanels(() => showFrames(false));
-    else open(f.name);
+    if (panelUnderImage.matches && f.name === (opening ?? current?.file)) {
+      // The row goes out of sight with the list, and keyboard focus goes to what brings it back.
+      const focused = document.activeElement === b;
+      slidePanels(() => showFrames(false));
+      if (focused) $("frames-toggle").focus();
+    } else open(f.name);
   });
   li.append(pick, b);
   showFrameState(f, state);
@@ -716,18 +725,19 @@ function showSetupNote() {
 
 let syncedFrame = null;  // the frame the controls last showed
 function syncControls() {
+  const film = filmNow();
+  // The panel under the image is as tall as what it shows, so its edge slides when the film type
+  // changes that, to where everything else that changes with it leaves the panel.
+  if (document.body.dataset.film !== film) slidePanels(() => showControls(film));
+  else showControls(film);
+}
+function showControls(film) {
   const a = adj();
   // Black and white has only Tone to develop. On a phone, its Color panel gives way to Tone.
-  const film = filmNow();
-  // The panel under the image is as tall as what it shows, so its edge slides when that changes.
-  if (document.body.dataset.film !== film) {
-    slidePanels(() => {
-      document.body.dataset.film = film;
-      if (film === "bw" && document.body.dataset.mode === "color") {
-        document.body.dataset.mode = "tone";
-        pressModes();
-      }
-    });
+  document.body.dataset.film = film;
+  if (film === "bw" && document.body.dataset.mode === "color") {
+    document.body.dataset.mode = "tone";
+    pressModes();
   }
   $("film-color").setAttribute("aria-pressed", String(film === "color"));
   $("film-bw").setAttribute("aria-pressed", String(film === "bw"));
@@ -1158,7 +1168,9 @@ function cancelRollFlow() {
   if (roll?.step === "reading" || roll?.step === "applying") {
     $("roll-cancel").disabled = true;
     $("roll-cancel").textContent = "Stopping…";
-    api("/api/export/cancel", {}).catch(() => {});
+    // Measuring a roll saves nothing, so stopping it leaves the frames an earlier save didn't
+    // reach as they are listed.
+    api("/api/export/cancel", { later: true }).catch(() => {});
   } else {
     closeRollFlow();
   }
