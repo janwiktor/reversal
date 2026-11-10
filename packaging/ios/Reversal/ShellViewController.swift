@@ -59,7 +59,9 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         view.addSubview(web)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            web.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            // To the screen's edge: the page fills the strip under the home indicator with what's
+            // at its foot, and keeps its controls clear of it.
+            web.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             web.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
         ])

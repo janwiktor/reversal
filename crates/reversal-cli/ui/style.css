@@ -62,6 +62,10 @@
   --slider-label-h: 16px;
   --slider-track-h: 16px;
   --val-text: var(--text);
+  /* Where the page runs to the screen's lower edge, the strip the system keeps for its own
+     gesture: what's at the foot of the page fills it with its background and keeps clear of it. */
+  --foot: env(safe-area-inset-bottom, 0px);
+  --stage-foot: var(--foot);
   /* Motion: panels slide and what appears fades, briefly and without bounce. */
   --ease: cubic-bezier(.4, 0, .2, 1);
   --slide: 220ms;
@@ -270,7 +274,7 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 @media (hover: hover) { #export.cancel:hover { background-color: var(--control-hover); } }
 
 /* Frames */
-#roll { grid-area: roll; background: var(--panel); border-right: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; }
+#roll { grid-area: roll; background: var(--panel); border-right: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; padding-bottom: var(--foot); }
 #roll-folder { flex: none; display: flex; align-items: center; height: var(--head-h); padding: 0 4px; background: var(--strip); border-bottom: 1px solid var(--seam); }
 #choose-folder { width: 100%; }
 /* Hidden frames give the image their column. */
@@ -311,7 +315,7 @@ body[data-frames="closed"] { grid-template-columns: 0 minmax(0, 1fr) var(--right
 #stage {
   --reach: 0px;
   grid-area: stage; position: relative; background: var(--surround); display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; overflow: hidden;
-  padding: max(var(--stage-edge), calc(var(--bar-room, 0px) + max(var(--float-gap), var(--reach)))) max(var(--stage-edge), var(--reach)) max(var(--stage-edge), var(--reach));
+  padding: max(var(--stage-edge), calc(var(--bar-room, 0px) + max(var(--float-gap), var(--reach)))) max(var(--stage-edge), var(--reach)) calc(max(var(--stage-edge), var(--reach)) + var(--stage-foot));
   transition: padding var(--slide) var(--ease);
 }
 body[data-tool="crop"] #stage { --reach: calc(var(--corner-hit) / 2); }
@@ -419,7 +423,7 @@ body[data-tool=""] #stage { transition-delay: var(--fade); }
 #hist-fold { display: none; }
 
 /* Dock: scrolls as one, under the histogram. */
-#dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+#dock { grid-area: dock; background: var(--panel); border-left: 1px solid var(--seam); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding-bottom: var(--foot); }
 
 .panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: var(--head-h); padding: 0 4px 0 10px; background: var(--strip); border-block: 1px solid var(--seam); font-weight: 600; }
 .head-btn { height: calc(var(--control-h) - 4px); padding: 0 8px; background: none; border: 0; border-radius: 3px; color: var(--ink-quiet); font-weight: 400; }
@@ -541,7 +545,7 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
 @media (min-width: 600px) and (orientation: portrait) {
   /* The panel is as tall as what it shows, up to a limit, so a short list or a frame with no
      color tools leaves the room to the image. */
-  body { --panel-h: min(500px, 46vh); grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr); }
+  body { --panel-h: min(500px, 46vh); --stage-foot: 0px; grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr); }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr); }
   #roll, #dock { grid-area: panel; max-height: var(--panel-h); border: 0; border-top: 1px solid var(--seam); }
   #files { flex: 0 1 auto; min-height: 0; }
@@ -566,7 +570,9 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
 @media not all and (min-width: 600px) {
   /* A phone's stage is narrow, so it keeps a smaller margin. */
   :root { --stage-edge: 12px; }
-  body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
+  /* The bar at the bottom is the page's foot here. */
+  #roll, #dock { padding-bottom: 0; }
+  body { --stage-foot: 0px; --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
   #bar { display: contents; }
   #where { grid-area: where; margin: 0; padding: 0 6px; background: var(--bar); border-bottom: 1px solid var(--seam); }
@@ -592,7 +598,7 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   body[data-mode="setup"] :is(#develop-head, #develop) { display: none; }
   body[data-mode="tone"] :is(#setup-head, #setup, #color) { display: none; }
   body[data-mode="color"] :is(#setup-head, #setup, #tone) { display: none; }
-  #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: env(safe-area-inset-bottom); }
+  #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: var(--foot); }
   /* Each tool's icon over its name. A 20 px icon keeps the 1.25 px stroke of the others. */
   #modes button { flex: 1; height: 49px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-quiet); font-size: 11px; line-height: 13px; }
   #modes svg { width: 20px; height: 20px; stroke-width: 1; }
