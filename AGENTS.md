@@ -151,6 +151,12 @@ open packaging/ios/Reversal.xcodeproj       # iOS app; for a device, set DEVELOP
   renumbers a build whose number is taken, and the number no longer matches the commit count.
   When the app or engine starts calling another API that Apple requires a reason for, add it to
   `packaging/ios/Reversal/PrivacyInfo.xcprivacy`.
+- **Builds for external testers, and later the App Store, come from a release tag.** Their notices
+  say that each release carries the source of LibRaw and the crates, so check out the tag, archive
+  it, and add the build to an external group only once that release is published. Internal testers
+  can have builds from `main`. App Store Connect links to `PRIVACY.md` on `main` as the privacy
+  policy, and its App Privacy answer is Data Not Collected: keep both true, and keep them in step
+  with the privacy manifest.
 
 ## License
 

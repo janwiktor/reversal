@@ -10,7 +10,7 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0</string>
   <key>CFBundleVersion</key><string>0</string>
-  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Jan Ambroziewicz. Reversal is under the Mozilla Public License 2.0, with no warranty. Source code: https://github.com/janwiktor/reversal. Includes DNG technology under license by Adobe. Uses LibRaw, Copyright © 2008-2025 LibRaw LLC, under the CDDL 1.0, with its source available; see Licenses/LibRaw.txt in the app.</string>
+  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Jan Ambroziewicz. Reversal is under the Mozilla Public License 2.0, with no warranty. Source code: https://github.com/janwiktor/reversal. Includes DNG technology under license by Adobe. Uses LibRaw, Copyright © 2008-2025 LibRaw LLC, under the CDDL 1.0, with its source available; see About in the app.</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>UILaunchScreen</key><dict/>
   <key>UIUserInterfaceStyle</key><string>Dark</string>
