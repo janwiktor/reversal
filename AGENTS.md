@@ -144,6 +144,11 @@ open packaging/ios/Reversal.xcodeproj       # iOS app; for a device, set DEVELOP
   full releases, not pre-releases, so the newest one shows on the repository page.
 - The Mac app stays ad hoc signed through pre-alpha and alpha, with no Apple certificate; users
   approve it with Open Anyway, as `Read me first.txt` explains.
+- **iOS test builds go to TestFlight by hand for now:** in Xcode, choose Any iOS Device, then
+  Product > Archive, and Distribute App to App Store Connect from the Organizer. Archive from a
+  clean `main`. The build number is the commit count, and App Store Connect accepts each number
+  only once per version. When the app or engine starts calling another API that Apple requires a
+  reason for, add it to `packaging/ios/Reversal/PrivacyInfo.xcprivacy`.
 
 ## License
 

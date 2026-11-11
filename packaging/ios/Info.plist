@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>Reversal</string>
@@ -44,6 +45,9 @@
   <!-- A save goes on while the app is off screen, see BackgroundWork.swift. -->
   <key>BGTaskSchedulerPermittedIdentifiers</key>
   <array><string>$(PRODUCT_BUNDLE_IDENTIFIER).work</string></array>
+  <!-- No encryption beyond what iOS provides, so TestFlight and the App Store don't ask for export
+       compliance with each build. -->
+  <key>ITSAppUsesNonExemptEncryption</key><false/>
   <key>NSPhotoLibraryAddUsageDescription</key><string>Reversal saves the DNGs you choose to your photo library.</string>
 </dict>
 </plist>
