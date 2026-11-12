@@ -35,21 +35,33 @@ jobs:
             echo "::notice::No wiki yet, so nothing was synced."
             exit 0
           fi
+          # Every page is generated, so start from none: a renamed doc leaves no stale page behind.
+          rm -f wiki/*.md
+          # Links between docs become wiki page names. Images stay in the repository and load from main.
+          images="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/docs/images/"
           convert() {
-            sed -e 's#(spec\.md)#(Product-Spec)#g' -e 's#(research\.md)#(Supporting-Research)#g' "docs/$1" >"wiki/$2.md"
+            sed -e 's#(spec\.md#(Product-Spec#g' \
+              -e 's#(conversion-method\.md#(Conversion-Method#g' \
+              -e 's#(research-notes\.md#(Research-Notes#g' \
+              -e "s#](images/#](${images}#g" "docs/$1" >"wiki/$2.md"
           }
           convert spec.md Product-Spec
-          convert research.md Supporting-Research
+          convert conversion-method.md Conversion-Method
+          convert research-notes.md Research-Notes
           cat >wiki/Home.md <<'EOF'
           # Reversal
 
           - [Product Spec](Product-Spec): what Reversal does and why
-          - [Supporting Research](Supporting-Research): conversion findings, technical options, test results and sources
+          - [Conversion Method](Conversion-Method): how a negative becomes a positive DNG, step by step, with formulas and evidence
+          - [Research Notes](Research-Notes): the working record of every choice, test and source along the way
+
+          All documentation here is a work in progress. It may not be fully accurate, and it may not be
+          updated at the same pace as the code.
 
           For how to install and use it, see the [README](https://github.com/janwiktor/reversal#readme).
           EOF
           cat >wiki/_Footer.md <<'EOF'
-          Generated from [`docs/`](https://github.com/janwiktor/reversal/tree/main/docs). Changes go there, not here.
+          Work in progress: these docs may not be fully accurate or as current as the code. Generated from [`docs/`](https://github.com/janwiktor/reversal/tree/main/docs). Changes go there, not here.
           EOF
           cd wiki
           git add -A

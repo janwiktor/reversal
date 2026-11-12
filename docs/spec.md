@@ -1,6 +1,6 @@
 # Reversal: Product Spec
 
-Reversal turns a camera scan of a film negative into a positive raw file that edits like a normal photo. This doc is the source of truth for what the product is and why. Evidence and rejected options for the conversion and file format are in the [Supporting Research](research.md).
+Reversal turns a camera scan of a film negative into a positive raw file that edits like a normal photo. This doc is the source of truth for what the product is and why. [Conversion Method](conversion-method.md) describes the conversion step by step, with its formulas and the evidence for each step. The [Research Notes](research-notes.md) index every test and rejected option for the conversion and file format.
 
 ## Product
 
