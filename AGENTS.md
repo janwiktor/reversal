@@ -125,7 +125,8 @@ open packaging/ios/Reversal.xcodeproj       # iOS app; for a device, set DEVELOP
 ## Versioning and releases
 
 - **One version, x.y.z,** in `[workspace.package]` in `Cargo.toml`. The engine, web UI, Mac app,
-  disk image name and git tag all read it. Never write the number anywhere else.
+  disk image name and git tag all read it. Never write the number anywhere else, except where
+  `docs/conversion-method.md` and its `figures.py` name the version they describe.
 - **Which tier to bump:** z for fixes that don't change a conversion; y for new features and for
   anything that changes a DNG's pixels or tags; x for 1.0 and later breaking changes. Bump in a PR
   of its own, or as the last commit of a PR that needs it, and run `cargo check` so `Cargo.lock`
@@ -179,14 +180,19 @@ open packaging/ios/Reversal.xcodeproj       # iOS app; for a device, set DEVELOP
 
 - The repo keeps product code, `README.md` for users of the tool, this file for how to work
   on it, and docs or skills that are useful to anyone.
-- `docs/spec.md` says what the product does and why. `docs/research.md` holds the evidence for the
-  conversion and technical choices: findings, options weighed, what each test changed and decided,
-  and sources. UI choices and their reasons belong in the spec. Keep each fact in one of them, and
-  update them when a change makes them untrue. The wiki is generated from them by
-  `.github/workflows/wiki.yml`, so never edit it.
+- `docs/spec.md` says what the product does and why. `docs/research-notes.md` is the working
+  record behind the conversion and technical choices: findings, options weighed, what each test
+  changed and decided, and sources. UI choices and their reasons belong in the spec. Keep each
+  fact in one of them, and update them when a change makes them untrue.
+- `docs/conversion-method.md` presents the current conversion end to end: each step, its formulas
+  and constants, and a summary of the evidence. It summarizes the notes, which stay the source
+  for test detail. It names the engine and model version it describes: when a change to the
+  conversion or the DNG makes it untrue, update it and that version, and run
+  `docs/images/conversion-method/figures.py` again when the constants it copies change.
+- The wiki is generated from `docs/` by `.github/workflows/wiki.yml`, so never edit it.
 - Experiments, test scripts and their output, agent config and memory, draft docs, ad hoc
   reports and plans stay out of this repo. Results that settle a conversion or technical choice go
-  in `docs/research.md`, summarized as what was tested, the effect and the decision.
+  in `docs/research-notes.md`, summarized as what was tested, the effect and the decision.
 - Write tracked files, commits and PRs as if the repo were public. Don't link to private
   docs or internal decision numbers.
 

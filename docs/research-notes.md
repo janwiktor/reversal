@@ -1,4 +1,6 @@
-# Reversal: Supporting Research
+# Reversal: Research Notes
+
+> **A working file.** These notes index every choice, test and experiment made along the way, including options that were later replaced or rejected. They are kept for the record, not as a reading guide. For the current method end to end, with its argument and formulas, see [Conversion Method](conversion-method.md).
 
 This doc holds the evidence behind the conversion and file format in the [Product Spec](spec.md): what we found about inverting negatives, the technical options we weighed, and what tests showed. What we chose lives in the spec. All measurements are from Nov 2026.
 

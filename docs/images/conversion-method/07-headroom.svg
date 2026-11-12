@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 744 214" width="744" height="214" role="img" aria-label="The 16-bit range: frame white at 13107, headroom up to 65535"><style>
+text { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; fill: #566170; }
+text.lbl { fill: #15191e; font-size: 11.5px; }
+text.ttl { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-weight: 600; font-size: 13px; fill: #15191e; }
+text.sm { font-size: 10.5px; }
+text.on-dark { fill: #ffffff; }
+.grid { stroke: #d5dbe2; stroke-width: 1; fill: none; }
+.axis { stroke: #566170; stroke-width: 1; fill: none; }
+.line { fill: none; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.ref { fill: none; stroke: #566170; stroke-width: 1.2; stroke-dasharray: 4 4; }
+.box { fill: #ffffff; stroke: #566170; stroke-width: 1.2; }
+.boxa { fill: #f7e3d6; stroke: #c0551a; stroke-width: 1.4; }
+.arr { stroke: #566170; stroke-width: 1.4; fill: none; }
+.c-ink { stroke: #15191e; } .c-r { stroke: #c2362f; } .c-b { stroke: #2d5fc0; }
+.c-a { stroke: #c0551a; } .c-m { stroke: #566170; }
+text.t-r { fill: #c2362f; } text.t-b { fill: #2d5fc0; } text.t-a { fill: #c0551a; }
+.dash { stroke-dasharray: 6 4; }
+</style><rect x="-12" y="-12" width="744" height="214" fill="#ffffff" rx="8"/><rect x="20" y="50" width="136" height="44" fill="#2b8449" opacity=".85"/><rect x="156" y="50" width="544" height="44" fill="#c0551a" opacity=".55"/><text class="ttl" x="20" y="30">Stored 16-bit value</text><text class="lbl on-dark" x="88" y="77" text-anchor="middle">image</text><text class="lbl" x="428" y="77" text-anchor="middle">headroom: 2.32 stops above frame white</text><line class="axis" x1="20" x2="20" y1="94" y2="106"/><text x="20" y="122" text-anchor="start">0</text><text class="sm" x="20" y="138" text-anchor="start">L = 0</text><line class="axis" x1="156" x2="156" y1="94" y2="106"/><text x="156" y="122" text-anchor="middle">13107</text><text class="sm" x="156" y="138" text-anchor="middle">L = 1 (frame white)</text><line class="axis" x1="292" x2="292" y1="94" y2="106"/><text x="292" y="122" text-anchor="middle">26214</text><text class="sm" x="292" y="138" text-anchor="middle">L = 2</text><line class="axis" x1="564" x2="564" y1="94" y2="106"/><text x="564" y="122" text-anchor="middle">52428</text><text class="sm" x="564" y="138" text-anchor="middle">L = 4</text><line class="axis" x1="700" x2="700" y1="94" y2="106"/><text x="700" y="122" text-anchor="end">65535</text><text class="sm" x="700" y="138" text-anchor="end">L = 5</text><text class="sm" x="700" y="152" text-anchor="end">WhiteLevel</text><text class="sm" x="20" y="176">stored = round( clamp(L × 0.2, 0, 1) × 65535 )   ·   frame white keeps 13,107 levels</text></svg>
