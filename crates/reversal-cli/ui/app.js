@@ -1394,6 +1394,7 @@ function setTool(t) {
   document.body.dataset.tool = t ?? "";
   cropDraft = t === "crop" ? { ...cropToAdjust() } : null;
   cropDrag = null;
+  dragStart = null;
   // The crop frame shows once the entire scan is on screen.
   $("crop-layer").hidden = true;
   $("crop-layer").style.cursor = "";
@@ -1445,6 +1446,8 @@ function svgRect(r, cls) {
 // What the analysis ignores as film holder, while Show areas is on. A custom area is measured as drawn.
 const holderKey = () => [...current.settings.estimate.base_rgb, adj().straighten].join();
 const holderKnown = () => current.holder?.key === holderKey();
+// A film base that's only a guess has no area worth showing: the scan showed no clear film.
+const baseKnown = () => !!hints().base || current.baseFound;
 function holderAreas() {
   return tool === "show" && !hints().analysis && holderKnown() ? current.holder.areas : [];
 }
@@ -1454,7 +1457,7 @@ function showLegend() {
   if (tool !== "show") return;
   // Until the holder is known, keep it named so the text doesn't change under the reader.
   const holder = !hints().analysis && !(holderKnown() && !current.holder.areas.length);
-  const items = new Map([["film base", "base"], ["measured area", "area"]]);
+  const items = new Map([...(baseKnown() ? [["film base", "base"]] : []), ["measured area", "area"]]);
   if (adj().crop) items.set("final crop", "crop");
   if (holder) items.set("detected film holder", "holder");
   const list = LIST.formatToParts([...items.keys()]).flatMap((p) => {
@@ -1499,13 +1502,29 @@ function drawOverlay(drag) {
   }
   const e = current.settings.estimate;
   // The dashed measured area goes over the crop, so both show when they're the same rectangle.
-  let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(e.area, "area") + svgRect(e.base_area, "base");
+  let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(e.area, "area") + (baseKnown() ? svgRect(e.base_area, "base") : "");
   if (drag) s += `<rect class="drag ${tool}" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
   $("overlay").innerHTML = s;
   showLegend();
 }
 
 let dragStart = null;  // where an area is being drawn from, with the pointer that draws it
+// The least an area spans of the view, each way. A drag along a narrow film edge is a line, so it
+// gets this width around it; one that's short both ways is a click, and draws nothing.
+const AREA_MIN = 0.005;
+function drawnArea(p, q) {
+  const r = rectFromPoints(p, q);
+  const thin = (low, high) => high - low < AREA_MIN;
+  if (thin(r.x0, r.x1) && thin(r.y0, r.y1)) return null;
+  const widened = (low, high) => {
+    if (!thin(low, high)) return [low, high];
+    const from = clamp((low + high - AREA_MIN) / 2, 0, 1 - AREA_MIN);
+    return [from, from + AREA_MIN];
+  };
+  [r.x0, r.x1] = widened(r.x0, r.x1);
+  [r.y0, r.y1] = widened(r.y0, r.y1);
+  return r;
+}
 const eventPoint = (ev) => {
   const b = $("view").getBoundingClientRect();
   return [clamp((ev.clientX - b.left) / b.width, 0, 1), clamp((ev.clientY - b.top) / b.height, 0, 1)];
@@ -1515,8 +1534,11 @@ $("overlay").addEventListener("pointerdown", (ev) => {
   dragStart = { pointer: ev.pointerId, at: eventPoint(ev) };
   $("overlay").setPointerCapture(ev.pointerId);
 });
+// A drag that ends without its pointer coming up here, as when the tool closes under it, draws
+// nothing, and leaves the next one free to start.
+$("overlay").addEventListener("lostpointercapture", (ev) => { if (dragStart?.pointer === ev.pointerId) dragStart = null; });
 $("overlay").addEventListener("pointermove", (ev) => {
-  if (dragStart?.pointer === ev.pointerId) drawOverlay(rectFromPoints(dragStart.at, eventPoint(ev)));
+  if (dragStart?.pointer === ev.pointerId) drawOverlay(drawnArea(dragStart.at, eventPoint(ev)));
 });
 // A drag the system takes over, as for a scroll, draws nothing.
 $("overlay").addEventListener("pointercancel", (ev) => {
@@ -1526,9 +1548,9 @@ $("overlay").addEventListener("pointercancel", (ev) => {
 });
 $("overlay").addEventListener("pointerup", (ev) => {
   if (dragStart?.pointer !== ev.pointerId) return;
-  const view = rectFromPoints(dragStart.at, eventPoint(ev));
+  const view = drawnArea(dragStart.at, eventPoint(ev));
   dragStart = null;
-  if (view.x1 - view.x0 < 0.005 || view.y1 - view.y0 < 0.005) { drawOverlay(); return; }
+  if (!view) { drawOverlay(); return; }
   const scan = rectInScan(view, adj());
   const t = tool;
   setTool(null);
