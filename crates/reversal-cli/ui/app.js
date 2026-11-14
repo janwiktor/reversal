@@ -19,7 +19,7 @@ const TOOL_TEXT = {
 };
 
 let current = null;   // { file, settings }, and what the scan was read as
-let tool = null;      // null | "crop" | "area" | "base" | "show"
+let tool = null;      // null | "crop" | "area" | "base" | "show" | "size", which Center size opens while it changes
 let cropDraft = null;  // the open crop frame in scan coordinates; applied by Done or Enter
 let timer = null;
 let saveTimer = null;
@@ -33,6 +33,7 @@ let batch = null;         // the running export's progress
 let lastPath = null;
 let unfinished = [];      // frames a save was cut short before, as the folder lists them
 let folderPath = "";      // the open folder, to name what's saved in it from there
+let fullShown = false;  // the preview on screen is the entire scan, which areas are drawn on
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
 
@@ -685,7 +686,7 @@ async function open(name) {
   clearTimeout(timer);
   clearTimeout(areaTimer);
   clearTimeout(straightenTimer);
-  straightenUnmeasured = false;
+  straightenUnmeasured = centerSizeUnmeasured = false;
   opening = name;
   current = null;  // no edits while nothing is open
   markCurrent(name);
@@ -821,13 +822,26 @@ for (const id of [...SLIDERS, "straighten"]) {
 // A new angle closes the areas, which no longer fit, but not the crop frame, since straightening and
 // cropping go together. It measures again once it settles: on letting
 // go of the slider, or after a short pause for arrow keys and typed values. Never while it's held.
-const STRAIGHTEN_PAUSE_MS = 300;
-let straightenTimer = null, straightenHeld = false, straightenUnmeasured = false;
+const SETTLE_PAUSE_MS = 300;
+// Whether a pointer holds a slider, with `release` run when it lets go.
+function holdable(range, release) {
+  let held = false;
+  range.addEventListener("pointerdown", (e) => { if (e.button === 0) held = true; });
+  for (const end of ["pointerup", "pointercancel", "blur"]) {
+    window.addEventListener(end, () => {
+      if (!held) return;
+      held = false;
+      release();
+    });
+  }
+  return () => held;
+}
+let straightenTimer = null, straightenUnmeasured = false;
 function straightenMoved() {
   if (tool && tool !== "crop") setTool(null);
   straightenUnmeasured = true;
   clearTimeout(straightenTimer);
-  if (!straightenHeld) straightenTimer = setTimeout(measureStraightened, STRAIGHTEN_PAUSE_MS);
+  if (!straightenHeld()) straightenTimer = setTimeout(measureStraightened, SETTLE_PAUSE_MS);
 }
 async function measureStraightened() {
   if (!straightenUnmeasured || !current) return;
@@ -839,30 +853,46 @@ async function measureStraightened() {
 async function measureSettled() {
   clearTimeout(straightenTimer);
   await measureStraightened();
+  await measureCenterSize();
   await lastMeasure;
 }
-$("straighten").addEventListener("pointerdown", (e) => { if (e.button === 0) straightenHeld = true; });
-for (const end of ["pointerup", "pointercancel", "blur"]) {
-  window.addEventListener(end, () => {
-    if (!straightenHeld) return;
-    straightenHeld = false;
-    measureStraightened();
-  });
-}
+const straightenHeld = holdable($("straighten"), measureStraightened);
 
 for (const look of LOOKS) {
   $(`look-${look}`).addEventListener("click", () => { if (current) { adj().look = look; changed(0); } });
 }
 
-let areaTimer = null;
+// While Center size changes, the entire scan shows with the area it would measure, dashed, and
+// nothing is measured. It measures once the size settles, as Straighten does: on letting go of
+// the slider, or after a short pause for arrow keys and typed values. Then the picture comes back.
+let areaTimer = null, centerSizeUnmeasured = false;
+const centerArea = () => {
+  const margin = (1 - (hints().area_percent ?? current.defaultAreaPercent) / 100) / 2;
+  return { x0: margin, y0: margin, x1: 1 - margin, y1: 1 - margin };
+};
 function setAreaPercent(percent) {
   if (!current) return;
   // The default is no choice at all, however it was reached.
   hints().area_percent = percent === current.defaultAreaPercent ? null : percent;
+  centerSizeUnmeasured = true;
   syncControls();
+  // Show areas already draws the area. Any other tool gives way, a crop frame applied first.
+  if (tool !== "show" && tool !== "size") {
+    applyOpenCrop();
+    setTool("size");
+  } else if (fullShown) drawOverlay();
   clearTimeout(areaTimer);
-  areaTimer = setTimeout(() => setHint("analysis", null), 150);
+  if (!centerSizeHeld()) areaTimer = setTimeout(measureCenterSize, SETTLE_PAUSE_MS);
 }
+async function measureCenterSize() {
+  clearTimeout(areaTimer);
+  if (!centerSizeUnmeasured || !current) return;
+  centerSizeUnmeasured = false;
+  // The picture comes back at once, and its colors follow when they're measured.
+  if (tool === "size") setTool(null);
+  await setHint("analysis", null);
+}
+const centerSizeHeld = holdable($("area-percent"), measureCenterSize);
 $("area-percent").title = "Double-click to reset";
 $("area-percent").addEventListener("input", (e) => setAreaPercent(Number(e.target.value)));
 onDouble($("area-percent"), () => setAreaPercent(null));
@@ -1335,7 +1365,7 @@ async function setHint(key, rect) {
   if (rollBusy()) return;
   hints()[key] = rect;
   if (key === "base") hints().base_rgb = null;
-  measure(key === "base" ? (rect ? "Custom film base set" : "Film base set to Detect")
+  return measure(key === "base" ? (rect ? "Custom film base set" : "Film base set to Detect")
                          : (rect ? "Custom measured area set" : "Measured area set to Center"), true);
 }
 
@@ -1399,9 +1429,15 @@ function setTool(t) {
   $("crop-layer").hidden = true;
   $("crop-layer").style.cursor = "";
   $("overlay").toggleAttribute("hidden", !t || t === "crop"); // SVG elements don't reflect .hidden
-  $("toolbar").hidden = !t;
+  // Areas drawn for another tool, or on another view, don't show for this one.
+  if (t && t !== "crop") {
+    if (fullShown) drawOverlay();
+    else $("overlay").innerHTML = "";
+  }
+  // Center size shows its area with no bar: the slider being moved says what it is.
+  $("toolbar").hidden = !t || t === "size";
   // A closing bar keeps its words while it fades.
-  if (t) {
+  if (t && t !== "size") {
     $("tool-text").textContent = TOOL_TEXT[t] ?? "";
     $("tool-cancel").hidden = t === "show";
     $("tool-done").hidden = t === "area" || t === "base";
@@ -1501,8 +1537,11 @@ function drawOverlay(drag) {
     return;
   }
   const e = current.settings.estimate;
+  if (tool === "size") { $("overlay").innerHTML = svgRect(centerArea(), "area"); return; }
+  // A centered area shows at the size it's set to, measured yet or not.
+  const area = hints().analysis ? e.area : centerArea();
   // The dashed measured area goes over the crop, so both show when they're the same rectangle.
-  let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(e.area, "area") + (baseKnown() ? svgRect(e.base_area, "base") : "");
+  let s = holderShape() + (adj().crop ? svgRect(adj().crop, "crop") : "") + svgRect(area, "area") + (baseKnown() ? svgRect(e.base_area, "base") : "");
   if (drag) s += `<rect class="drag ${tool}" x="${drag.x0}" y="${drag.y0}" width="${drag.x1 - drag.x0}" height="${drag.y1 - drag.y0}"/>`;
   $("overlay").innerHTML = s;
   showLegend();
@@ -1695,6 +1734,7 @@ async function refresh() {
     await new Promise((done) => { img.onload = img.onerror = done; img.src = URL.createObjectURL(blob); });
     if (old.startsWith("blob:")) URL.revokeObjectURL(old);
     if (file !== current?.file) return;
+    fullShown = full;
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
@@ -1718,7 +1758,7 @@ async function refresh() {
 // eases into what's left, so the bar never covers it. Messages pass over the image and take none.
 let barRoom = "";
 function placeStage() {
-  const room = tool ? `${$("floats").offsetTop + $("toolbar").offsetHeight}px` : "0px";
+  const room = tool && tool !== "size" ? `${$("floats").offsetTop + $("toolbar").offsetHeight}px` : "0px";
   if (room !== barRoom) $("stage").style.setProperty("--bar-room", barRoom = room);
 }
 new ResizeObserver(placeStage).observe($("toolbar"));
