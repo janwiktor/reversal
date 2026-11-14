@@ -21,7 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::image::{for_each_part, NRect, Rgb32};
+use crate::image::{for_each_part, NRect, Rgb32, Scan16};
 use crate::render::{Look, Tone};
 
 /// Film gamma assumed when turning density into scene log exposure; sets scene contrast.
@@ -36,7 +36,7 @@ pub const BASE_SATURATION: f32 = 1.25;
 pub const EXPOSURE_EV_RANGE: f32 = 3.0;
 pub const BALANCE_EV_RANGE: f32 = 0.6;
 /// Factor the analysis image is downsampled by.
-const ANALYSIS_FACTOR: usize = 4;
+pub const ANALYSIS_FACTOR: usize = 4;
 const REC2020_LUMA: [f32; 3] = [0.2627, 0.6780, 0.0593];
 const LOG10_2: f32 = std::f32::consts::LOG10_2;
 
@@ -1156,38 +1156,14 @@ pub fn convert_owned(scan: Rgb32, s: &Settings) -> Rgb32 {
 }
 
 fn convert_straight(straight: Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
-    let a = &s.adjust;
-    let gain = a.saturation_gain();
-    let (gains, weights) = (
-        gains_ev(s.estimate.film, a),
-        silver_weights(s.estimate.base_rgb),
-    );
-    framed(straight, s, crop_override, |px| {
-        saturate(positive_with(px, &s.estimate, gains, weights), gain)
-    })
+    finished(cropped(straight, s, crop_override), s, false)
 }
 
-/// A straightened scan as its settings frame it: cropped, each pixel through `develop`, then
-/// mirrored and rotated.
-fn framed(
-    straight: Rgb32,
-    s: &Settings,
-    crop_override: Option<NRect>,
-    develop: impl Fn([f32; 3]) -> [f32; 3] + Sync,
-) -> Rgb32 {
-    let a = &s.adjust;
-    let crop = crop_override.or(a.crop).unwrap_or(NRect::FULL);
+/// A straightened scan cut to its settings' crop.
+fn cropped(straight: Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
+    let crop = crop_override.or(s.adjust.crop).unwrap_or(NRect::FULL);
     let pixels = crop.to_pixels(straight.width, straight.height);
-    let mut img = straight.into_cropped(pixels);
-    for_each_part(&mut img.data, 3, |_, part| {
-        for px in part.as_chunks_mut::<3>().0 {
-            *px = develop(*px);
-        }
-    });
-    if a.flip_h {
-        img.flip_h_in_place();
-    }
-    img.into_rotated_cw(a.rotate)
+    straight.into_cropped(pixels)
 }
 
 /// How bright clear film shows in the negative view, of display white, which leaves light
@@ -1197,22 +1173,98 @@ const NEGATIVE_BASE_LEVEL: f32 = 0.8;
 /// typical base densities of about 0.4 more in green and 0.65 more in blue than in red.
 const NEGATIVE_MASK_RGB: [f32; 3] = [1.0, 0.4, 0.22];
 
+/// A straightened and cropped piece of scan as its settings show it: each pixel converted to
+/// the positive, or kept as the negative for looking at, then mirrored and rotated.
+fn finished(mut img: Rgb32, s: &Settings, negative: bool) -> Rgb32 {
+    let a = &s.adjust;
+    if negative {
+        let tint = match s.estimate.film {
+            Film::Color => NEGATIVE_MASK_RGB,
+            Film::Bw => [1.0; 3],
+        };
+        let base = s.estimate.base_rgb;
+        let scale = [0, 1, 2].map(|c| NEGATIVE_BASE_LEVEL * tint[c] / base[c].max(1e-4));
+        for_each_part(&mut img.data, 3, |_, part| {
+            for px in part.as_chunks_mut::<3>().0 {
+                *px = [0, 1, 2].map(|c| px[c] * scale[c]);
+            }
+        });
+    } else {
+        let gain = a.saturation_gain();
+        let (gains, weights) = (
+            gains_ev(s.estimate.film, a),
+            silver_weights(s.estimate.base_rgb),
+        );
+        for_each_part(&mut img.data, 3, |_, part| {
+            for px in part.as_chunks_mut::<3>().0 {
+                *px = saturate(positive_with(*px, &s.estimate, gains, weights), gain);
+            }
+        });
+    }
+    if a.flip_h {
+        img.flip_h_in_place();
+    }
+    img.into_rotated_cw(a.rotate)
+}
+
 /// The negative itself, framed as [`convert_with`] frames the positive, for looking at the scan:
 /// linear display RGB with white at 1. The scan's channels are in the camera's own balance under
 /// the scanning light, so each is taken relative to the film base, which then shows as on a light
 /// table: neutral for black and white film, and in the orange of its mask for color film. That
 /// color stands for the mask and isn't measured.
 pub fn negative_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
-    let base = s.estimate.base_rgb;
-    let tint = match s.estimate.film {
-        Film::Color => NEGATIVE_MASK_RGB,
-        Film::Bw => [1.0; 3],
-    };
-    let scale = [0, 1, 2].map(|c| NEGATIVE_BASE_LEVEL * tint[c] / base[c].max(1e-4));
     let straight = scan.straighten(s.adjust.straighten);
-    framed(straight, s, crop_override, |px| {
-        [0, 1, 2].map(|c| px[c] * scale[c])
-    })
+    finished(cropped(straight, s, crop_override), s, true)
+}
+
+/// A rectangle on the picture as shown, mirrored and rotated, back on the cropped scan.
+fn unframed(part: NRect, a: &Adjust) -> NRect {
+    let back = |u: f32, v: f32| {
+        let (x, y) = match a.rotate % 4 {
+            1 => (v, 1.0 - u),
+            2 => (1.0 - u, 1.0 - v),
+            3 => (1.0 - v, u),
+            _ => (u, v),
+        };
+        (if a.flip_h { 1.0 - x } else { x }, y)
+    };
+    let (p, q) = (back(part.x0, part.y0), back(part.x1, part.y1));
+    NRect {
+        x0: p.0.min(q.0),
+        y0: p.1.min(q.1),
+        x1: p.0.max(q.0),
+        y1: p.1.max(q.1),
+    }
+}
+
+/// A part of what [`convert_with`] or [`negative_with`] shows, from the full scan, for looking
+/// at closely: `part` is a rectangle on the picture as shown. The scan's own pixels are kept
+/// while the part's long side stays within `long_side` pixels, and averaged by the smallest
+/// whole factor that fits it otherwise. Only the part is straightened and converted.
+pub fn part_with(
+    scan: &Scan16,
+    s: &Settings,
+    crop_override: Option<NRect>,
+    part: NRect,
+    long_side: usize,
+    negative: bool,
+) -> Rgb32 {
+    let crop = crop_override.or(s.adjust.crop).unwrap_or(NRect::FULL);
+    let frame = crop.to_pixels(scan.width, scan.height);
+    let (w, h) = (frame.right - frame.left, frame.bottom - frame.top);
+    let within = unframed(part, &s.adjust).to_pixels(w, h);
+    let pixels = crate::image::Rect {
+        left: frame.left + within.left,
+        right: frame.left + within.right,
+        top: frame.top + within.top,
+        bottom: frame.top + within.bottom,
+    };
+    let long = (pixels.right - pixels.left).max(pixels.bottom - pixels.top);
+    let factor = long.div_ceil(long_side.max(1)).max(1);
+    let img = scan
+        .straightened_part(s.adjust.straighten, pixels)
+        .downsample(factor);
+    finished(img, s, negative)
 }
 
 pub fn convert(scan: &Rgb32, s: &Settings) -> Rgb32 {
@@ -1906,6 +1958,55 @@ mod tests {
         let brightest = negative.pixels().map(|p| p[0]).fold(0.0, f32::max);
         let darkest = negative.pixels().map(|p| p[0]).fold(f32::MAX, f32::min);
         assert!(darkest < brightest * 0.5, "{darkest} {brightest}");
+    }
+
+    #[test]
+    fn a_part_from_the_full_scan_shows_what_the_whole_picture_shows_there() {
+        let scan = synthetic_scan();
+        let kept = Scan16::new(&scan);
+        let mut s = Settings::new(estimate(&scan, &Hints::default()), Adjust::default());
+        s.adjust.crop = Some(NRect {
+            x0: 0.1,
+            y0: 0.2,
+            x1: 0.9,
+            y1: 0.8,
+        });
+        s.adjust.straighten = 2.0;
+        let near = |a: &Rgb32, b: &Rgb32| {
+            assert_eq!((a.width, a.height), (b.width, b.height));
+            for (a, b) in a.data.iter().zip(&b.data) {
+                assert!((a - b).abs() < 0.01 * b.abs().max(0.05), "{a} {b}");
+            }
+        };
+        for (rotate, flip_h) in [(0, false), (1, false), (2, true), (3, true)] {
+            (s.adjust.rotate, s.adjust.flip_h) = (rotate, flip_h);
+            for negative in [false, true] {
+                let whole = if negative {
+                    negative_with(&scan, &s, None)
+                } else {
+                    convert(&scan, &s)
+                };
+                near(
+                    &part_with(&kept, &s, None, NRect::FULL, usize::MAX, negative),
+                    &whole,
+                );
+                // The right half of the picture as shown.
+                let half = NRect {
+                    x0: 0.5,
+                    ..NRect::FULL
+                };
+                let want = whole.crop(half.to_pixels(whole.width, whole.height));
+                near(
+                    &part_with(&kept, &s, None, half, usize::MAX, negative),
+                    &want,
+                );
+            }
+        }
+        // A part too large for the size asked is averaged down by a whole factor.
+        s.adjust = Adjust::default();
+        let whole = convert(&scan, &s);
+        let small = part_with(&kept, &s, None, NRect::FULL, whole.width / 2, false);
+        assert_eq!(small.width, whole.width / 2);
     }
 
     #[test]

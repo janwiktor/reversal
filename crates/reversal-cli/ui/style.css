@@ -326,6 +326,14 @@ body[data-tool="crop"] #stage { --reach: calc(var(--corner-hit) / 2); }
 body[data-tool=""] #stage { transition-delay: var(--fade); }
 #view { position: relative; flex: none; }
 #photo { display: block; width: 100%; height: 100%; -webkit-user-drag: none; }
+/* The script places it over the part of the preview it sharpens. */
+#detail { position: absolute; display: block; pointer-events: none; -webkit-user-drag: none; }
+#detail[hidden] { display: none; }
+/* Two fingers zoom and move the image, so a touch here is never the page's to scroll. */
+#stage { touch-action: none; }
+/* With Space held, a drag moves the zoomed image, whatever tool is open. */
+body[data-pan] #stage, body[data-pan] #stage * { cursor: grab; }
+body[data-pan="drag"] #stage, body[data-pan="drag"] #stage * { cursor: grabbing; }
 #overlay { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 #overlay * { cursor: crosshair; }
 /* Center size only shows its area: nothing is drawn there. */
