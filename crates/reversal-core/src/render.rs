@@ -257,6 +257,20 @@ pub fn display_jpeg(img: &Rgb32, quality: u8) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_display_image_encodes_as_a_jpeg_of_its_size() {
+        let mut img = Rgb32::new(24, 16);
+        for (i, v) in img.data.iter_mut().enumerate() {
+            // Past white on one side, which must clip and not wrap.
+            *v = i as f32 / 600.0;
+        }
+        let jpeg = display_jpeg(&img, 90);
+        assert_eq!(&jpeg[..2], [0xFF, 0xD8]);
+        // The frame header carries the height, then the width.
+        let size = [0, 16, 0, 24];
+        assert!(jpeg.windows(4).any(|w| w == size));
+    }
+
     const ENDS: [f32; 3] = [-100.0, 0.0, 100.0];
 
     /// Display value of linear `l` as a look's profile renders it.

@@ -699,7 +699,7 @@ async function open(name) {
   $("message").textContent = "Opening the raw file…";
   $("message").hidden = false;
   $("view").hidden = true;
-  dropDetail();
+  showDetail();
   setBusy(true);
   try {
     const data = await ask(`/api/load?file=${encodeURIComponent(name)}`);
@@ -834,13 +834,14 @@ const SETTLE_PAUSE_MS = 300;
 function holdable(range, release) {
   let held = false;
   range.addEventListener("pointerdown", (e) => { if (e.button === 0) held = true; });
-  for (const end of ["pointerup", "pointercancel", "blur"]) {
-    window.addEventListener(end, () => {
-      if (!held) return;
-      held = false;
-      release();
-    });
-  }
+  const end = () => {
+    if (!held) return;
+    held = false;
+    release();
+  };
+  for (const type of ["pointerup", "pointercancel", "blur"]) window.addEventListener(type, end);
+  // A slider says so itself when a drag commits its value, should the pointer's end go unheard.
+  range.addEventListener("change", end);
   return () => held;
 }
 let straightenTimer = null, straightenUnmeasured = false;
@@ -854,7 +855,9 @@ async function measureStraightened() {
   if (!straightenUnmeasured || !current) return;
   // A custom area keeps its place on the scan while the picture turns under it.
   const custom = hints().base || hints().analysis;
-  straightenUnmeasured = !(await measure(custom ? "Colors measured again. Check custom areas in Show areas" : "Colors measured again for the new angle"));
+  // Cleared first, so an angle set while this one is measured still counts as unmeasured.
+  straightenUnmeasured = false;
+  if (!(await measure(custom ? "Colors measured again. Check custom areas in Show areas" : "Colors measured again for the new angle"))) straightenUnmeasured = true;
 }
 // Saved settings must hold what was measured for their angle, so saving and leaving wait for it.
 async function measureSettled() {
@@ -877,12 +880,15 @@ const centerArea = () => {
   const margin = (1 - (hints().area_percent ?? current.defaultAreaPercent) / 100) / 2;
   return { x0: margin, y0: margin, x1: 1 - margin, y1: 1 - margin };
 };
-function setAreaPercent(percent) {
+// `settled` is a size set in one step, as a reset is: it's measured at once, with nothing to show
+// meanwhile.
+function setAreaPercent(percent, settled = false) {
   if (!current) return;
   // The default is no choice at all, however it was reached.
   hints().area_percent = percent === current.defaultAreaPercent ? null : percent;
   centerSizeUnmeasured = true;
   syncControls();
+  if (settled) { measureCenterSize(); return; }
   // Show areas already draws the area. Any other tool gives way, a crop frame applied first.
   if (tool !== "show" && tool !== "size") {
     applyOpenCrop();
@@ -897,12 +903,14 @@ async function measureCenterSize() {
   centerSizeUnmeasured = false;
   // The picture comes back at once, and its colors follow when they're measured.
   if (tool === "size") setTool(null);
-  await setHint("analysis", null);
+  // A measurement that failed is still owed, so saving or leaving the frame tries it again. One
+  // put off for a roll isn't: the roll measures the frame itself.
+  if ((await setHint("analysis", null)) === false) centerSizeUnmeasured = true;
 }
 const centerSizeHeld = holdable($("area-percent"), measureCenterSize);
 $("area-percent").title = "Double-click to reset";
 $("area-percent").addEventListener("input", (e) => setAreaPercent(Number(e.target.value)));
-onDouble($("area-percent"), () => setAreaPercent(null));
+onDouble($("area-percent"), () => setAreaPercent(null, true));
 
 // A value box drives its slider, so a typed number goes the same way as a drag.
 for (const id of [...SLIDERS, "straighten", "area-percent"]) {
@@ -1029,7 +1037,8 @@ document.addEventListener("keydown", (e) => {
     if (next && next.name !== frameNow()) open(next.name);
   }
 });
-document.addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "n") releaseNegative(); });
+// A Mac sends no keyup for a letter let go while Command is held, so Command's own counts.
+document.addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "n" || e.key === "Meta") releaseNegative(); });
 // In the app, a right-click shouldn't offer a web page's Reload.
 if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text]") && !e.target.closest("#note, #about")) e.preventDefault(); });
 
@@ -1300,6 +1309,8 @@ async function followBatch() {
   }
   const finished = batch;
   batch = null;
+  // A sharper part put off for the save can come now.
+  wantDetail();
   if (finished.task === "roll-read") {
     updateSaveButton();
     rollReadingsDone(finished).catch(rollFailed);
@@ -1448,7 +1459,7 @@ function showNegative() {
 }
 function pressNegative() {
   if (onAreas()) negativeOnAreas = !negativeOnAreas;
-  else negativeKeyed = true;
+  else [negativeKeyed, negativeKept] = [true, false];
   showNegative();
 }
 function releaseNegative() {
@@ -1459,9 +1470,11 @@ function releaseNegative() {
 const negativeHeld = holdable($("negative"), showNegative);
 $("negative").addEventListener("pointerdown", (e) => { if (e.button === 0) showNegative(); });
 $("negative").addEventListener("click", (e) => {
-  // A pointer's click ends a hold, which has shown and hidden the negative already.
+  // A pointer's click ends a hold, which has shown and hidden the negative already: all it
+  // has left to do is let go of one the keyboard kept.
   if (onAreas()) negativeOnAreas = !negativeOnAreas;
   else if (e.detail === 0) negativeKept = !negativeKept;
+  else if (negativeKept) negativeKept = false;
   else return;
   showNegative();
 });
@@ -1538,7 +1551,8 @@ function svgRect(r, cls) {
 const holderKey = () => [...current.settings.estimate.base_rgb, adj().straighten].join();
 const holderKnown = () => current.holder?.key === holderKey();
 // A film base that's only a guess has no area worth showing: the scan showed no clear film.
-const baseKnown = () => !!hints().base || current.baseFound;
+// Nor has one taken from the roll: its value didn't come from where this frame's was found.
+const baseKnown = () => !!hints().base || (current.baseFound && !hints().base_rgb);
 function holderAreas() {
   return tool === "show" && !hints().analysis && holderKnown() ? current.holder.areas : [];
 }
@@ -1603,13 +1617,14 @@ function drawOverlay(drag) {
 }
 
 let dragStart = null;  // where an area is being drawn from, with the pointer that draws it
-// The least an area spans of the view, each way. A drag along a narrow film edge is a line, so it
-// gets this width around it; one that's short both ways is a click, and draws nothing.
+// The least an area spans of the view, each way. A drag along a narrow film edge is a line, so a
+// film base gets this width around it; one that's short both ways is a click, and draws nothing.
+// A measured area thin either way is a slip: colors can't be measured on a line.
 const AREA_MIN = 0.005;
 function drawnArea(p, q) {
   const r = rectFromPoints(p, q);
   const thin = (low, high) => high - low < AREA_MIN;
-  if (thin(r.x0, r.x1) && thin(r.y0, r.y1)) return null;
+  if (tool === "base" ? thin(r.x0, r.x1) && thin(r.y0, r.y1) : thin(r.x0, r.x1) || thin(r.y0, r.y1)) return null;
   const widened = (low, high) => {
     if (!thin(low, high)) return [low, high];
     const from = clamp((low + high - AREA_MIN) / 2, 0, 1 - AREA_MIN);
@@ -1624,7 +1639,7 @@ const eventPoint = (ev) => {
   return [clamp((ev.clientX - b.left) / b.width, 0, 1), clamp((ev.clientY - b.top) / b.height, 0, 1)];
 };
 $("overlay").addEventListener("pointerdown", (ev) => {
-  if (!["area", "base"].includes(tool) || ev.button !== 0 || dragStart) return;
+  if (!["area", "base"].includes(tool) || ev.button !== 0 || dragStart || touches.size > 1) return;
   dragStart = { pointer: ev.pointerId, at: eventPoint(ev) };
   $("overlay").setPointerCapture(ev.pointerId);
 });
@@ -1739,7 +1754,7 @@ function nudgeCrop([dx, dy], px, edge) {
   setCropView(edge ? resizedRect(v, edge, x, y, false) : movedRect(v, x, y));
 }
 $("crop-layer").addEventListener("pointerdown", (ev) => {
-  if (tool !== "crop" || ev.button !== 0 || cropDrag) return;
+  if (tool !== "crop" || ev.button !== 0 || cropDrag || touches.size > 1) return;
   ev.preventDefault();
   const from = cropView();
   const edge = ev.target.closest("[data-edge]")?.dataset.edge;
@@ -1779,9 +1794,7 @@ async function refresh() {
   const file = current.file;
   try {
     const full = !!tool, negative = negativeNow(), kind = negative ? "negative" : "positive";
-    // A negative only changes with how the frame is turned and cropped, and with its film base.
-    const { adjust: a, estimate: e } = current.settings;
-    const key = JSON.stringify([file, full, negative ? [a.straighten, a.crop, a.flip_h, a.rotate, e.base_rgb, e.film] : current.settings]);
+    const key = JSON.stringify([file, full, negative, current.settings]);
     const last = shots[kind];
     let shot = last;
     if (last?.key !== key) {
@@ -1800,8 +1813,10 @@ async function refresh() {
     if (file !== current?.file) return;
     fullShown = full;
     shownShot = shot;
-    // A sharper part made for another picture goes, and one for this follows.
-    if (detailShown && detailShown.key !== shot.key) dropDetail();
+    // Areas drawn on the entire scan don't fit a picture that isn't it.
+    if (!full && tool && tool !== "crop") $("overlay").innerHTML = "";
+    // The sharper part made for this picture shows with it. One made for another doesn't.
+    showDetail();
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
@@ -1888,7 +1903,7 @@ function placeView(box = stageBox()) {
   view.style.width = `${width}px`;
   view.style.height = `${height}px`;
   view.style.transform = `translate(${zoom.x}px, ${zoom.y}px)`;
-  wantDetail();
+  if (zoom.z > 1) wantDetail();
 }
 // Zooms to `z`, keeping the point of the image at `at` on the page where it is.
 function zoomTo(z, at, eased = false) {
@@ -1904,6 +1919,7 @@ function zoomTo(z, at, eased = false) {
   else endMotion(view, "zoom");
 }
 function zoomOut() {
+  endMotion($("view"), "zoom");
   if (zoom.z === 1) return;
   Object.assign(zoom, ZOOM_OUT);
   placeView();
@@ -1927,7 +1943,8 @@ function cancelDrags() {
 }
 
 // Two fingers on the stage pinch and move the image, wherever on it they land: the stage hears
-// of them before the tool under them does, and ends what one finger had begun there.
+// of them before the tool under them does, and ends what one finger had begun there. A tool
+// starts nothing with a second finger.
 const touches = new Map();  // the fingers on the stage, by pointer
 let pinch = null;           // the zoom when two fingers came down, where between them, and how far apart
 const fingers = () => {
@@ -1963,6 +1980,14 @@ for (const end of ["pointerup", "pointercancel"]) {
   // On the window: a finger that began on the stage can come up anywhere.
   addEventListener(end, (e) => { if (touches.delete(e.pointerId)) touchesChanged(); }, true);
 }
+// Fingers the page stops hearing of, as when the app goes to the background, are no longer down.
+for (const type of ["blur", "visibilitychange"]) {
+  addEventListener(type, () => {
+    if (!touches.size) return;
+    touches.clear();
+    touchesChanged();
+  });
+}
 // A trackpad's pinch comes as a wheel turn with Control held in some browsers and as a gesture in
 // others, and its two-finger move as a plain wheel turn.
 $("stage").addEventListener("wheel", (e) => {
@@ -1985,7 +2010,8 @@ $("stage").addEventListener("gesturechange", (e) => { if (gestureFrom && !touche
 $("stage").addEventListener("gestureend", () => { gestureFrom = 0; });
 
 // Space held with the pointer over the image turns a drag into a move of it, before any tool
-// hears of the drag. Elsewhere Space keeps its own meaning, as on a button.
+// hears of the drag. Elsewhere Space keeps its own meaning, as on a button: over a bar or a
+// message on the image too, and in a dialog.
 let overStage = false, spaceHeld = false;
 let panDrag = null;  // { pointer, x, y, from: where the image was }
 $("stage").addEventListener("pointerenter", () => { overStage = true; });
@@ -1996,7 +2022,8 @@ function showPan() {
   else delete document.body.dataset.pan;
 }
 document.addEventListener("keydown", (e) => {
-  if (e.code !== "Space" || e.target.matches?.("input[type=text]") || !(overStage || spaceHeld)) return;
+  if (e.code !== "Space" || e.target.matches?.("input[type=text]") || document.querySelector("dialog[open], .float:hover")) return;
+  if (!(overStage || spaceHeld)) return;
   e.preventDefault();
   spaceHeld = true;
   showPan();
@@ -2039,35 +2066,43 @@ const DETAIL_PAUSE_MS = 200;
 const DETAIL_GAIN = 1.2;      // screen pixels to one of the preview's, from which the scan shows more
 const DETAIL_MARGIN = 0.15;   // room around the part in view, as a share of it
 const DETAIL_MAX_SIDE = 3200;
-let detailShown = null;  // { key, part, gain }: the preview it was made for, the part it covers, and the gain it's sharp to
+// The last sharper part of each kind, as { key, part, gain, url }: the preview it was made for,
+// the part it covers and the gain it's sharp to. Like the previews, one each for the picture and
+// its negative, so going between them stays sharp.
+const details = { positive: null, negative: null };
 let detailTimer = 0, detailLoading = false, detailAgain = false;
+const kindOf = (shot) => (shot.job.negative ? "negative" : "positive");
+// The sharper part made for the preview on screen, if there is one.
+const detailNow = () => {
+  const has = shownShot && !$("view").hidden && details[kindOf(shownShot)];
+  return has && has.key === shownShot.key ? has : null;
+};
 function wantDetail() {
   clearTimeout(detailTimer);
   detailTimer = setTimeout(loadDetail, DETAIL_PAUSE_MS);
 }
-function dropDetail() {
-  const detail = $("detail");
-  detail.hidden = true;
-  if (detail.src) URL.revokeObjectURL(detail.src);
-  detail.removeAttribute("src");
-  detailShown = null;
+// Lays the sharper part made for the preview on screen over it, or hides the one that isn't.
+function showDetail() {
+  const detail = $("detail"), has = detailNow();
+  detail.hidden = !has;
+  if (!has) return;
+  for (const [side, v] of [["left", has.part.x0], ["top", has.part.y0], ["width", has.part.x1 - has.part.x0], ["height", has.part.y1 - has.part.y0]]) detail.style[side] = `${v * 100}%`;
+  if (detail.src !== has.url) detail.src = has.url;
 }
 async function loadDetail() {
   if (detailLoading) { detailAgain = true; return; }
   const shot = shownShot, view = $("view").getBoundingClientRect(), stage = $("stage").getBoundingClientRect();
   const gain = view.width * devicePixelRatio / $("photo").naturalWidth;
-  // A running save has the engine, and the memory a full scan takes.
-  if (!current || !shot || $("view").hidden || gain < DETAIL_GAIN || batch || motionTag($("view"), "zoom") != null) {
-    if (gain < DETAIL_GAIN) dropDetail();
-    return;
-  }
+  // Only a zoomed image gets one: a fitted one is what sliders work on, and they mustn't wait for
+  // the full scan. A running save has the engine, and the memory a full scan takes.
+  if (!current || !shot || $("view").hidden || zoom.z === 1 || gain < DETAIL_GAIN || batch || motionTag($("view"), "zoom") != null) return;
   const seen = {
     x0: clamp((stage.left - view.left) / view.width, 0, 1), y0: clamp((stage.top - view.top) / view.height, 0, 1),
     x1: clamp((stage.right - view.left) / view.width, 0, 1), y1: clamp((stage.bottom - view.top) / view.height, 0, 1),
   };
   if (seen.x1 <= seen.x0 || seen.y1 <= seen.y0) return;
-  const has = detailShown;
-  const covered = has?.key === shot.key && has.part.x0 <= seen.x0 && has.part.y0 <= seen.y0 && has.part.x1 >= seen.x1 && has.part.y1 >= seen.y1;
+  const has = detailNow();
+  const covered = has && has.part.x0 <= seen.x0 && has.part.y0 <= seen.y0 && has.part.x1 >= seen.x1 && has.part.y1 >= seen.y1;
   // Sharp enough for this zoom, or as sharp as the scan gets.
   if (covered && has.gain >= Math.min(gain, scanScale) / DETAIL_GAIN) return;
   const roomX = (seen.x1 - seen.x0) * DETAIL_MARGIN, roomY = (seen.y1 - seen.y0) * DETAIL_MARGIN;
@@ -2078,15 +2113,14 @@ async function loadDetail() {
   try {
     const res = await api("/api/detail", { ...shot.job, part, pixels });
     const url = URL.createObjectURL(await res.blob());
-    const detail = $("detail"), old = detail.src;
-    // The picture changed meanwhile: its own detail follows.
-    if (shownShot !== shot) { URL.revokeObjectURL(url); return; }
-    await new Promise((done) => { detail.onload = detail.onerror = done; detail.src = url; });
-    if (old) URL.revokeObjectURL(old);
-    if (shownShot !== shot) { dropDetail(); return; }
-    for (const [side, v] of [["left", part.x0], ["top", part.y0], ["width", part.x1 - part.x0], ["height", part.y1 - part.y0]]) detail.style[side] = `${v * 100}%`;
-    detail.hidden = false;
-    detailShown = { key: shot.key, part, gain: gain * pixels / side };
+    // Loaded apart from the page, so it shows whole, and a picture that changes meanwhile can't
+    // leave this waiting.
+    const loaded = new Image();
+    await new Promise((done) => { loaded.onload = loaded.onerror = done; loaded.src = url; });
+    const kind = kindOf(shot), last = details[kind];
+    details[kind] = { key: shot.key, part, gain: gain * pixels / side, url };
+    showDetail();
+    if (last) URL.revokeObjectURL(last.url);
   } catch {
     // The preview stays, as sharp as it is.
   } finally {

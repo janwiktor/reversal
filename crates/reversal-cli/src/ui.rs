@@ -163,6 +163,8 @@ struct State {
     /// being opened, and one that was kept ready to show decodes it again when it's first asked
     /// for. One at a time: a 24-megapixel scan takes 144 MB.
     detail: Option<(String, Scan16)>,
+    /// When the system was last short of memory. A full scan isn't decoded again right after.
+    trimmed: Option<Instant>,
     /// The frame last asked for: the one on screen.
     shown: Option<String>,
     batch: Batch,
@@ -196,6 +198,15 @@ struct DetailJob {
 
 /// The longest side of a part of a scan rendered for looking at closely.
 const DETAIL_MAX_SIDE: usize = 4096;
+/// How long after the system was short of memory no full scan is decoded for looking closely.
+const DETAIL_REST: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether a frame keeps its full scan from being opened, so its first zoom is sharp at once.
+/// Where memory is tight, only a scan of up to about 26 megapixels does: a larger one is decoded
+/// again if it's zoomed.
+fn keeps_detail_at_open(scan: &Rgb32) -> bool {
+    !cfg!(target_os = "ios") || scan.width * scan.height * 6 <= 160 << 20
+}
 
 #[derive(Deserialize)]
 struct SaveSettings {
@@ -307,6 +318,7 @@ impl Engine {
             .and_then(|file| state.cache.remove_entry(file));
         state.cache = shown.into_iter().collect();
         state.detail = None;
+        state.trimmed = Some(Instant::now());
     }
 }
 
@@ -475,6 +487,7 @@ impl State {
             folder: Arc::new(Folder::new(dir)),
             cache: HashMap::new(),
             detail: None,
+            trimmed: None,
             batch: Batch::default(),
             roll_readings: Arc::default(),
         }
@@ -691,7 +704,7 @@ impl State {
             let t = Instant::now();
             let scan = reversal_core::decode::decode(&path).map_err(|e| (500, e.to_string()))?;
             // While a save runs, memory goes to the frames it converts.
-            if !self.batch.is_running() {
+            if !self.batch.is_running() && keeps_detail_at_open(&scan) {
                 self.detail = Some((file.to_string(), Scan16::new(&scan)));
             }
             let small = invert::analysis_image(&scan);
@@ -761,6 +774,10 @@ impl State {
             return Err((409, "busy saving".to_string()));
         }
         self.ensure_loaded(&job.file)?;
+        let resting = self.trimmed.is_some_and(|at| at.elapsed() < DETAIL_REST);
+        if self.detail.is_none() && resting {
+            return Err((503, "short of memory".to_string()));
+        }
         if self.detail.is_none() {
             let path = self.folder.resolve(&job.file)?;
             let scan = reversal_core::decode::decode(&path).map_err(|e| (500, e.to_string()))?;
@@ -829,7 +846,9 @@ impl State {
 }
 
 impl State {
-    fn read_roll(&self, files: Vec<String>) -> Handled {
+    fn read_roll(&mut self, files: Vec<String>) -> Handled {
+        // Like a save, a roll decodes its own scans.
+        self.detail = None;
         if files.len() < 2 {
             return Err((400, "a roll needs at least two frames".to_string()));
         }
@@ -859,7 +878,8 @@ impl State {
         Ok(json_resp(200, &self.batch.status()))
     }
 
-    fn apply_roll(&self, job: RollApply) -> Handled {
+    fn apply_roll(&mut self, job: RollApply) -> Handled {
+        self.detail = None;
         let base_rgb = voted_base(&job.bases)?;
         for file in &job.files {
             self.folder.resolve(file)?;

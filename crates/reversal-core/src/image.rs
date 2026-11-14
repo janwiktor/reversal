@@ -163,44 +163,63 @@ impl Scan16 {
     }
 
     /// The pixels of `r` on this scan turned by `degrees`, as [`Rgb32::straighten`] and then
-    /// [`Rgb32::crop`] would give them, without turning the rest.
-    pub fn straightened_part(&self, degrees: f32, r: Rect) -> Rgb32 {
+    /// [`Rgb32::crop`] would give them, each `factor` pixels a side averaged into one, as
+    /// [`Rgb32::downsample`] would. Only the result is held: the rest is never turned, and the
+    /// part is never held at the scan's own size.
+    pub fn straightened_part(&self, degrees: f32, r: Rect, factor: usize) -> Rgb32 {
         let r = r.clamp(self.width, self.height);
         let (w, h) = (self.width, self.height);
-        let (out_w, out_h) = (r.right - r.left, r.bottom - r.top);
-        let mut out = Rgb32::new(out_w, out_h);
-        if out.data.is_empty() {
-            return out;
+        let (part_w, part_h) = (r.right - r.left, r.bottom - r.top);
+        if part_w == 0 || part_h == 0 {
+            return Rgb32::new(0, 0);
         }
+        let factor = factor.max(1);
+        let (out_w, out_h) = ((part_w / factor).max(1), (part_h / factor).max(1));
+        let mut out = Rgb32::new(out_w, out_h);
         let turned = degrees.abs() >= 1e-3;
         let (s, c) = degrees.to_radians().sin_cos();
         let (cx, cy) = ((w as f32 - 1.0) / 2.0, (h as f32 - 1.0) / 2.0);
+        // One pixel of the straightened scan.
+        let straight = |x: usize, y: usize| {
+            if !turned {
+                return self.get(x, y);
+            }
+            // Inverse rotation, as in `Rgb32::straighten`.
+            let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+            let sx = (c * dx + s * dy + cx).clamp(0.0, (w - 1) as f32);
+            let sy = (-s * dx + c * dy + cy).clamp(0.0, (h - 1) as f32);
+            let (x0, y0) = (sx.floor() as usize, sy.floor() as usize);
+            let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+            let (fx, fy) = (sx - x0 as f32, sy - y0 as f32);
+            let (a, b, cc, d) = (
+                self.get(x0, y0),
+                self.get(x1, y0),
+                self.get(x0, y1),
+                self.get(x1, y1),
+            );
+            [0, 1, 2].map(|k| {
+                let top = a[k] + (b[k] - a[k]) * fx;
+                let bot = cc[k] + (d[k] - cc[k]) * fx;
+                top + (bot - top) * fy
+            })
+        };
+        let norm = 1.0 / (factor * factor) as f32;
         for_each_part(&mut out.data, 3, |start, part| {
             for (i, px) in part.as_chunks_mut::<3>().0.iter_mut().enumerate() {
                 let at = start / 3 + i;
-                let (x, y) = (r.left + at % out_w, r.top + at / out_w);
-                if !turned {
-                    *px = self.get(x, y);
-                    continue;
+                let (left, top) = (r.left + at % out_w * factor, r.top + at / out_w * factor);
+                let mut sum = [0.0f32; 3];
+                for dy in 0..factor {
+                    for dx in 0..factor {
+                        // Past the part's edge, its last pixel again, as `downsample` does.
+                        let p =
+                            straight((left + dx).min(r.right - 1), (top + dy).min(r.bottom - 1));
+                        for k in 0..3 {
+                            sum[k] += p[k];
+                        }
+                    }
                 }
-                // Inverse rotation, as in `Rgb32::straighten`.
-                let (dx, dy) = (x as f32 - cx, y as f32 - cy);
-                let sx = (c * dx + s * dy + cx).clamp(0.0, (w - 1) as f32);
-                let sy = (-s * dx + c * dy + cy).clamp(0.0, (h - 1) as f32);
-                let (x0, y0) = (sx.floor() as usize, sy.floor() as usize);
-                let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
-                let (fx, fy) = (sx - x0 as f32, sy - y0 as f32);
-                let (a, b, cc, d) = (
-                    self.get(x0, y0),
-                    self.get(x1, y0),
-                    self.get(x0, y1),
-                    self.get(x1, y1),
-                );
-                for k in 0..3 {
-                    let top = a[k] + (b[k] - a[k]) * fx;
-                    let bot = cc[k] + (d[k] - cc[k]) * fx;
-                    px[k] = top + (bot - top) * fy;
-                }
+                *px = sum.map(|v| v * norm);
             }
         });
         out
@@ -410,13 +429,22 @@ mod tests {
             right: 33,
         };
         for degrees in [0.0, 3.5, -8.0] {
-            let want = scan.straighten(degrees).crop(r);
-            let got = kept.straightened_part(degrees, r);
-            assert_eq!((got.width, got.height), (want.width, want.height));
-            for (a, b) in got.data.iter().zip(&want.data) {
-                assert!((a - b).abs() < 2.0 / 65535.0, "{degrees}: {a} {b}");
+            for factor in [1, 2, 3] {
+                let want = scan.straighten(degrees).crop(r).downsample(factor);
+                let got = kept.straightened_part(degrees, r, factor);
+                assert_eq!((got.width, got.height), (want.width, want.height));
+                for (a, b) in got.data.iter().zip(&want.data) {
+                    assert!((a - b).abs() < 2.0 / 65535.0, "{degrees} {factor}: {a} {b}");
+                }
             }
         }
+        let nothing = Rect {
+            top: 5,
+            bottom: 5,
+            left: 0,
+            right: 9,
+        };
+        assert!(kept.straightened_part(0.0, nothing, 1).data.is_empty());
     }
 
     fn numbered(w: usize, h: usize) -> Rgb32 {
