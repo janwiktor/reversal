@@ -250,7 +250,7 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 }
 
 /* Top bar, lined up with the columns below it. */
-#bar { grid-area: bar; display: grid; grid-template: calc(var(--bar-h) - 1px) / var(--left) auto minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
+#bar { grid-area: bar; display: grid; grid-template: calc(var(--bar-h) - 1px) / var(--left) auto auto minmax(0, 1fr) var(--right); align-items: center; background: var(--bar); border-bottom: 1px solid var(--seam); }
 /* The open frame's name, which opens and closes the frames list. */
 #where { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 6px; }
 #frames-toggle, #choose-folder { min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; height: calc(var(--control-h) + 2px); background: none; border: 0; border-radius: 4px; text-align: left; opacity: 1; }
@@ -259,6 +259,9 @@ input[type="range"]:focus-visible { outline: none; --thumb-ring: var(--focus); -
 #frames-toggle[aria-expanded="true"] svg { color: var(--ink); }
 #folder, #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 #frame-tools { display: flex; align-items: center; gap: 4px; padding: 0 0 0 10px; }
+/* Held, the button shows the negative: a hold mustn't scroll, select or open a menu. */
+#view-tools { display: flex; align-items: center; padding: 0 0 0 4px; }
+#negative { touch-action: none; -webkit-touch-callout: none; }
 #crop-open { display: none; }
 #crop-tools { display: flex; align-items: center; gap: 4px; padding: 0 10px 0 4px; min-width: 0; }
 #crop-tools .sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
@@ -492,9 +495,10 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
    their names. The bar moves the image down rather than covering it, so the crop frame's
    handles stay in reach while it's open. */
 @media (min-width: 600px) and (max-width: 1180px), (min-width: 600px) and (orientation: portrait) {
-  #bar { grid-template: "where tools save" calc(var(--bar-h) - 1px) "crop crop crop" auto / minmax(0, 1fr) auto auto; }
+  #bar { grid-template: "where tools view save" calc(var(--bar-h) - 1px) "crop crop crop crop" auto / minmax(0, 1fr) auto auto auto; }
   #where { grid-area: where; }
-  #frame-tools { grid-area: tools; padding: 0 4px; }
+  #frame-tools { grid-area: tools; padding: 0 0 0 4px; }
+  #view-tools { grid-area: view; padding: 0 4px; }
   #save { grid-area: save; }
   #crop-open { display: inline-grid; }
   #crop-tools { grid-area: crop; display: none; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--line); }
@@ -504,7 +508,7 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   /* The crop bar slides down from behind the top bar's row, which covers it while it moves; the
      script eases its row open or shut, and it stays shown until shut. */
   #where { margin: 0; padding: 0 6px; }
-  #where, #frame-tools, #save { align-self: stretch; position: relative; z-index: 1; background: var(--bar); }
+  #where, #frame-tools, #view-tools, #save { align-self: stretch; position: relative; z-index: 1; background: var(--bar); }
   #crop-tools { align-self: end; }
   #bar[data-moving] { overflow: hidden; }
   #bar[data-moving] #crop-tools { display: flex; }
@@ -582,10 +586,11 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   :root { --stage-edge: 12px; }
   /* The bar at the bottom is the page's foot here. */
   #roll, #dock { padding-bottom: 0; }
-  body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where save" var(--bar-h) "stage stage" minmax(0, 1fr) "panel panel" auto "crop crop" auto "modes modes" auto / minmax(0, 1fr) auto; }
-  body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto; }
+  body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where view save" var(--bar-h) "stage stage stage" minmax(0, 1fr) "panel panel panel" auto "crop crop crop" auto "modes modes modes" auto / minmax(0, 1fr) auto auto; }
+  body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto auto; }
   #bar { display: contents; }
   #where { grid-area: where; margin: 0; padding: 0 6px; background: var(--bar); border-bottom: 1px solid var(--seam); }
+  #view-tools { grid-area: view; padding: 0; background: var(--bar); border-bottom: 1px solid var(--seam); }
   #save { grid-area: save; background: var(--bar); border-bottom: 1px solid var(--seam); }
   #frame-tools { grid-area: panel; }
   #crop-tools { grid-area: crop; }

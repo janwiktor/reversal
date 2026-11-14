@@ -1157,23 +1157,62 @@ pub fn convert_owned(scan: Rgb32, s: &Settings) -> Rgb32 {
 
 fn convert_straight(straight: Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
     let a = &s.adjust;
-    let crop = crop_override.or(a.crop).unwrap_or(NRect::FULL);
-    let pixels = crop.to_pixels(straight.width, straight.height);
-    let mut img = straight.into_cropped(pixels);
     let gain = a.saturation_gain();
     let (gains, weights) = (
         gains_ev(s.estimate.film, a),
         silver_weights(s.estimate.base_rgb),
     );
+    framed(straight, s, crop_override, |px| {
+        saturate(positive_with(px, &s.estimate, gains, weights), gain)
+    })
+}
+
+/// A straightened scan as its settings frame it: cropped, each pixel through `develop`, then
+/// mirrored and rotated.
+fn framed(
+    straight: Rgb32,
+    s: &Settings,
+    crop_override: Option<NRect>,
+    develop: impl Fn([f32; 3]) -> [f32; 3] + Sync,
+) -> Rgb32 {
+    let a = &s.adjust;
+    let crop = crop_override.or(a.crop).unwrap_or(NRect::FULL);
+    let pixels = crop.to_pixels(straight.width, straight.height);
+    let mut img = straight.into_cropped(pixels);
     for_each_part(&mut img.data, 3, |_, part| {
         for px in part.as_chunks_mut::<3>().0 {
-            *px = saturate(positive_with(*px, &s.estimate, gains, weights), gain);
+            *px = develop(*px);
         }
     });
     if a.flip_h {
         img.flip_h_in_place();
     }
     img.into_rotated_cw(a.rotate)
+}
+
+/// How bright clear film shows in the negative view, of display white, which leaves light
+/// through holes room above it.
+const NEGATIVE_BASE_LEVEL: f32 = 0.8;
+/// The color clear color negative film shows in, as linear display RGB: its orange mask, from
+/// typical base densities of about 0.4 more in green and 0.65 more in blue than in red.
+const NEGATIVE_MASK_RGB: [f32; 3] = [1.0, 0.4, 0.22];
+
+/// The negative itself, framed as [`convert_with`] frames the positive, for looking at the scan:
+/// linear display RGB with white at 1. The scan's channels are in the camera's own balance under
+/// the scanning light, so each is taken relative to the film base, which then shows as on a light
+/// table: neutral for black and white film, and in the orange of its mask for color film. That
+/// color stands for the mask and isn't measured.
+pub fn negative_with(scan: &Rgb32, s: &Settings, crop_override: Option<NRect>) -> Rgb32 {
+    let base = s.estimate.base_rgb;
+    let tint = match s.estimate.film {
+        Film::Color => NEGATIVE_MASK_RGB,
+        Film::Bw => [1.0; 3],
+    };
+    let scale = [0, 1, 2].map(|c| NEGATIVE_BASE_LEVEL * tint[c] / base[c].max(1e-4));
+    let straight = scan.straighten(s.adjust.straighten);
+    framed(straight, s, crop_override, |px| {
+        [0, 1, 2].map(|c| px[c] * scale[c])
+    })
 }
 
 pub fn convert(scan: &Rgb32, s: &Settings) -> Rgb32 {
@@ -1834,6 +1873,39 @@ mod tests {
             }
         }
         assert!(!detect_base(&with_grain(scan, 0.04)).found);
+    }
+
+    #[test]
+    fn the_negative_view_shows_clear_film_bright_and_frames_it_like_the_positive() {
+        let scan = synthetic_scan();
+        let mut s = Settings::new(estimate(&scan, &Hints::default()), Adjust::default());
+        s.adjust.rotate = 1;
+        s.adjust.flip_h = true;
+        let (positive, negative) = (convert(&scan, &s), negative_with(&scan, &s, None));
+        assert_eq!(
+            (negative.width, negative.height),
+            (positive.width, positive.height)
+        );
+        // Clear film shows at one level, in the mask's color on color film and gray on black
+        // and white, and denser film is darker in every channel.
+        let clear = |film: Film| {
+            let mut s = s.clone();
+            s.estimate.film = film;
+            let base = Rgb32 {
+                width: 1,
+                height: 1,
+                data: s.estimate.base_rgb.to_vec(),
+            };
+            negative_with(&base, &s, None).get(0, 0)
+        };
+        let (color, bw) = (clear(Film::Color), clear(Film::Bw));
+        for c in 0..3 {
+            assert!((bw[c] - NEGATIVE_BASE_LEVEL).abs() < 1e-5, "{bw:?}");
+            assert!((color[c] - NEGATIVE_BASE_LEVEL * NEGATIVE_MASK_RGB[c]).abs() < 1e-5);
+        }
+        let brightest = negative.pixels().map(|p| p[0]).fold(0.0, f32::max);
+        let darkest = negative.pixels().map(|p| p[0]).fold(f32::MAX, f32::min);
+        assert!(darkest < brightest * 0.5, "{darkest} {brightest}");
     }
 
     #[test]

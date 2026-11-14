@@ -242,6 +242,17 @@ pub fn preview_jpeg(positive: &Rgb32, profile: &dng::Profile, quality: u8) -> Ve
     jpeg(&px, positive.width, positive.height, quality)
 }
 
+/// JPEG of an image in linear display RGB with white at 1, such as the negative view.
+pub fn display_jpeg(img: &Rgb32, quality: u8) -> Vec<u8> {
+    let mut px = vec![0u8; img.data.len()];
+    for_each_part(&mut px, 3, |start, part| {
+        for (out, &v) in part.iter_mut().zip(&img.data[start..]) {
+            *out = (srgb_encode(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8;
+        }
+    });
+    jpeg(&px, img.width, img.height, quality)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
