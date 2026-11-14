@@ -89,6 +89,12 @@ const CROSSTALK: [[f32; 2]; 3] = [[1.1532, 0.3195], [0.0973, 1.3271], [-0.0460, 
 /// grainy film between the means of its quarters.
 const BASE_CELLS_LONG_SIDE: usize = 150;
 const BASE_CELL_SPREAD: f32 = 0.05;
+/// On grainy film the means of a cell's quarters may also differ by this many times the grain
+/// left in such a mean: four means of pure noise span about twice that.
+const BASE_GRAIN_RANGE: f32 = 6.0;
+/// The most grain a pixel of clear film is taken to have, as a share of its level: beyond it
+/// the variation is picture texture. The coarsest film scanned so far has 0.06.
+const BASE_MAX_GRAIN: f32 = 0.08;
 /// How much brighter than the next even cells a small bright patch must be, as density, to be
 /// taken for light through a hole and not film: clear film is at least this dense.
 const BASE_LIGHT_DENSITY: f32 = 0.1;
@@ -580,6 +586,10 @@ fn largest_rect(cells: &[bool], cols: usize, rows: usize) -> Option<(usize, usiz
 /// averages out over a quarter, where an edge or a marking doesn't. It comes second, asks for
 /// a longer patch and doesn't look below the brightest cells, because it also passes smooth
 /// picture and fine texture, which the first leaves out.
+///
+/// On the coarsest film even the quarters differ. So a third search, when that one finds
+/// nothing either, lets them differ by what the cell's own grain explains, measured between
+/// neighboring pixels, and takes in the odd cell that still falls outside.
 pub fn detect_base(small: &Rgb32) -> BaseReading {
     let (w, h) = (small.width, small.height);
     let side = (w.max(h) / BASE_CELLS_LONG_SIDE).max(2);
@@ -587,8 +597,10 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
     let near = near_clipped(small);
     let mut even = vec![false; cols * rows];
     let mut even_quarters = vec![false; cols * rows];
+    let mut even_grain = vec![false; cols * rows];
     let mut level = vec![0.0f32; cols * rows];
     let mut values: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::with_capacity(side * side));
+    let mut steps: Vec<f32> = Vec::with_capacity(side * side);
     let half = side / 2;
     for row in 0..rows {
         for col in 0..cols {
@@ -617,19 +629,32 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
             if touches_clipped {
                 continue;
             }
-            let (mut sum, mut flat, mut flat_quarters) = (0.0, true, true);
+            let (mut sum, mut flat, mut flat_quarters, mut flat_grain) = (0.0, true, true, true);
             for (c, v) in values.iter_mut().enumerate() {
+                // Grain as the noise of one pixel, from the differences between neighbors along
+                // each line of the cell: their median leaves out the few across an edge, and
+                // for noise it is 0.954 of the standard deviation.
+                steps.clear();
+                steps.extend(
+                    v.chunks_exact(side)
+                        .flat_map(|line| line.windows(2).map(|pair| (pair[1] - pair[0]).abs())),
+                );
                 let mid = median(v).max(1e-4);
+                let grain = (median(&mut steps) / 0.954).min(BASE_MAX_GRAIN * mid);
                 flat &= percentile(v, 90.0) - percentile(v, 10.0) < BASE_CELL_SPREAD * mid;
                 let means = [0, 1, 2, 3].map(|q| quarters[q][c] / counts[q] as f32);
                 let (low, high) = means
                     .iter()
                     .fold((f32::MAX, f32::MIN), |(l, h), &m| (l.min(m), h.max(m)));
+                // The mean of a quarter's pixels carries its share of the grain.
+                let from_grain = BASE_GRAIN_RANGE * grain / (counts[0] as f32).sqrt();
                 flat_quarters &= high - low < BASE_CELL_SPREAD * mid;
+                flat_grain &= high - low < (BASE_CELL_SPREAD * mid).max(from_grain);
                 sum += mid;
             }
             even[cell] = flat;
             even_quarters[cell] = flat_quarters;
+            even_grain[cell] = flat_grain;
             level[cell] = sum / 3.0;
         }
     }
@@ -644,7 +669,7 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
     };
     // The largest patch of clear film among `cells`, and whether it's large enough to trust,
     // with the level the cells had to reach.
-    let clear_patch = |cells: &[bool], edge_share: f32| {
+    let clear_patch = |cells: &[bool], edge_share: f32, bridge: bool| {
         let mut levels: Vec<f32> = (0..cols * rows)
             .filter(|&i| cells[i])
             .map(|i| level[i])
@@ -653,9 +678,20 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
             return None;
         }
         let bright = percentile(&mut levels, BASE_LEVEL_PERCENTILE) * BASE_LEVEL_RANGE;
-        let clear: Vec<bool> = (0..cols * rows)
+        let mut clear: Vec<bool> = (0..cols * rows)
             .map(|i| cells[i] && level[i] >= bright)
             .collect();
+        if bridge {
+            // Grain leaves the odd cell of clear film uneven. One at the level of clear film,
+            // between two clear cells, is part of the patch: the reading is a median.
+            let even = clear.clone();
+            for i in (0..cols * rows).filter(|&i| !even[i] && level[i] >= bright) {
+                let (row, col) = (i / cols, i % cols);
+                let across = col > 0 && col + 1 < cols && even[i - 1] && even[i + 1];
+                let along = row > 0 && row + 1 < rows && even[i - cols] && even[i + cols];
+                clear[i] = across || along;
+            }
+        }
         let at_edge: Vec<bool> = (0..cols * rows).map(|i| clear[i] && in_band(i)).collect();
         let edge = largest_rect(&at_edge, cols, rows).filter(|&r| long_enough(r, edge_share));
         let patch = match edge {
@@ -668,8 +704,8 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
         Some((patch, bright))
     };
     // Clear film among `cells`, looking below light through holes when the brightest is no film.
-    let search = |cells: &[bool], edge_share: f32, past_light: bool| {
-        let (patch, bright) = clear_patch(cells, edge_share)?;
+    let search = |cells: &[bool], edge_share: f32, past_light: bool, bridge: bool| {
+        let (patch, bright) = clear_patch(cells, edge_share, bridge)?;
         if patch.1 || !past_light {
             return Some(patch);
         }
@@ -678,7 +714,7 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
         let film: Vec<bool> = (0..cols * rows)
             .map(|i| cells[i] && level[i] < bright)
             .collect();
-        let Some((under @ (_, true), next)) = clear_patch(&film, edge_share) else {
+        let Some((under @ (_, true), next)) = clear_patch(&film, edge_share, bridge) else {
             return Some(patch);
         };
         // A hole is punched in clear film, so the even cells around the bright patches are at
@@ -698,22 +734,30 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
             Some(patch)
         }
     };
-    let by_pixel = search(&even, BASE_MIN_EDGE_SHARE, true);
-    let (rect, found) = match by_pixel {
-        Some(patch @ (_, true)) => patch,
-        _ => match (
-            search(&even_quarters, BASE_MIN_GRAINY_EDGE_SHARE, false),
-            by_pixel,
-        ) {
-            (Some(patch @ (_, true)), _) | (_, Some(patch)) | (Some(patch), None) => patch,
-            (None, None) => {
-                return BaseReading {
-                    rgb: channel_medians(small),
-                    area: NRect::FULL,
-                    found: false,
-                }
+    // Each search is looser than the one before, so it runs only when that one found nothing,
+    // and the first patch any of them came up with stands in when none can be trusted.
+    let searches = [
+        (&even, BASE_MIN_EDGE_SHARE, true, false),
+        (&even_quarters, BASE_MIN_GRAINY_EDGE_SHARE, false, false),
+        (&even_grain, BASE_MIN_GRAINY_EDGE_SHARE, false, true),
+    ];
+    let mut guess = None;
+    let mut trusted = None;
+    for (cells, edge_share, past_light, bridge) in searches {
+        match search(cells, edge_share, past_light, bridge) {
+            Some(patch @ (_, true)) => {
+                trusted = Some(patch);
+                break;
             }
-        },
+            patch => guess = guess.or(patch),
+        }
+    }
+    let Some((rect, found)) = trusted.or(guess) else {
+        return BaseReading {
+            rgb: channel_medians(small),
+            area: NRect::FULL,
+            found: false,
+        };
     };
     let pixels = crate::image::Rect {
         left: rect.0 * side,
@@ -1927,6 +1971,23 @@ mod tests {
     fn the_base_is_found_on_grainy_film() {
         let (scan, flaws) = film_strip();
         let scan = with_grain(scan, 0.04);
+        let read = detect_base(&scan);
+        assert!(read.found);
+        for (got, want) in read.rgb.iter().zip(BASE) {
+            assert!((got - want).abs() < 0.01, "{:?}", read.rgb);
+        }
+        let a = read.area;
+        for f in flaws {
+            let apart = a.x1 <= f.x0 || f.x1 <= a.x0 || a.y1 <= f.y0 || f.y1 <= a.y0;
+            assert!(apart, "{a:?} overlaps {f:?}");
+        }
+    }
+
+    #[test]
+    fn the_base_is_found_on_film_too_grainy_for_even_quarters() {
+        // Grain that leaves many cells' quarters uneven, so no long patch of even cells forms.
+        let (scan, flaws) = film_strip();
+        let scan = with_grain(scan, 0.11);
         let read = detect_base(&scan);
         assert!(read.found);
         for (got, want) in read.rgb.iter().zip(BASE) {
