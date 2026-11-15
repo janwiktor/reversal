@@ -28,7 +28,7 @@ use crate::render::{Look, Tone};
 pub const GAMMA_REF: f32 = 0.7;
 /// Version of the conversion model. Bump when the inversion, `BASE_SATURATION`, the
 /// DNG's stored scale or the tone curve change, since old settings then render differently.
-pub const MODEL_VERSION: u32 = 3;
+pub const MODEL_VERSION: u32 = 4;
 /// Built-in saturation (linear, around Rec.2020 luminance). Matched the chroma of
 /// reference scans (22 frames, 6 rolls).
 pub const BASE_SATURATION: f32 = 1.25;
@@ -84,10 +84,14 @@ const GRAY_BIN_WEIGHT: f32 = 0.25;
 /// Neutrals have zero differences, so they pass unchanged.
 const CROSSTALK: [[f32; 2]; 3] = [[1.1532, 0.3195], [0.0973, 1.3271], [-0.0460, -0.1033]];
 
-/// Film base search: cells along the scan's long side, and how much a cell may vary (10th to
-/// 90th percentile, as a share of its median) and still count as even.
+/// Film base search: cells along the scan's long side, and how much a cell may vary and still
+/// count as even, as a share of its median: between its pixels' 10th and 90th percentiles, or on
+/// grainy film between the means of its quarters.
 const BASE_CELLS_LONG_SIDE: usize = 150;
 const BASE_CELL_SPREAD: f32 = 0.05;
+/// How much brighter than the next even cells a small bright patch must be, as density, to be
+/// taken for light through a hole and not film: clear film is at least this dense.
+const BASE_LIGHT_DENSITY: f32 = 0.1;
 /// Clear film lies within this share of a high percentile of the even cells' levels.
 const BASE_LEVEL_PERCENTILE: f32 = 98.0;
 const BASE_LEVEL_RANGE: f32 = 0.93;
@@ -96,6 +100,9 @@ const BASE_LEVEL_RANGE: f32 = 0.93;
 const BASE_EDGE_BAND: f32 = 0.15;
 const BASE_MIN_EDGE_SHARE: f32 = 0.08;
 const BASE_MIN_GAP_SHARE: f32 = 0.5;
+/// The same at the film's edge when cells are judged by their quarters, which smooth picture
+/// passes too: a patch of that is short, and a film edge runs along the frame.
+const BASE_MIN_GRAINY_EDGE_SHARE: f32 = 0.25;
 /// A frame's base this far from its roll's, as a share in any channel, deserves a look: frames
 /// of a roll scanned alike stayed within 2%, unless something was misread.
 const ROLL_BASE_TOLERANCE: f32 = 0.06;
@@ -554,85 +561,137 @@ fn largest_rect(cells: &[bool], cols: usize, rows: usize) -> Option<(usize, usiz
     best
 }
 
-/// Film base: clear film is the brightest thing on a negative, and it is even. So split the
+/// Film base: clear film is the brightest film on a negative, and it is even. So split the
 /// scan into small cells, keep the even ones near the brightest level, and read the largest
 /// rectangle of them. Holes, film markings and picture detail break a cell's evenness, and
 /// the holder and exposed film are darker. Film edges come first, since an even bright patch
-/// inside the picture may be a deep shadow; a strip across the scan can be the gap between
-/// two frames.
+/// inside the picture may be a deep shadow; a strip across the scan can be the gap between two
+/// frames.
+///
+/// Light through a sprocket hole is even too, and brighter than film where the scan didn't clip
+/// it. Such patches are too small to be a film edge, so when the brightest cells form none, and
+/// stand clear of the rest by more than film's own density, the search goes on below them.
+///
+/// Coarse grain makes clear film uneven pixel by pixel. So when no cell-by-pixel search finds
+/// clear film, a second one takes a cell as even when its quarters have the same mean: grain
+/// averages out over a quarter, where an edge or a marking doesn't. It comes second, and asks
+/// for a longer patch, because it also passes smooth picture, which the first leaves out.
 pub fn detect_base(small: &Rgb32) -> BaseReading {
     let (w, h) = (small.width, small.height);
     let side = (w.max(h) / BASE_CELLS_LONG_SIDE).max(2);
     let (cols, rows) = (w / side, h / side);
     let near = near_clipped(small);
     let mut even = vec![false; cols * rows];
+    let mut even_quarters = vec![false; cols * rows];
     let mut level = vec![0.0f32; cols * rows];
     let mut values: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::with_capacity(side * side));
+    let half = side / 2;
     for row in 0..rows {
         for col in 0..cols {
             let cell = row * cols + col;
             for v in &mut values {
                 v.clear();
             }
+            // Sums of each channel over the cell's four quarters, and their pixel counts.
+            let mut quarters = [[0.0f32; 3]; 4];
+            let mut counts = [0usize; 4];
             let mut touches_clipped = false;
             for y in row * side..(row + 1) * side {
                 for x in col * side..(col + 1) * side {
                     let at = y * w + x;
                     touches_clipped |= near[at];
+                    let quarter = usize::from(y - row * side >= half) * 2
+                        + usize::from(x - col * side >= half);
+                    counts[quarter] += 1;
                     for (c, v) in values.iter_mut().enumerate() {
-                        v.push(small.data[at * 3 + c]);
+                        let value = small.data[at * 3 + c];
+                        v.push(value);
+                        quarters[quarter][c] += value;
                     }
                 }
             }
             if touches_clipped {
                 continue;
             }
-            let (mut sum, mut flat) = (0.0, true);
-            for v in &mut values {
+            let (mut sum, mut flat, mut flat_quarters) = (0.0, true, true);
+            for (c, v) in values.iter_mut().enumerate() {
                 let mid = median(v).max(1e-4);
                 flat &= percentile(v, 90.0) - percentile(v, 10.0) < BASE_CELL_SPREAD * mid;
+                let means = [0, 1, 2, 3].map(|q| quarters[q][c] / counts[q] as f32);
+                let (low, high) = means
+                    .iter()
+                    .fold((f32::MAX, f32::MIN), |(l, h), &m| (l.min(m), h.max(m)));
+                flat_quarters &= high - low < BASE_CELL_SPREAD * mid;
                 sum += mid;
             }
             even[cell] = flat;
+            even_quarters[cell] = flat_quarters;
             level[cell] = sum / 3.0;
         }
     }
-    let mut levels: Vec<f32> = (0..cols * rows)
-        .filter(|&i| even[i])
-        .map(|i| level[i])
-        .collect();
-    if levels.is_empty() {
-        return BaseReading {
-            rgb: channel_medians(small),
-            area: NRect::FULL,
-            found: false,
-        };
-    }
-    let bright = percentile(&mut levels, BASE_LEVEL_PERCENTILE) * BASE_LEVEL_RANGE;
-    let clear: Vec<bool> = (0..cols * rows)
-        .map(|i| even[i] && level[i] >= bright)
-        .collect();
     let band_cols = (cols as f32 * BASE_EDGE_BAND).ceil() as usize;
     let band_rows = (rows as f32 * BASE_EDGE_BAND).ceil() as usize;
-    let at_edge: Vec<bool> = (0..cols * rows)
-        .map(|i| {
-            let (row, col) = (i / cols, i % cols);
-            clear[i]
-                && (row < band_rows
-                    || row + band_rows >= rows
-                    || col < band_cols
-                    || col + band_cols >= cols)
-        })
-        .collect();
+    let in_band = |i: usize| {
+        let (row, col) = (i / cols, i % cols);
+        row < band_rows || row + band_rows >= rows || col < band_cols || col + band_cols >= cols
+    };
     let long_enough = |(l, t, r, b): (usize, usize, usize, usize), share: f32| {
         (r - l) as f32 >= share * cols as f32 || (b - t) as f32 >= share * rows as f32
     };
-    let edge = largest_rect(&at_edge, cols, rows).filter(|&r| long_enough(r, BASE_MIN_EDGE_SHARE));
-    let across = largest_rect(&clear, cols, rows);
-    let (rect, found) = match (edge, across) {
-        (Some(rect), _) => (rect, true),
-        (None, Some(rect)) => (rect, long_enough(rect, BASE_MIN_GAP_SHARE)),
-        (None, None) => unreachable!("the brightest even cell is always clear"),
+    // The largest patch of clear film among `cells`, and whether it's large enough to trust,
+    // with the level the cells had to reach.
+    let clear_patch = |cells: &[bool], edge_share: f32| {
+        let mut levels: Vec<f32> = (0..cols * rows)
+            .filter(|&i| cells[i])
+            .map(|i| level[i])
+            .collect();
+        if levels.is_empty() {
+            return None;
+        }
+        let bright = percentile(&mut levels, BASE_LEVEL_PERCENTILE) * BASE_LEVEL_RANGE;
+        let clear: Vec<bool> = (0..cols * rows)
+            .map(|i| cells[i] && level[i] >= bright)
+            .collect();
+        let at_edge: Vec<bool> = (0..cols * rows).map(|i| clear[i] && in_band(i)).collect();
+        let edge = largest_rect(&at_edge, cols, rows).filter(|&r| long_enough(r, edge_share));
+        let patch = match edge {
+            Some(rect) => (rect, true),
+            None => {
+                let rect = largest_rect(&clear, cols, rows)?;
+                (rect, long_enough(rect, BASE_MIN_GAP_SHARE))
+            }
+        };
+        Some((patch, bright))
+    };
+    // Clear film among `cells`, looking below light through holes when the brightest is no film.
+    let search = |cells: &[bool], edge_share: f32| {
+        let (patch, bright) = clear_patch(cells, edge_share)?;
+        if patch.1 {
+            return Some(patch);
+        }
+        // Density is a ratio of levels, so this far below the brightest cells is a level.
+        let below = bright * 10f32.powf(-BASE_LIGHT_DENSITY);
+        let film: Vec<bool> = (0..cols * rows)
+            .map(|i| cells[i] && level[i] < bright)
+            .collect();
+        match clear_patch(&film, edge_share) {
+            Some((under @ (_, true), next)) if next / BASE_LEVEL_RANGE < below => Some(under),
+            _ => Some(patch),
+        }
+    };
+    let by_pixel = search(&even, BASE_MIN_EDGE_SHARE);
+    let (rect, found) = match by_pixel {
+        Some(patch @ (_, true)) => patch,
+        _ => match (search(&even_quarters, BASE_MIN_GRAINY_EDGE_SHARE), by_pixel) {
+            (Some(patch @ (_, true)), _) | (_, Some(patch)) | (Some(patch), None) => patch,
+            (None, None) => {
+                return BaseReading {
+                    rgb: channel_medians(small),
+                    area: NRect::FULL,
+                    found: false,
+                }
+            }
+        },
     };
     let pixels = crate::image::Rect {
         left: rect.0 * side,
@@ -1685,6 +1744,96 @@ mod tests {
             }
         }
         assert!(!detect_base(&scan).found);
+    }
+
+    /// A value in −1…1 that differs from pixel to pixel and channel to channel, like grain.
+    fn grain(x: usize, y: usize, c: usize) -> f32 {
+        let mut v = (x as u32)
+            .wrapping_mul(73_856_093)
+            .wrapping_add((y as u32).wrapping_mul(19_349_663))
+            .wrapping_add((c as u32).wrapping_mul(83_492_791));
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x2c1b_3c6d);
+        v ^= v >> 12;
+        (v % 2001) as f32 / 1000.0 - 1.0
+    }
+
+    /// Makes every pixel vary by up to `share` of its value.
+    fn with_grain(mut scan: Rgb32, share: f32) -> Rgb32 {
+        let w = scan.width;
+        for (i, px) in scan.data.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+            for (c, v) in px.iter_mut().enumerate() {
+                *v *= 1.0 + share * grain(i % w, i / w, c);
+            }
+        }
+        scan
+    }
+
+    #[test]
+    fn light_through_holes_that_did_not_clip_is_not_the_base() {
+        let (mut scan, _) = film_strip();
+        // The same holes on a darker scan: brighter than the film, and as even.
+        let light = BASE.map(|v| v * 2.0);
+        for px in scan.data.as_chunks_mut::<3>().0 {
+            if px[0] >= 1.0 {
+                *px = light;
+            }
+        }
+        let read = detect_base(&scan);
+        assert!(read.found);
+        for (got, want) in read.rgb.iter().zip(BASE) {
+            assert!((got - want).abs() < 0.005, "{:?}", read.rgb);
+        }
+    }
+
+    #[test]
+    fn a_bright_patch_barely_above_the_rest_is_not_taken_for_a_hole() {
+        // Even film with short patches a little clearer: nothing says the rest is film base.
+        let (w, h) = (400, 300);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let d = if x % 40 < 28 && y < 20 { 0.0 } else { 0.05 };
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel([d; 3]));
+            }
+        }
+        assert!(!detect_base(&scan).found);
+    }
+
+    #[test]
+    fn the_base_is_found_on_grainy_film() {
+        let (scan, flaws) = film_strip();
+        let scan = with_grain(scan, 0.04);
+        let read = detect_base(&scan);
+        assert!(read.found);
+        for (got, want) in read.rgb.iter().zip(BASE) {
+            assert!((got - want).abs() < 0.01, "{:?}", read.rgb);
+        }
+        let a = read.area;
+        for f in flaws {
+            let apart = a.x1 <= f.x0 || f.x1 <= a.x0 || a.y1 <= f.y0 || f.y1 <= a.y0;
+            assert!(apart, "{a:?} overlaps {f:?}");
+        }
+    }
+
+    #[test]
+    fn a_short_smooth_patch_of_grainy_picture_is_not_the_base() {
+        let (w, h) = (400, 300);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                // Picture with detail everywhere, but for a smooth shadow at the left edge.
+                let d = if x < 40 && (100..145).contains(&y) {
+                    0.0
+                } else {
+                    0.2 + ((x * 7 + y * 13) % 11) as f32 * 0.08
+                };
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel([d; 3]));
+            }
+        }
+        assert!(!detect_base(&with_grain(scan, 0.04)).found);
     }
 
     #[test]
