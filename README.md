@@ -48,7 +48,7 @@ Your source files are never changed. Each DNG stores its conversion settings in 
 
 ## Install
 
-The Mac app is on the [Releases](https://github.com/janwiktor/reversal/releases) page, for Apple Silicon and macOS 13 or later. It isn't notarized, so the disk image includes the steps to open it the first time.
+The Mac app is on the [Releases](https://github.com/janwiktor/reversal/releases) page, for Apple Silicon and macOS 13 or later. It is signed and notarized by Apple; the disk image of an older release that isn't explains how to open it the first time.
 
 Everything else builds from source. On macOS with Homebrew:
 

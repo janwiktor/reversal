@@ -37,6 +37,7 @@ jobs:
     name: Mac app
     needs: check
     uses: ./.github/workflows/mac-app.yml
+    secrets: inherit
 
   draft:
     name: Draft the release
