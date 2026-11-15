@@ -518,6 +518,8 @@ function showFrames(on) {
   if (!panelUnderImage.matches) framesColumn = on;
   showFolds();
 }
+// What the panel under the image is showing: on a phone, Crop has a row of frame tools over it.
+const panelParts = () => (framesShown() ? [$("roll")] : phoneLayout.matches && document.body.dataset.mode === "crop" ? [$("frame-tools"), $("crop-tools")] : [$("dock")]);
 // What the frames button, the panel's handle and a phone's bar of tools say is shown. Under the
 // image the list is in the panel, so it's shown only while the panel is, and the handle is the
 // list's while the list is what the panel shows.
@@ -527,6 +529,9 @@ function showFolds() {
   expand($("fold-panel"), dockShown());
   $("fold-panel").setAttribute("aria-controls", list ? "roll" : "dock");
   $("fold-panel").setAttribute("aria-label", list ? "Frames panel" : "Tools panel");
+  // The frame tools over a phone's Crop panel keep their height, out of what the panel may have.
+  const [fixed, scrolls] = panelParts();
+  if (dockShown()) document.body.style.setProperty("--panel-fixed", `${scrolls ? fixed.getBoundingClientRect().height : 0}px`);
   pressModes();
 }
 // On a touch screen the panel under the image, whichever it shows, can be put away, to leave its
@@ -563,13 +568,12 @@ $("frames-toggle").addEventListener("click", toggleFrames);
 // shows next; a panel that needs less is as short as before. Dragged lower than that, the
 // panel goes away, and comes back when the finger does. A tap puts it away or brings it back.
 const PANEL_LEAST = 88;  // px: two rows of tools, less than which isn't worth keeping
-// What the panel under the image is showing: on a phone, Crop has a row of frame tools over it.
-const panelParts = () => (framesShown() ? [$("roll")] : phoneLayout.matches && document.body.dataset.mode === "crop" ? [$("frame-tools"), $("crop-tools")] : [$("dock")]);
 const panelHeight = () => panelParts().reduce((sum, el) => sum + el.getBoundingClientRect().height, 0);
 function limitPanel(height) {
   if (height == null) document.body.style.removeProperty("--panel-user");
   else document.body.style.setProperty("--panel-user", `${height}px`);
 }
+let panelDragged = -Infinity;  // when a drag last ended, since a click can follow it
 let panelDrag = null;  // { pointer, y, from: the panel's height then, full: its height by itself, limit: the one set then, moved }
 $("fold-panel").addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || panelDrag) return;
@@ -578,8 +582,6 @@ $("fold-panel").addEventListener("pointerdown", (e) => {
   // Its height by itself is measured open and with no limit, then put back before anything shows.
   document.body.dataset.dock = "open";
   limitPanel(null);
-  // The frame tools over a phone's Crop panel keep their height.
-  document.body.style.setProperty("--panel-fixed", `${panelParts().length > 1 ? panelParts()[0].getBoundingClientRect().height : 0}px`);
   const full = panelHeight();
   document.body.dataset.dock = shown ? "open" : "closed";
   if (limit) limitPanel(parseFloat(limit));
@@ -591,17 +593,23 @@ $("fold-panel").addEventListener("pointermove", (e) => {
   const height = panelDrag.from + panelDrag.y - e.clientY;
   if (!panelDrag.moved && Math.abs(e.clientY - panelDrag.y) < TAP_SLIP) return;
   panelDrag.moved = true;
-  const show = height >= PANEL_LEAST;
+  // A panel shorter than that by itself goes away only from under its own height.
+  const show = height >= Math.min(PANEL_LEAST, panelDrag.full);
   if (show !== dockShown()) showDock(show);
   // Put away, it keeps the height it had, to come back to.
-  limitPanel(!show ? panelDrag.limit : height < panelDrag.full - 1 ? height : null);
+  // Dragged past its own height, a panel too short to have been limited keeps the limit set.
+  limitPanel(!show ? panelDrag.limit : height < panelDrag.full - 1 ? height : panelDrag.limit > panelDrag.full ? panelDrag.limit : null);
 });
 for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
-  $("fold-panel").addEventListener(end, (e) => { if (panelDrag?.pointer === e.pointerId) setTimeout(() => { panelDrag = null; }); });
+  $("fold-panel").addEventListener(end, (e) => {
+    if (panelDrag?.pointer !== e.pointerId) return;
+    if (panelDrag.moved) panelDragged = e.timeStamp;
+    panelDrag = null;
+  });
 }
-// A drag's end is no tap.
-$("fold-panel").addEventListener("click", () => {
-  if (panelDrag?.moved) return;
+// A drag's end is no tap, whenever the click for it comes.
+$("fold-panel").addEventListener("click", (e) => {
+  if (e.timeStamp - panelDragged < TAP_MS) return;
   slidePanels(() => showDock(!dockShown()));
 });
 panelUnderImage.addEventListener("change", () => {

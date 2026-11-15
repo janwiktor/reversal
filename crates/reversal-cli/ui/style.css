@@ -548,6 +548,9 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
     #fold-panel[aria-expanded="false"] { height: 16px; margin-bottom: 4px; border-radius: 8px; background: var(--veil); box-shadow: var(--veil-edge); color: var(--ink); transform: translateY(calc(-1 * var(--stage-foot))); }
     #fold-panel[aria-expanded="false"]::after { top: -24px; bottom: -4px; }
     body:is([data-tool="crop"], [data-tool="area"], [data-tool="base"]) #fold-panel { display: none; }
+    /* Messages keep above the dots at the foot of the image, and the folder's name clear of them. */
+    body[data-dock="closed"] #messages { bottom: calc(var(--float-gap) + var(--stage-foot) + 24px); }
+    #choose-folder { width: auto; max-width: calc(50% - 32px); }
   }
   /* While the panel slides, the script moves the edge between it and the image; rows the panel
      hasn't reached yet take its color, so that edge is the only one that moves. */
