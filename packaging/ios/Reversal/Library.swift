@@ -116,6 +116,13 @@ enum Library {
 
     static func isInInbox(_ url: URL) -> Bool { isInside(url, inbox) }
 
+    /// Whether something picked outside the app is a folder, read with the access the pick gave.
+    static func isFolder(_ url: URL) -> Bool {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        return (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+    }
+
     /// Whether a file or folder lies somewhere in a folder, which itself doesn't count.
     private static func isInside(_ url: URL, _ folder: URL) -> Bool {
         url.resolvingSymlinksInPath().path.hasPrefix(folder.resolvingSymlinksInPath().path + "/")

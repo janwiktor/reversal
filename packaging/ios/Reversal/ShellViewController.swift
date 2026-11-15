@@ -331,6 +331,13 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     func documentPicker(_: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let first = urls.first else { return }
+        // The folder picker can hand over a file, from a search or its recent items.
+        if pick == .openFolder || pick == .importFolder, !Library.isFolder(first) {
+            let again = pick
+            return tell("\(first.lastPathComponent) is a file", "Choose the folder that holds the scans.") { [weak self] in
+                if let again { self?.choose(again, [.folder]) }
+            }
+        }
         switch pick {
         case .openFolder: switchTo(first)
         case .importFolder: runImport(urls, rollName: first.lastPathComponent)

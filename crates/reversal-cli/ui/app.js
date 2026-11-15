@@ -512,20 +512,88 @@ function markCurrent(name) {
 // On a phone, the bar at the bottom picks which tools show, and closes the list. The column stays
 // as it was left; turning the device to portrait with a frame open shows the tools instead.
 let framesColumn = true;
+const framesShown = () => document.body.dataset.frames === "open";
 function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
   expand($("frames-toggle"), on);
+  expand($("fold-frames"), on);
   if (!panelUnderImage.matches) framesColumn = on;
   pressModes();
 }
-// On a phone the list takes the tools' place, so no group of tools reads as shown.
+// On a touch screen the panels fold away, to leave their room to the image: the side panel
+// beside it to the right, and the panel under it, whichever it shows, down. A handle stays at the
+// panel's edge. The frames column folds to the left, as it does from its button in the bar.
+const dockShown = () => document.body.dataset.dock === "open";
+function showDock(on) {
+  document.body.dataset.dock = on ? "open" : "closed";
+  expand($("fold-panel"), on);
+  pressModes();
+}
+// On a phone the list takes the tools' place, so no group of tools reads as shown, and none
+// while the panel is folded away.
 function pressModes() {
-  const listShown = document.body.dataset.frames === "open";
+  const toolsShown = dockShown() && !framesShown();
   for (const button of document.querySelectorAll("#modes button")) {
-    press(button, !listShown && button.dataset.mode === document.body.dataset.mode);
+    press(button, toolsShown && button.dataset.mode === document.body.dataset.mode);
   }
 }
-$("frames-toggle").addEventListener("click", () => slidePanels(() => showFrames(document.body.dataset.frames !== "open")));
+// Under the image, the frame's name brings the list back from a folded panel.
+function toggleFrames() {
+  const unfold = panelUnderImage.matches && !dockShown();
+  slidePanels(() => {
+    showFrames(unfold || !framesShown());
+    if (unfold) showDock(true);
+  });
+}
+$("frames-toggle").addEventListener("click", toggleFrames);
+$("fold-frames").addEventListener("click", toggleFrames);
+$("fold-panel").addEventListener("click", () => slidePanels(() => showDock(!dockShown())));
+
+// A swipe on a touch screen: one finger that goes far enough one way, and less than half as far
+// across. `run` hears which way, and where it began. Touch events report it, since they go on
+// while the panel under the finger scrolls, when pointer events stop.
+const SWIPE_PX = 36;
+function onSwipe(el, run) {
+  let from = null;
+  el.addEventListener("touchstart", (e) => {
+    const [touch] = e.touches;
+    from = e.touches.length === 1 ? { x: touch.clientX, y: touch.clientY, target: e.target } : null;
+    // Whether everything that scrolls under the finger is at its top.
+    for (let at = e.target; from && at && at !== el.parentElement; at = at.parentElement) from.atTop = (from.atTop ?? true) && at.scrollTop <= 0;
+  }, { passive: true });
+  el.addEventListener("touchmove", (e) => {
+    if (!from) return;
+    const [touch] = e.touches, start = from;
+    const dx = touch.clientX - start.x, dy = touch.clientY - start.y;
+    if (e.touches.length === 1 && Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
+    from = null;
+    if (e.touches.length !== 1) return;
+    if (Math.abs(dx) > 2 * Math.abs(dy)) run(dx < 0 ? "left" : "right", start);
+    else if (Math.abs(dy) > 2 * Math.abs(dx)) run(dy < 0 ? "up" : "down", start);
+  }, { passive: true });
+  for (const end of ["touchend", "touchcancel"]) el.addEventListener(end, () => { from = null; }, { passive: true });
+}
+// A panel folds toward the edge it sits at, from a swipe that way anywhere on it, and comes back
+// from a swipe the other way on its handle. A slider's thumb and a value being typed keep their
+// finger. A panel under the image scrolls up and down itself, so there a swipe down folds it
+// only from its top, where there's nothing left to scroll to; beside the image, a swipe along a
+// slider's row is taken for a miss of its thumb.
+for (const id of ["roll", "dock", "hist", "frame-tools", "crop-tools", "modes", "fold-frames", "fold-panel"]) {
+  const el = $(id), handle = el.classList.contains("fold");
+  onSwipe(el, (way, start) => {
+    if (start.target.closest("input")) return;
+    if (panelUnderImage.matches) {
+      // The histogram floats there, and off a phone the frame and crop tools are in the top bar.
+      const inPanel = handle || id === "roll" || id === "dock" || (phoneLayout.matches && id !== "hist" && id !== "modes");
+      if (way === "down" && dockShown() && inPanel && start.atTop) slidePanels(() => showDock(false));
+      if (way === "up" && !dockShown() && (handle || id === "modes")) slidePanels(() => showDock(true));
+    } else if (id === "roll" || id === "fold-frames") {
+      if (way === (framesShown() ? "left" : "right")) showFrames(!framesShown());
+    } else if (id === "dock" || id === "hist" || id === "fold-panel") {
+      if (way === (dockShown() ? "right" : "left") && !start.target.closest(".slider")) showDock(!dockShown());
+    }
+  });
+}
 panelUnderImage.addEventListener("change", () => showFrames(panelUnderImage.matches ? !shownName : framesColumn));
 // A motion measured for one layout finishes at once when the layout changes, so what was going
 // goes, and the histogram's rows follow.
@@ -542,6 +610,7 @@ for (const button of document.querySelectorAll("#modes button")) {
   button.addEventListener("click", () => slidePanels(() => {
     document.body.dataset.mode = button.dataset.mode;
     showFrames(false);
+    showDock(true);
     // Each panel from its top: scrolled as the last one was, its heading would be out of view.
     $("dock").scrollTop = 0;
   }));
@@ -1868,7 +1937,8 @@ new ResizeObserver(fit).observe($("stage"));
 // pixels: a pinch or Control and the wheel zoom around where they point, and a double click or
 // tap goes to 100%, one scan pixel to one of the screen's, and back. Zoomed in, two fingers on a
 // touch screen or trackpad move the image, or a drag with Space held, so one finger or the mouse
-// stays free for the open tool. The stage clips the image, and its bars and messages stay over it.
+// stays free for a tool that draws. With no such tool open, one finger moves the image too. The
+// stage clips the image, and its bars and messages stay over it.
 // Zooming is only a way of looking: it changes no setting, so nothing is measured or saved for it.
 const ZOOM_OUT = { z: 1, x: 0, y: 0 };
 // How far the image is zoomed from its fit, and how far its center is from the room's, in px.
@@ -1947,6 +2017,9 @@ function cancelDrags() {
 // starts nothing with a second finger.
 const touches = new Map();  // the fingers on the stage, by pointer
 let pinch = null;           // the zoom when two fingers came down, where between them, and how far apart
+let fingerPan = null;       // one finger moving the zoomed image: its pointer, where it began, and where the image was
+// The tools that take one finger's drag for themselves.
+const toolDraws = () => ["crop", "area", "base"].includes(tool);
 const fingers = () => {
   const [a, b] = [...touches.values()];
   return { at: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, apart: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -1959,15 +2032,27 @@ function touchesChanged() {
     pinch = null;
     if (zoom.z < ZOOM_SNAP) zoomOut();
   }
+  // The one finger down, or the one left of a pinch, moves the zoomed image from where it is now,
+  // unless it came down on a bar or a message.
+  const [[pointer, only] = []] = touches.size === 1 ? [...touches] : [];
+  fingerPan = only?.onImage && zoom.z > 1 && !toolDraws() ? { pointer, x: only.x, y: only.y, from: { x: zoom.x, y: zoom.y } } : null;
 }
 $("stage").addEventListener("pointerdown", (e) => {
   if (e.pointerType !== "touch") return;
-  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY, onImage: !e.target.closest(".float") });
   touchesChanged();
 }, true);
 $("stage").addEventListener("pointermove", (e) => {
-  if (!touches.has(e.pointerId)) return;
-  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const touch = touches.get(e.pointerId);
+  if (!touch) return;
+  Object.assign(touch, { x: e.clientX, y: e.clientY });
+  if (fingerPan?.pointer === e.pointerId && current) {
+    zoom.x = fingerPan.from.x + e.clientX - fingerPan.x;
+    zoom.y = fingerPan.from.y + e.clientY - fingerPan.y;
+    endMotion($("view"), "zoom");
+    placeView();
+    return;
+  }
   if (!pinch || !current) return;
   const now = fingers(), box = stageBox();
   const z = clamp(pinch.z * now.apart / Math.max(1, pinch.apart), 1, zoomMax()), ratio = z / pinch.z;

@@ -297,7 +297,12 @@ pub struct Engine {
 impl Engine {
     /// `notices` is a folder of license and copyright notices for what the app has built in.
     pub fn open(dir: PathBuf, notices: Option<PathBuf>) -> std::io::Result<Self> {
-        let mut state = State::new(dir.canonicalize()?, Served::App);
+        let dir = dir.canonicalize()?;
+        // A file has no frames to list, and would open as an empty folder.
+        if !dir.is_dir() {
+            return Err(std::io::Error::other("not a folder"));
+        }
+        let mut state = State::new(dir, Served::App);
         state.notices = notices;
         Ok(Engine { state })
     }

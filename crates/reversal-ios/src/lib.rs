@@ -239,6 +239,11 @@ mod tests {
         let missing = CString::new("/no/such/folder").unwrap();
         assert!(!unsafe { reversal_engine_open(missing.as_ptr(), folder.as_ptr()) });
         assert_eq!(ask("GET", "/api/version", "", b"").0, 503);
+
+        // Neither does a file, which a folder picker can hand over.
+        let file = CString::new(dir.join("Some license.txt").to_str().unwrap()).unwrap();
+        assert!(!unsafe { reversal_engine_open(file.as_ptr(), std::ptr::null()) });
+        assert_eq!(ask("GET", "/api/version", "", b"").0, 503);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
