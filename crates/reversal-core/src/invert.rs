@@ -95,6 +95,10 @@ const BASE_GRAIN_RANGE: f32 = 6.0;
 /// The most grain a pixel of clear film is taken to have, as a share of its level: beyond it
 /// the variation is picture texture. The coarsest film scanned so far has 0.06.
 const BASE_MAX_GRAIN: f32 = 0.08;
+/// Cells this small, in pixels a side, are too few pixels to measure grain in, and a patch
+/// judged by its grain is at least this many cells thick.
+const BASE_MIN_GRAINY_CELL: usize = 4;
+const BASE_MIN_GRAINY_THICKNESS: usize = 2;
 /// How much brighter than the next even cells a small bright patch must be, as density, to be
 /// taken for light through a hole and not film: clear film is at least this dense.
 const BASE_LIGHT_DENSITY: f32 = 0.1;
@@ -647,7 +651,7 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
                     .iter()
                     .fold((f32::MAX, f32::MIN), |(l, h), &m| (l.min(m), h.max(m)));
                 // The mean of a quarter's pixels carries its share of the grain.
-                let from_grain = BASE_GRAIN_RANGE * grain / (counts[0] as f32).sqrt();
+                let from_grain = BASE_GRAIN_RANGE * grain / ((side * side) as f32 / 4.0).sqrt();
                 flat_quarters &= high - low < BASE_CELL_SPREAD * mid;
                 flat_grain &= high - low < (BASE_CELL_SPREAD * mid).max(from_grain);
                 sum += mid;
@@ -693,12 +697,19 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
             }
         }
         let at_edge: Vec<bool> = (0..cols * rows).map(|i| clear[i] && in_band(i)).collect();
-        let edge = largest_rect(&at_edge, cols, rows).filter(|&r| long_enough(r, edge_share));
+        // Bridged cells are only as good as their neighbors, so such a patch is two cells
+        // thick at least: a single line of them could be a run of picture.
+        let thick_enough = |(l, t, r, b): (usize, usize, usize, usize)| {
+            !bridge || (r - l).min(b - t) >= BASE_MIN_GRAINY_THICKNESS
+        };
+        let edge = largest_rect(&at_edge, cols, rows)
+            .filter(|&r| long_enough(r, edge_share) && thick_enough(r));
         let patch = match edge {
             Some(rect) => (rect, true),
             None => {
                 let rect = largest_rect(&clear, cols, rows)?;
-                (rect, long_enough(rect, BASE_MIN_GAP_SHARE))
+                let trusted = long_enough(rect, BASE_MIN_GAP_SHARE) && thick_enough(rect);
+                (rect, trusted)
             }
         };
         Some((patch, bright))
@@ -744,6 +755,10 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
     let mut guess = None;
     let mut trusted = None;
     for (cells, edge_share, past_light, bridge) in searches {
+        // Grain can't be told from detail in quarters of a pixel or two.
+        if bridge && side < BASE_MIN_GRAINY_CELL {
+            continue;
+        }
         match search(cells, edge_share, past_light, bridge) {
             Some(patch @ (_, true)) => {
                 trusted = Some(patch);
@@ -1998,6 +2013,53 @@ mod tests {
             let apart = a.x1 <= f.x0 || f.x1 <= a.x0 || a.y1 <= f.y0 || f.y1 <= a.y0;
             assert!(apart, "{a:?} overlaps {f:?}");
         }
+    }
+
+    #[test]
+    fn a_line_of_grainy_picture_along_the_edge_is_not_the_base() {
+        // A scan filled by coarse-grained picture, whose brightest part is one line of cells
+        // along the top: it passes cell by cell, but nothing says it's clear film.
+        let (w, h) = (1500, 1000);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let d = if y < 10 {
+                    // Texture too coarse to average out over a quarter, but within its grain.
+                    0.3 + ((x / 5) % 2) as f32 * 0.02
+                } else {
+                    0.6 + ((x / 7 + y / 7) % 2) as f32 * 0.5
+                };
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel([d; 3]));
+            }
+        }
+        assert!(!detect_base(&with_grain(scan, 0.14)).found);
+    }
+
+    #[test]
+    fn clear_film_beside_a_square_picture_is_found_inside_the_measured_area() {
+        // A square picture in a 3:2 scan: the film beside it lies well inside the scan, where
+        // the measured area and the picture of a wider frame would be.
+        let (w, h) = (600, 400);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let d = if !(110..490).contains(&x) {
+                    3.0 // the holder
+                } else if (140..460).contains(&x) {
+                    0.4 + ((x / 3 + y / 3) % 2) as f32 * 0.5
+                } else {
+                    0.0
+                };
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel([d; 3]));
+            }
+        }
+        let read = detect_base(&scan);
+        assert!(read.found);
+        assert!((read.rgb[1] - BASE[1]).abs() < 0.005, "{:?}", read.rgb);
+        let measured = NRect::centered(DEFAULT_AREA_PERCENT / 100.0);
+        assert!(read.area.x0 > measured.x0 && read.area.x1 < measured.x1);
     }
 
     #[test]
