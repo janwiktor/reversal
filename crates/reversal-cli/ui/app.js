@@ -20,6 +20,8 @@ const TOOL_TEXT = {
 
 let current = null;   // { file, settings }, and what the scan was read as
 let tool = null;      // null | "crop" | "area" | "base" | "show" | "size", which Center size opens while it changes
+// The tools that take one finger's drag for themselves.
+const toolDraws = () => ["crop", "area", "base"].includes(tool);
 let cropDraft = null;  // the open crop frame in scan coordinates; applied by Done or Enter
 let timer = null;
 let saveTimer = null;
@@ -162,24 +164,28 @@ function fadeOut(el, then) {
 // A panel that changes height slides there rather than jumping. The edge it shares with the image
 // eases to its new place and the panel's contents ride that edge, so the image resizes smoothly
 // with it. What a panel shows changes at once: only the edge moves.
+const gridRows = (grid = document.body) => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
+// The page's rows with the image's at `stage` px. They are the bar, the image, the panel rows and,
+// on a phone, the tool bar: the panel rows under the image fill from the top at their heights and
+// the last takes what's left, so the panel's contents ride its top edge and the tool bar covers
+// what doesn't fit.
+function pageRows(rows, stage) {
+  const last = phoneLayout.matches ? rows.length - 2 : rows.length - 1;
+  return rows.map((h, i) => (i === 1 ? `${stage}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ");
+}
 function slidePanels(change, grid = panelUnderImage.matches ? document.body : $("bar")) {
   // On a phone and in portrait the panels sit under the image in the page's grid. Elsewhere only
   // the crop bar, under the top bar's row, changes height; the frames column slides by itself.
-  const rows = () => getComputedStyle(grid).gridTemplateRows.split(" ").map(parseFloat);
   // From where the edge is now, mid-slide or not.
-  const from = rows();
+  const from = gridRows(grid);
   endMotion(grid, "size");
   change();
-  const to = rows();
-  const n = to.length;
-  if (from.length !== n || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
-  // The page's rows are the bar, the image, the panel rows and, on a phone, the tool bar. Only the
-  // image's row moves: the panel rows under it fill from the top at their new heights and the last
-  // takes what's left, so the panel's contents ride its top edge and the tool bar covers what
-  // doesn't fit yet. The crop bar's two rows both move, and its contents ride their bottom edge.
-  const last = phoneLayout.matches ? n - 2 : n - 1;
+  const to = gridRows(grid);
+  if (from.length !== to.length || to.some(Number.isNaN) || from.every((h, i) => Math.abs(h - to[i]) < 1)) return;
+  // In the page only the image's row moves. The crop bar's two rows both move, and its contents
+  // ride their bottom edge.
   const template = grid === document.body
-    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
+    ? (end) => pageRows(to, (end ? to : from)[1])
     : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
   move(grid, "size", { gridTemplateRows: [template(false), template(true)] }, motion("--slide"), { flags: ["moving"] });
 }
@@ -513,157 +519,149 @@ function markCurrent(name) {
 // as it was left; turning the device to portrait with a frame open shows the tools instead.
 let framesColumn = true;
 const framesShown = () => document.body.dataset.frames === "open";
+// On a touch screen the panel under the image, whichever it shows, can be put away, to leave its
+// room to the image. Beside the image the side panel always shows, whatever this says.
+const panelShown = () => document.body.dataset.panel === "shown";
+// What can be in the panel under the image, and what is: on a phone, Crop has a row of frame
+// tools over it.
+const PANEL_IDS = ["roll", "dock", "frame-tools", "crop-tools"];
+const panelParts = () => (framesShown() ? [$("roll")] : phoneLayout.matches && document.body.dataset.mode === "crop" ? [$("frame-tools"), $("crop-tools")] : [$("dock")]);
 function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
   if (!panelUnderImage.matches) framesColumn = on;
-  showFolds();
+  markPanels();
 }
-// What the panel under the image is showing: on a phone, Crop has a row of frame tools over it.
-const panelParts = () => (framesShown() ? [$("roll")] : phoneLayout.matches && document.body.dataset.mode === "crop" ? [$("frame-tools"), $("crop-tools")] : [$("dock")]);
+function showPanel(on) {
+  // A value being typed in a panel that goes away is done: its keyboard would stay otherwise.
+  if (!on && document.activeElement?.closest(PANEL_IDS.map((id) => `#${id}`).join())) document.activeElement.blur();
+  document.body.dataset.panel = on ? "shown" : "away";
+  markPanels();
+}
 // What the frames button, the panel's handle and a phone's bar of tools say is shown. Under the
 // image the list is in the panel, so it's shown only while the panel is, and the handle is the
 // list's while the list is what the panel shows.
-function showFolds() {
-  const under = panelUnderImage.matches, list = under && framesShown();
-  expand($("frames-toggle"), framesShown() && (dockShown() || !under));
-  expand($("fold-panel"), dockShown());
-  $("fold-panel").setAttribute("aria-controls", list ? "roll" : "dock");
-  $("fold-panel").setAttribute("aria-label", list ? "Frames panel" : "Tools panel");
-  // The frame tools over a phone's Crop panel keep their height, out of what the panel may have.
-  const [fixed, scrolls] = panelParts();
-  if (dockShown()) document.body.style.setProperty("--panel-fixed", `${scrolls ? fixed.getBoundingClientRect().height : 0}px`);
+function markPanels() {
+  const under = panelUnderImage.matches;
+  expand($("frames-toggle"), framesShown() && (panelShown() || !under));
+  expand($("panel-handle"), panelShown());
+  $("panel-handle").setAttribute("aria-controls", panelParts().map((el) => el.id).join(" "));
+  $("panel-handle").setAttribute("aria-label", under && framesShown() ? "Frames panel" : "Tools panel");
+  fitCropTools();
   pressModes();
 }
-// On a touch screen the panel under the image, whichever it shows, can be put away, to leave its
-// room to the image. Beside the image the side panel always shows, whatever this says.
-const dockShown = () => document.body.dataset.dock === "open";
-function showDock(on) {
-  // A value being typed in a panel that goes away is done: its keyboard would stay otherwise.
-  if (!on && document.activeElement?.closest("#roll, #dock, #frame-tools, #crop-tools")) document.activeElement.blur();
-  document.body.dataset.dock = on ? "open" : "closed";
-  showFolds();
+// The frame tools over a phone's Crop panel keep their height, out of what the panel may have.
+function fitCropTools() {
+  const [fixed, scrolls] = panelParts();
+  if (panelShown()) document.body.style.setProperty("--panel-fixed", `${scrolls ? fixed.getBoundingClientRect().height : 0}px`);
 }
 // On a phone the list takes the tools' place, so no group of tools reads as shown, and none
 // while the panel is put away.
 function pressModes() {
-  const toolsShown = dockShown() && !framesShown();
+  const toolsShown = panelShown() && !framesShown();
   for (const button of document.querySelectorAll("#modes button")) {
     press(button, toolsShown && button.dataset.mode === document.body.dataset.mode);
   }
 }
 // The page starts on the list, which the handle says from the start.
-showFolds();
-// Under the image, the frame's name brings the list back from a panel that's put away.
-function toggleFrames() {
-  // A panel on its way out is away.
-  endMotion(document.body, "size", true);
-  const unfold = panelUnderImage.matches && !dockShown();
-  slidePanels(() => {
-    showFrames(unfold || !framesShown());
-    if (unfold) showDock(true);
-  });
-}
-$("frames-toggle").addEventListener("click", toggleFrames);
+markPanels();
 
-// A drag on the panel's handle sets how tall the panel is: from PANEL_LEAST up to all it has to
-// show, as far as the image keeps its least room, and the image takes the rest. The height stays
-// for whatever the panel shows next; a panel that has less to show is as short as before. The
-// panel's top edge follows the finger all the way: lower than its least height the panel rides
-// down past the page's foot, and let go there it slides away. From away, it comes up under the
-// finger the same way. A tap puts it away or brings it back at the height it has by itself.
-const PANEL_LEAST = 88;  // px: two rows, less than which isn't worth keeping
-const STAGE_LEAST = 160;  // px: the image's area, with the room around the image
+// A drag on the panel's handle sets how tall the panel is: from two rows up to all it has to
+// show, as far as the image's area keeps its least height, and the image takes the rest. The
+// height stays for whatever the panel shows next; a panel that has less to show is as short as
+// before. The panel's top edge follows the finger all the way: lower than its least height the
+// panel rides down past the page's foot, and let go there it slides away. From away, it comes up
+// under the finger the same way. A tap puts it away or brings it back at the height it has by
+// itself.
+const PANEL_ANY = 1e5;  // px: taller than any panel, to measure all one has to show
+const stageRow = () => gridRows()[1];
 const panelHeight = () => panelParts().reduce((sum, el) => sum + el.getBoundingClientRect().height, 0);
+let panelLimit = null;  // the height a drag set, in px, which the stylesheet reads as --panel-user
 function limitPanel(height) {
+  panelLimit = height;
   if (height == null) document.body.style.removeProperty("--panel-user");
   else document.body.style.setProperty("--panel-user", `${height}px`);
 }
-const panelLimit = () => parseFloat(document.body.style.getPropertyValue("--panel-user")) || null;
-// The page's rows with the image's row at `stage` px: the panel's rows fill from the top and the
-// last takes what's left, as in slidePanels, so the panel rides its top edge past the foot.
-function rowsWithStage(stage) {
-  const rows = getComputedStyle(document.body).gridTemplateRows.split(" ").map(parseFloat);
-  const last = phoneLayout.matches ? rows.length - 2 : rows.length - 1;
-  return rows.map((h, i) => (i === 1 ? `${stage}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ");
+// What the panel has by itself, and all it can have: measured shown, with no height set and then
+// with any, and put back before anything is drawn.
+function measurePanel() {
+  const body = document.body, state = body.dataset.panel, limit = panelLimit;
+  body.dataset.panel = "shown";
+  limitPanel(null);
+  const natural = panelHeight(), room = stageRow() + natural - cssPx("--stage-least");
+  limitPanel(PANEL_ANY);
+  const full = Math.max(natural, Math.min(panelHeight(), room));
+  limitPanel(limit);
+  body.dataset.panel = state;
+  return { natural, full };
 }
 // While its edge is lower than the panel is tall, the panel keeps its height, so all of it rides
 // down under the page's foot: left to fit its row, a list would fold up between its head and foot.
 function holdPanel(on) {
-  for (const id of ["roll", "dock", "frame-tools", "crop-tools"]) $(id).style.minHeight = "";
+  for (const id of PANEL_IDS) $(id).style.minHeight = "";
   if (on) for (const el of panelParts()) el.style.minHeight = `${el.getBoundingClientRect().height}px`;
 }
-const stageRow = () => parseFloat(getComputedStyle(document.body).gridTemplateRows.split(" ")[1]);
-// Shows `height` of the open panel: all of it laid out, down to its least height, and the rest
-// of the way by moving the edge it shares with the image down over it.
-function showPanelHeight(height, { least, full, grows, limit }) {
-  const laidOut = Math.max(height, least);
+// The panel's edge where the layout puts it, or `stage` px under the bar, over the held panel.
+function placePanelEdge(stage) {
   document.body.style.gridTemplateRows = "";
-  holdPanel(false);
-  // At all it has to show, a panel that shows that anyway keeps the height that was set.
-  limitPanel(laidOut < full - 1 ? laidOut : grows ? full : limit == null || limit >= full ? limit : null);
+  holdPanel(stage != null);
+  if (stage != null) document.body.style.gridTemplateRows = pageRows(gridRows(), stage);
+}
+// Shows `height` of the panel: all of it laid out, down to its least height, and the rest of the
+// way by moving the edge it shares with the image down over it.
+function showPanelHeight(height, { least, full, grows, limit }) {
+  placePanelEdge(null);
+  const laidOut = Math.max(height, least);
+  // Short of all it has, the panel is as tall as the drag. At all of it, a panel that can grow
+  // is held there, and one that can't keeps a taller height set before.
+  if (laidOut < full - 1) limitPanel(laidOut);
+  else limitPanel(grows ? full : limit >= full ? limit : null);
   const actual = panelHeight();
-  if (height >= actual - 0.5) return;
-  holdPanel(true);
-  document.body.style.gridTemplateRows = rowsWithStage(stageRow() + actual - height);
+  if (height < actual - 0.5) placePanelEdge(stageRow() + actual - height);
 }
-// Slides the open panel away from where its edge is, and only then puts it away, so what it
-// shows rides down with the edge. `limit` is the height it comes back to from a drag.
-function slidePanelAway(limit = panelLimit()) {
-  const body = document.body, from = body.style.gridTemplateRows || rowsWithStage(stageRow());
-  body.style.gridTemplateRows = "";
+// Slides the panel away from where its edge is, and only then puts it away, so what it shows
+// rides down with the edge. `limit` is the height it comes back to from a drag. Cut short, by a
+// tool chosen or the handle taken hold of again, the panel stays.
+function slidePanelAway(limit = panelLimit) {
+  const body = document.body, from = body.style.gridTemplateRows || pageRows(gridRows(), stageRow());
+  placePanelEdge(null);
   holdPanel(true);
-  const to = rowsWithStage(stageRow() + panelHeight());
-  // Cut short, by a tool chosen or the handle taken hold of again, the panel stays.
-  move(body, "size", { gridTemplateRows: [from, to] }, motion("--slide"), {
-    flags: ["moving"],
-    tag: "away",
-    after: (finished) => {
-      body.style.gridTemplateRows = "";
-      holdPanel(false);
-      limitPanel(limit);
-      if (finished) showDock(false);
-    },
-  });
+  const to = pageRows(gridRows(), stageRow() + panelHeight());
+  const after = (finished) => {
+    placePanelEdge(null);
+    limitPanel(limit);
+    if (finished) showPanel(false);
+  };
+  // Dragged all the way down, it's there already.
+  if (from === to) after(true);
+  else move(body, "size", { gridTemplateRows: [from, to] }, motion("--slide"), { flags: ["moving"], tag: "away", after });
 }
-let panelDragged = -Infinity;  // when a drag last ended, since a click can follow it
 let panelDrag = null;  // { pointer, y, from: the panel's height then, least, full, grows, limit: the one set then, height, moved }
-$("fold-panel").addEventListener("pointerdown", (e) => {
+let panelDragged = -Infinity;  // when a drag last ended, since a click can follow it
+$("panel-handle").addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || panelDrag) return;
   // A slide under way ends where it's going, but a panel caught on its way out is held where
   // it is, and goes on from there.
-  const body = document.body, caught = motionTag(body, "size") === "away" ? stageRow() : null;
-  endMotion(body, "size", caught == null);
-  const shown = dockShown(), limit = panelLimit();
-  const from = !shown ? 0 : caught == null ? panelHeight() : Math.max(0, panelHeight() - (caught - stageRow()));
-  // What the panel has by itself and what it can have are measured open, then all is put back
-  // before anything shows.
-  body.dataset.dock = "open";
-  limitPanel(null);
-  const natural = panelHeight();
-  // All it has to show, as far as the image's area keeps its least height.
-  const room = stageRow() + natural - STAGE_LEAST;
-  limitPanel(1e5);
-  const full = Math.max(natural, Math.min(panelHeight(), room));
-  limitPanel(limit);
-  body.dataset.dock = shown ? "open" : "closed";
-  if (caught != null) {
-    holdPanel(true);
-    body.style.gridTemplateRows = rowsWithStage(caught);
-  }
-  panelDrag = { pointer: e.pointerId, y: e.clientY, from, least: Math.min(PANEL_LEAST, natural), full, grows: full > natural + 1, limit, height: from, moved: false };
-  $("fold-panel").setPointerCapture(e.pointerId);
+  const caught = motionTag(document.body, "size") === "away" ? stageRow() : null;
+  endMotion(document.body, "size", caught == null);
+  const from = !panelShown() ? 0 : caught == null ? panelHeight() : Math.max(0, panelHeight() - (caught - stageRow()));
+  const { natural, full } = measurePanel();
+  if (caught != null) placePanelEdge(caught);
+  // Two rows, less than which isn't worth keeping, or all of a panel that has less.
+  const least = Math.min(2 * cssPx("--hit"), natural);
+  panelDrag = { pointer: e.pointerId, y: e.clientY, from, least, full, grows: full > natural + 1, limit: panelLimit, height: from, moved: false };
+  $("panel-handle").setPointerCapture(e.pointerId);
 });
-$("fold-panel").addEventListener("pointermove", (e) => {
+$("panel-handle").addEventListener("pointermove", (e) => {
   if (panelDrag?.pointer !== e.pointerId) return;
   if (!panelDrag.moved && Math.abs(e.clientY - panelDrag.y) < TAP_SLIP) return;
   panelDrag.moved = true;
   document.body.dataset.panelDrag = "";
   panelDrag.height = clamp(panelDrag.from + panelDrag.y - e.clientY, 0, panelDrag.full);
-  if (!dockShown()) showDock(true);
+  if (!panelShown()) showPanel(true);
   showPanelHeight(panelDrag.height, panelDrag);
 });
 for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
-  $("fold-panel").addEventListener(end, (e) => {
+  $("panel-handle").addEventListener(end, (e) => {
     if (panelDrag?.pointer !== e.pointerId) return;
     const drag = panelDrag;
     panelDrag = null;
@@ -672,36 +670,36 @@ for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
     panelDragged = e.timeStamp;
     // Let go lower than the panel can be, it goes away, back to the height it had.
     if (drag.height < drag.least) slidePanelAway(drag.limit);
-    else {
-      document.body.style.gridTemplateRows = "";
-      holdPanel(false);
-    }
+    else placePanelEdge(null);
   });
 }
 // A drag's end is no tap, whenever the click for it comes, and wherever: the finger comes up
-// over whatever the panel brought under it.
+// over whatever the panel brought under it. A finger down again is another matter.
 const afterPanelDrag = (e) => e.timeStamp - panelDragged < TAP_MS;
-$("fold-panel").addEventListener("touchend", (e) => { if ((panelDrag?.moved || afterPanelDrag(e)) && e.cancelable) e.preventDefault(); });
-// A finger down again is another matter.
+$("panel-handle").addEventListener("touchend", (e) => { if (afterPanelDrag(e) && e.cancelable) e.preventDefault(); });
 document.addEventListener("pointerdown", () => { panelDragged = -Infinity; }, true);
 document.addEventListener("click", (e) => {
   if (!afterPanelDrag(e)) return;
   e.preventDefault();
   e.stopPropagation();
 }, true);
-$("fold-panel").addEventListener("click", () => {
+$("panel-handle").addEventListener("click", () => {
   endMotion(document.body, "size", true);
-  if (dockShown()) return slidePanelAway();
+  if (panelShown()) return slidePanelAway();
   slidePanels(() => {
     limitPanel(null);
-    showDock(true);
+    showPanel(true);
   });
 });
-panelUnderImage.addEventListener("change", () => {
+// Under the image, the frame's name brings the list back from a panel that's put away.
+$("frames-toggle").addEventListener("click", () => {
+  // A panel on its way out is away.
   endMotion(document.body, "size", true);
-  showFrames(panelUnderImage.matches ? !shownName : framesColumn);
-  // With no frame open, the list under the image is all there is to work with.
-  if (panelUnderImage.matches && !shownName) showDock(true);
+  const bringBack = panelUnderImage.matches && !panelShown();
+  slidePanels(() => {
+    showFrames(bringBack || !framesShown());
+    if (bringBack) showPanel(true);
+  });
 });
 // A motion measured for one layout finishes at once when the layout changes, so what was going
 // goes, and the histogram's rows follow.
@@ -711,6 +709,11 @@ for (const layout of [phoneLayout, panelUnderImage]) {
     showHistRows(histRows.clip, histRows.stored, { now: true });
   });
 }
+panelUnderImage.addEventListener("change", () => {
+  showFrames(panelUnderImage.matches ? !shownName : framesColumn);
+  // With no frame open, the list under the image is all there is to work with.
+  if (panelUnderImage.matches && !shownName) showPanel(true);
+});
 $("crop-open").addEventListener("click", () => slidePanels(() => {
   expand($("crop-open"), $("crop-open").getAttribute("aria-expanded") !== "true");
 }, $("bar")));
@@ -718,7 +721,7 @@ for (const button of document.querySelectorAll("#modes button")) {
   button.addEventListener("click", () => slidePanels(() => {
     document.body.dataset.mode = button.dataset.mode;
     showFrames(false);
-    showDock(true);
+    showPanel(true);
     // Each panel from its top: scrolled as the last one was, its heading would be out of view.
     $("dock").scrollTop = 0;
   }));
@@ -1665,6 +1668,7 @@ function setTool(t) {
   if (t && !tool) zoomOut();
   tool = t;
   document.body.dataset.tool = t ?? "";
+  document.body.toggleAttribute("data-draws", toolDraws());
   cropDraft = t === "crop" ? { ...cropToAdjust() } : null;
   cropDrag = null;
   dragStart = null;
@@ -2096,6 +2100,12 @@ function zoomTo(z, at, eased = false) {
   if (eased) move(view, "zoom", { width: [from.width, to.width], height: [from.height, to.height], transform: [from.transform, to.transform] }, motion("--slide"), { after: wantDetail });
   else endMotion(view, "zoom");
 }
+// Moves the zoomed image's center to `x` and `y` px from the room's, as far as it goes.
+function panView(x, y) {
+  Object.assign(zoom, { x, y });
+  endMotion($("view"), "zoom");
+  placeView();
+}
 function zoomOut() {
   endMotion($("view"), "zoom");
   if (zoom.z === 1) return;
@@ -2125,9 +2135,7 @@ function cancelDrags() {
 // starts nothing with a second finger.
 const touches = new Map();  // the fingers on the stage, by pointer
 let pinch = null;           // the zoom when two fingers came down, where between them, and how far apart
-let fingerPan = null;       // one finger moving the zoomed image: its pointer, where it began, and where the image was
-// The tools that take one finger's drag for themselves.
-const toolDraws = () => ["crop", "area", "base"].includes(tool);
+let fingerPan = null;       // one finger moving the zoomed image, as { pointer, x, y, from }, like panDrag
 const fingers = () => {
   const [a, b] = [...touches.values()];
   return { at: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, apart: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -2142,7 +2150,7 @@ function touchesChanged() {
   }
   // The one finger down, or the one left of a pinch, moves the zoomed image from where it is now,
   // unless it came down on a bar or a message.
-  const [[pointer, only] = []] = touches.size === 1 ? [...touches] : [];
+  const [pointer, only] = touches.size === 1 ? [...touches][0] : [];
   fingerPan = only?.onImage && zoom.z > 1 && !toolDraws() ? { pointer, x: only.x, y: only.y, from: { x: zoom.x, y: zoom.y } } : null;
 }
 $("stage").addEventListener("pointerdown", (e) => {
@@ -2155,10 +2163,7 @@ $("stage").addEventListener("pointermove", (e) => {
   if (!touch) return;
   Object.assign(touch, { x: e.clientX, y: e.clientY });
   if (fingerPan?.pointer === e.pointerId && current) {
-    zoom.x = fingerPan.from.x + e.clientX - fingerPan.x;
-    zoom.y = fingerPan.from.y + e.clientY - fingerPan.y;
-    endMotion($("view"), "zoom");
-    placeView();
+    panView(fingerPan.from.x + e.clientX - fingerPan.x, fingerPan.from.y + e.clientY - fingerPan.y);
     return;
   }
   if (!pinch || !current) return;
@@ -2191,10 +2196,7 @@ $("stage").addEventListener("wheel", (e) => {
     zoomTo(zoom.z * Math.exp(-e.deltaY * lines * ZOOM_WHEEL), { x: e.clientX, y: e.clientY });
   } else if (zoom.z > 1) {
     e.preventDefault();
-    zoom.x -= e.deltaX * lines;
-    zoom.y -= e.deltaY * lines;
-    endMotion($("view"), "zoom");
-    placeView();
+    panView(zoom.x - e.deltaX * lines, zoom.y - e.deltaY * lines);
   }
 }, { passive: false });
 let gestureFrom = 0;  // the zoom a trackpad's pinch gesture began at; fingers on a screen are followed themselves
@@ -2237,10 +2239,7 @@ $("stage").addEventListener("pointerdown", (e) => {
 }, true);
 $("stage").addEventListener("pointermove", (e) => {
   if (panDrag?.pointer !== e.pointerId) return;
-  zoom.x = panDrag.from.x + e.clientX - panDrag.x;
-  zoom.y = panDrag.from.y + e.clientY - panDrag.y;
-  endMotion($("view"), "zoom");
-  placeView();
+  panView(panDrag.from.x + e.clientX - panDrag.x, panDrag.from.y + e.clientY - panDrag.y);
 });
 for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
   $("stage").addEventListener(end, (e) => {

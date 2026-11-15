@@ -7,7 +7,7 @@
 <title>Reversal</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body data-frames="open" data-dock="open" data-mode="tone" data-tool="">
+<body data-frames="open" data-panel="shown" data-mode="tone" data-tool="">
 <svg class="sprite" width="0" height="0" aria-hidden="true">
   <!-- A folder with a magnifying glass: where scans are found and opened. -->
   <symbol id="i-folder" viewBox="0 0 16 16"><path d="M7.6 12.2H2.5c-.4 0-.7-.3-.7-.7v-8c0-.4.3-.7.7-.7h3.4l1.5 1.7h6.1c.4 0 .7.3.7.7v1.9"/><circle cx="11.1" cy="10.6" r="2.4"/><path d="M12.9 12.4l1.7 1.7"/></symbol>
@@ -118,7 +118,7 @@
 
 <!-- On a touch screen, the handle of the panel under the image: a drag sets the panel's height
      or puts it away, and a tap puts it away or brings it back. -->
-<button type="button" id="fold-panel" aria-controls="dock" aria-expanded="true" aria-label="Tools panel"><svg class="grip" aria-hidden="true"><use href="#i-grip"/></svg><svg class="up" aria-hidden="true"><use href="#i-up"/></svg></button>
+<button type="button" id="panel-handle" aria-controls="roll" aria-expanded="true" aria-label="Frames panel"><svg class="grip" aria-hidden="true"><use href="#i-grip"/></svg><svg class="up" aria-hidden="true"><use href="#i-up"/></svg></button>
 
 <!-- The histogram: above the side panel in landscape, over the image's corner in portrait,
      where it folds away to an icon. -->
