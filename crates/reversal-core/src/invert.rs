@@ -593,7 +593,8 @@ fn largest_rect(cells: &[bool], cols: usize, rows: usize) -> Option<(usize, usiz
 ///
 /// On the coarsest film even the quarters differ. So a third search, when that one finds
 /// nothing either, lets them differ by what the cell's own grain explains, measured between
-/// neighboring pixels, and takes in the odd cell that still falls outside.
+/// neighboring pixels, and takes in the odd cell that still falls outside. Textured picture
+/// passes that too, so the patch must be more than one cell thick.
 pub fn detect_base(small: &Rgb32) -> BaseReading {
     let (w, h) = (small.width, small.height);
     let side = (w.max(h) / BASE_CELLS_LONG_SIDE).max(2);
