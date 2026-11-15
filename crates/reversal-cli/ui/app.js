@@ -179,7 +179,7 @@ function slidePanels(change, grid = panelUnderImage.matches ? document.body : $(
   // doesn't fit yet. The crop bar's two rows both move, and its contents ride their bottom edge.
   const last = phoneLayout.matches ? n - 2 : n - 1;
   const template = grid === document.body
-    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last && Math.abs(from[i] - h) >= 1 ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
+    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
     : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
   move(grid, "size", { gridTemplateRows: [template(false), template(true)] }, motion("--slide"), { flags: ["moving"] });
 }
@@ -518,40 +518,37 @@ function showFrames(on) {
   if (!panelUnderImage.matches) framesColumn = on;
   showFolds();
 }
-// What the frames button, the handles and a phone's bar of tools say is shown. Under the image the
-// list is in the panel, so it's shown only while the panel is, and the panel's handle is the
+// What the frames button, the panel's handle and a phone's bar of tools say is shown. Under the
+// image the list is in the panel, so it's shown only while the panel is, and the handle is the
 // list's while the list is what the panel shows.
 function showFolds() {
   const under = panelUnderImage.matches, list = under && framesShown();
   expand($("frames-toggle"), framesShown() && (dockShown() || !under));
-  expand($("fold-frames"), framesShown());
   expand($("fold-panel"), dockShown());
-  $("fold-panel").setAttribute("aria-controls", list ? "roll" : under ? "dock" : "hist dock");
-  $("fold-panel").setAttribute("aria-label", list ? "Frames" : "Tools");
+  $("fold-panel").setAttribute("aria-controls", list ? "roll" : "dock");
+  $("fold-panel").setAttribute("aria-label", list ? "Frames panel" : "Tools panel");
   pressModes();
 }
-// On a touch screen the panels fold away, to leave their room to the image: the side panel
-// beside it to the right, and the panel under it, whichever it shows, down. A handle stays at the
-// panel's edge. The frames column folds to the left, as it does from its button in the bar.
+// On a touch screen the panel under the image, whichever it shows, can be put away, to leave its
+// room to the image. Beside the image the side panel always shows, whatever this says.
 const dockShown = () => document.body.dataset.dock === "open";
 function showDock(on) {
-  // A value being typed in a panel that folds away is done: its keyboard would stay otherwise.
-  const folding = !panelUnderImage.matches ? "#dock" : phoneLayout.matches ? "#roll, #dock, #frame-tools, #crop-tools" : "#roll, #dock";
-  if (!on && document.activeElement?.closest(folding)) document.activeElement.blur();
+  // A value being typed in a panel that goes away is done: its keyboard would stay otherwise.
+  if (!on && document.activeElement?.closest("#roll, #dock, #frame-tools, #crop-tools")) document.activeElement.blur();
   document.body.dataset.dock = on ? "open" : "closed";
   showFolds();
 }
 // On a phone the list takes the tools' place, so no group of tools reads as shown, and none
-// while the panel is folded away.
+// while the panel is put away.
 function pressModes() {
   const toolsShown = dockShown() && !framesShown();
   for (const button of document.querySelectorAll("#modes button")) {
     press(button, toolsShown && button.dataset.mode === document.body.dataset.mode);
   }
 }
-// The page starts on the list, which the handles say from the start.
+// The page starts on the list, which the handle says from the start.
 showFolds();
-// Under the image, the frame's name brings the list back from a folded panel.
+// Under the image, the frame's name brings the list back from a panel that's put away.
 function toggleFrames() {
   const unfold = panelUnderImage.matches && !dockShown();
   slidePanels(() => {
@@ -560,54 +557,53 @@ function toggleFrames() {
   });
 }
 $("frames-toggle").addEventListener("click", toggleFrames);
-$("fold-frames").addEventListener("click", toggleFrames);
-$("fold-panel").addEventListener("click", () => slidePanels(() => showDock(!dockShown())));
 
-// A swipe on a touch screen: one finger that goes far enough one way, and less than half as far
-// across. `run` hears which way, and where it began. Touch events report it, since they go on
-// while the panel under the finger scrolls, when pointer events stop.
-const SWIPE_PX = 36;
-function onSwipe(el, run) {
-  let from = null;
-  el.addEventListener("touchstart", (e) => {
-    const [touch] = e.touches;
-    from = e.touches.length === 1 ? { x: touch.clientX, y: touch.clientY, target: e.target } : null;
-    // Whether everything that scrolls under the finger is at its top.
-    for (let at = e.target; from && at && at !== el.parentElement; at = at.parentElement) from.atTop = (from.atTop ?? true) && at.scrollTop <= 0;
-  }, { passive: true });
-  el.addEventListener("touchmove", (e) => {
-    if (!from) return;
-    const [touch] = e.touches, start = from;
-    const dx = touch.clientX - start.x, dy = touch.clientY - start.y;
-    if (e.touches.length === 1 && Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
-    from = null;
-    if (e.touches.length !== 1) return;
-    if (Math.abs(dx) > 2 * Math.abs(dy)) run(dx < 0 ? "left" : "right", start);
-    else if (Math.abs(dy) > 2 * Math.abs(dx)) run(dy < 0 ? "up" : "down", start);
-  }, { passive: true });
-  for (const end of ["touchend", "touchcancel"]) el.addEventListener(end, () => { from = null; }, { passive: true });
+// A drag on the panel's handle sets how tall the panel may be, from as tall as it is by itself
+// down to PANEL_LEAST, and the image takes the rest. The height stays for whatever the panel
+// shows next; a panel that needs less is as short as before. Dragged lower than that, the
+// panel goes away, and comes back when the finger does. A tap puts it away or brings it back.
+const PANEL_LEAST = 88;  // px: two rows of tools, less than which isn't worth keeping
+// What the panel under the image is showing: on a phone, Crop has a row of frame tools over it.
+const panelParts = () => (framesShown() ? [$("roll")] : phoneLayout.matches && document.body.dataset.mode === "crop" ? [$("frame-tools"), $("crop-tools")] : [$("dock")]);
+const panelHeight = () => panelParts().reduce((sum, el) => sum + el.getBoundingClientRect().height, 0);
+function limitPanel(height) {
+  if (height == null) document.body.style.removeProperty("--panel-user");
+  else document.body.style.setProperty("--panel-user", `${height}px`);
 }
-// A panel folds toward the edge it sits at, from a swipe that way anywhere on it, and comes back
-// from a swipe the other way on its handle. A slider's thumb and a value being typed keep their
-// finger. A panel under the image scrolls up and down itself, so there a swipe down folds it
-// only from its top, where there's nothing left to scroll to; beside the image, a swipe along a
-// slider's row is taken for a miss of its thumb.
-for (const id of ["roll", "dock", "hist", "frame-tools", "crop-tools", "modes", "fold-frames", "fold-panel"]) {
-  const el = $(id), handle = el.classList.contains("fold");
-  onSwipe(el, (way, start) => {
-    if (start.target.closest("input")) return;
-    if (panelUnderImage.matches) {
-      // The histogram floats there, and off a phone the frame and crop tools are in the top bar.
-      const inPanel = handle || id === "roll" || id === "dock" || (phoneLayout.matches && id !== "hist" && id !== "modes");
-      if (way === "down" && dockShown() && inPanel && start.atTop) slidePanels(() => showDock(false));
-      if (way === "up" && !dockShown() && (handle || id === "modes")) slidePanels(() => showDock(true));
-    } else if (id === "roll" || id === "fold-frames") {
-      if (way === (framesShown() ? "left" : "right")) showFrames(!framesShown());
-    } else if (id === "dock" || id === "hist" || id === "fold-panel") {
-      if (way === (dockShown() ? "right" : "left") && !start.target.closest(".slider")) showDock(!dockShown());
-    }
-  });
+let panelDrag = null;  // { pointer, y, from: the panel's height then, full: its height by itself, limit: the one set then, moved }
+$("fold-panel").addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || panelDrag) return;
+  endMotion(document.body, "size");
+  const from = dockShown() ? panelHeight() : 0, limit = document.body.style.getPropertyValue("--panel-user"), shown = dockShown();
+  // Its height by itself is measured open and with no limit, then put back before anything shows.
+  document.body.dataset.dock = "open";
+  limitPanel(null);
+  // The frame tools over a phone's Crop panel keep their height.
+  document.body.style.setProperty("--panel-fixed", `${panelParts().length > 1 ? panelParts()[0].getBoundingClientRect().height : 0}px`);
+  const full = panelHeight();
+  document.body.dataset.dock = shown ? "open" : "closed";
+  if (limit) limitPanel(parseFloat(limit));
+  panelDrag = { pointer: e.pointerId, y: e.clientY, from, full, limit: limit ? parseFloat(limit) : null, moved: false };
+  $("fold-panel").setPointerCapture(e.pointerId);
+});
+$("fold-panel").addEventListener("pointermove", (e) => {
+  if (panelDrag?.pointer !== e.pointerId) return;
+  const height = panelDrag.from + panelDrag.y - e.clientY;
+  if (!panelDrag.moved && Math.abs(e.clientY - panelDrag.y) < TAP_SLIP) return;
+  panelDrag.moved = true;
+  const show = height >= PANEL_LEAST;
+  if (show !== dockShown()) showDock(show);
+  // Put away, it keeps the height it had, to come back to.
+  limitPanel(!show ? panelDrag.limit : height < panelDrag.full - 1 ? height : null);
+});
+for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  $("fold-panel").addEventListener(end, (e) => { if (panelDrag?.pointer === e.pointerId) setTimeout(() => { panelDrag = null; }); });
 }
+// A drag's end is no tap.
+$("fold-panel").addEventListener("click", () => {
+  if (panelDrag?.moved) return;
+  slidePanels(() => showDock(!dockShown()));
+});
 panelUnderImage.addEventListener("change", () => {
   showFrames(panelUnderImage.matches ? !shownName : framesColumn);
   // With no frame open, the list under the image is all there is to work with.

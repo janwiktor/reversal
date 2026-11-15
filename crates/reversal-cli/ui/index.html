@@ -14,7 +14,8 @@
   <symbol id="i-frames" viewBox="0 0 16 16"><path d="M2.5 3.2h11c.4 0 .7.3.7.7v8.2c0 .4-.3.7-.7.7h-11c-.4 0-.7-.3-.7-.7V3.9c0-.4.3-.7.7-.7ZM6.2 3.2v9.6"/></symbol>
   <!-- The system's sign for handing something on: an arrow up out of a tray. -->
   <symbol id="i-share" viewBox="0 0 16 16"><path d="M8 1.8v8.2M5.3 4.4 8 1.8l2.7 2.6M5.4 6.9H3.9c-.4 0-.7.3-.7.7v5.9c0 .4.3.7.7.7h8.2c.4 0 .7-.3.7-.7V7.6c0-.4-.3-.7-.7-.7h-1.5"/></symbol>
-  <symbol id="i-fold" viewBox="0 0 16 16"><path d="M4.5 6.2 8 9.8l3.5-3.6"/></symbol>
+  <!-- Three dots: something to take hold of. -->
+  <symbol id="i-grip" viewBox="0 0 20 8"><path d="M4 4h.01M10 4h.01M16 4h.01"/></symbol>
   <symbol id="i-hist" viewBox="0 0 16 16"><path d="M1.8 13.2h12.4M2.5 13.2C4 13.2 4.6 5 6.3 5s2 5.2 3.4 5.2 1.6-3.4 2.8-3.4 1.2 6.4 1.8 6.4"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7L13 5.8M13 2.6v3.2H9.8"/></symbol>
   <symbol id="i-crop" viewBox="0 0 16 16"><path d="M4.2 1.8v9.3c0 .4.3.7.7.7h9.3M1.8 4.2h9.3c.4 0 .7.3.7.7v9.3"/></symbol>
@@ -114,10 +115,9 @@
   <p id="message">Choose a frame to convert it</p>
 </main>
 
-<!-- On a touch screen, each panel that folds away keeps a handle at its edge, with an arrow for
-     the way it goes: a tap or a swipe there folds the panel and brings it back. -->
-<button type="button" class="fold" id="fold-frames" aria-controls="roll" aria-expanded="true" aria-label="Frames"><svg aria-hidden="true"><use href="#i-fold"/></svg></button>
-<button type="button" class="fold" id="fold-panel" aria-controls="dock" aria-expanded="true" aria-label="Tools"><svg aria-hidden="true"><use href="#i-fold"/></svg></button>
+<!-- On a touch screen, the handle of the panel under the image: a drag makes the panel smaller
+     or puts it away, and a tap puts it away or brings it back. -->
+<button type="button" id="fold-panel" aria-controls="dock" aria-expanded="true" aria-label="Tools panel"><svg aria-hidden="true"><use href="#i-grip"/></svg></button>
 
 <!-- The histogram: above the side panel in landscape, over the image's corner in portrait,
      where it folds away to an icon. -->
