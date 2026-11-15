@@ -117,12 +117,23 @@ fi
 if [ ${#notary[@]} -gt 0 ]; then
   xcrun notarytool submit "$dmg" "${notary[@]}" --wait --timeout 30m --output-format json \
     >"$build/notary.json" || true
-  status="$(plutil -extract status raw "$build/notary.json" 2>/dev/null || echo unknown)"
+  status="$(plutil -extract status raw "$build/notary.json" 2>/dev/null || true)"
   if [ "$status" != Accepted ]; then
     cat "$build/notary.json" >&2
+    # A disk image that isn't notarized mustn't pass for one that is.
+    rm -f "$dmg"
     id="$(plutil -extract id raw "$build/notary.json" 2>/dev/null || true)"
-    [ -n "$id" ] && xcrun notarytool log "$id" "${notary[@]}" >&2 || true
-    echo "Notarization ended with status $status." >&2
+    if [ -z "$status" ] && [ -n "$id" ]; then
+      # Waiting timed out; Apple goes on with the submission.
+      status="$(xcrun notarytool info "$id" "${notary[@]}" --output-format json 2>/dev/null \
+        | plutil -extract status raw - 2>/dev/null || true)"
+    fi
+    if [ "$status" = "In Progress" ]; then
+      echo "Apple is still notarizing submission $id: build again once it's accepted." >&2
+    else
+      [ -n "$id" ] && { xcrun notarytool log "$id" "${notary[@]}" >&2 || true; }
+      echo "Notarization ended with status ${status:-unknown}." >&2
+    fi
     exit 1
   fi
   xcrun stapler staple -q "$dmg"
