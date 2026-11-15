@@ -92,6 +92,8 @@ const BASE_CELL_SPREAD: f32 = 0.05;
 /// How much brighter than the next even cells a small bright patch must be, as density, to be
 /// taken for light through a hole and not film: clear film is at least this dense.
 const BASE_LIGHT_DENSITY: f32 = 0.1;
+/// How many cells around such a patch are looked at for the film a hole is punched in.
+const BASE_LIGHT_REACH: usize = 3;
 /// Clear film lies within this share of a high percentile of the even cells' levels.
 const BASE_LEVEL_PERCENTILE: f32 = 98.0;
 const BASE_LEVEL_RANGE: f32 = 0.93;
@@ -569,13 +571,15 @@ fn largest_rect(cells: &[bool], cols: usize, rows: usize) -> Option<(usize, usiz
 /// frames.
 ///
 /// Light through a sprocket hole is even too, and brighter than film where the scan didn't clip
-/// it. Such patches are too small to be a film edge, so when the brightest cells form none, and
-/// stand clear of the rest by more than film's own density, the search goes on below them.
+/// it. Such patches are too small to be a film edge, so when the brightest cells form none,
+/// stand clear of the rest by more than film's own density, and have even film of the next
+/// level around them, as holes punched in clear film do, the search goes on below them.
 ///
 /// Coarse grain makes clear film uneven pixel by pixel. So when no cell-by-pixel search finds
 /// clear film, a second one takes a cell as even when its quarters have the same mean: grain
-/// averages out over a quarter, where an edge or a marking doesn't. It comes second, and asks
-/// for a longer patch, because it also passes smooth picture, which the first leaves out.
+/// averages out over a quarter, where an edge or a marking doesn't. It comes second, asks for
+/// a longer patch and doesn't look below the brightest cells, because it also passes smooth
+/// picture and fine texture, which the first leaves out.
 pub fn detect_base(small: &Rgb32) -> BaseReading {
     let (w, h) = (small.width, small.height);
     let side = (w.max(h) / BASE_CELLS_LONG_SIDE).max(2);
@@ -664,9 +668,9 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
         Some((patch, bright))
     };
     // Clear film among `cells`, looking below light through holes when the brightest is no film.
-    let search = |cells: &[bool], edge_share: f32| {
+    let search = |cells: &[bool], edge_share: f32, past_light: bool| {
         let (patch, bright) = clear_patch(cells, edge_share)?;
-        if patch.1 {
+        if patch.1 || !past_light {
             return Some(patch);
         }
         // Density is a ratio of levels, so this far below the brightest cells is a level.
@@ -674,15 +678,33 @@ pub fn detect_base(small: &Rgb32) -> BaseReading {
         let film: Vec<bool> = (0..cols * rows)
             .map(|i| cells[i] && level[i] < bright)
             .collect();
-        match clear_patch(&film, edge_share) {
-            Some((under @ (_, true), next)) if next / BASE_LEVEL_RANGE < below => Some(under),
-            _ => Some(patch),
+        let Some((under @ (_, true), next)) = clear_patch(&film, edge_share) else {
+            return Some(patch);
+        };
+        // A hole is punched in clear film, so the even cells around the bright patches are at
+        // the level found below them. Around a short patch of clear film they're picture.
+        let light: Vec<bool> = (0..cols * rows)
+            .map(|i| cells[i] && level[i] >= bright)
+            .collect();
+        let around = dilate(light.clone(), cols, rows, BASE_LIGHT_REACH);
+        let (mut beside, mut clear_beside) = (0, 0);
+        for i in (0..cols * rows).filter(|&i| around[i] && !light[i] && film[i]) {
+            beside += 1;
+            clear_beside += usize::from(level[i] >= next);
+        }
+        if next < below && clear_beside > 0 && clear_beside * 2 >= beside {
+            Some(under)
+        } else {
+            Some(patch)
         }
     };
-    let by_pixel = search(&even, BASE_MIN_EDGE_SHARE);
+    let by_pixel = search(&even, BASE_MIN_EDGE_SHARE, true);
     let (rect, found) = match by_pixel {
         Some(patch @ (_, true)) => patch,
-        _ => match (search(&even_quarters, BASE_MIN_GRAINY_EDGE_SHARE), by_pixel) {
+        _ => match (
+            search(&even_quarters, BASE_MIN_GRAINY_EDGE_SHARE, false),
+            by_pixel,
+        ) {
             (Some(patch @ (_, true)), _) | (_, Some(patch)) | (Some(patch), None) => patch,
             (None, None) => {
                 return BaseReading {
@@ -1237,10 +1259,12 @@ fn unframed(part: NRect, a: &Adjust) -> NRect {
     }
 }
 
-/// A part of what [`convert_with`] or [`negative_with`] shows, from the full scan, for looking
-/// at closely: `part` is a rectangle on the picture as shown. The scan's own pixels are kept
-/// while the part's long side stays within `long_side` pixels, and averaged by the smallest
-/// whole factor that fits it otherwise. Only the part is straightened and converted.
+/// A part of what a preview shows, from the full scan, for looking at closely: `part` is a
+/// rectangle on the picture as shown. A preview is [`convert_with`] or [`negative_with`] on the
+/// scan's [`analysis_image`], so the part is framed as that frames it, by its pixels, and lies
+/// exactly over it. The scan's own pixels are kept while the part's long side stays within
+/// `long_side` pixels, and averaged by the smallest whole factor that fits it otherwise. Only
+/// the part is straightened and converted.
 pub fn part_with(
     scan: &Scan16,
     s: &Settings,
@@ -1250,20 +1274,27 @@ pub fn part_with(
     negative: bool,
 ) -> Rgb32 {
     let crop = crop_override.or(s.adjust.crop).unwrap_or(NRect::FULL);
-    let frame = crop.to_pixels(scan.width, scan.height);
-    let (w, h) = (frame.right - frame.left, frame.bottom - frame.top);
-    let within = unframed(part, &s.adjust).to_pixels(w, h);
+    // The preview's crop, in its own pixels, on the scan.
+    let (preview_w, preview_h) = (
+        (scan.width / ANALYSIS_FACTOR).max(1),
+        (scan.height / ANALYSIS_FACTOR).max(1),
+    );
+    let frame = crop.to_pixels(preview_w, preview_h);
+    let (left, top) = (frame.left * ANALYSIS_FACTOR, frame.top * ANALYSIS_FACTOR);
+    let (w, h) = (
+        ((frame.right - frame.left) * ANALYSIS_FACTOR).min(scan.width - left.min(scan.width)),
+        ((frame.bottom - frame.top) * ANALYSIS_FACTOR).min(scan.height - top.min(scan.height)),
+    );
+    let within = unframed(part, &s.adjust).to_pixels(w.max(1), h.max(1));
     let pixels = crate::image::Rect {
-        left: frame.left + within.left,
-        right: frame.left + within.right,
-        top: frame.top + within.top,
-        bottom: frame.top + within.bottom,
+        left: left + within.left,
+        right: left + within.right,
+        top: top + within.top,
+        bottom: top + within.bottom,
     };
     let long = (pixels.right - pixels.left).max(pixels.bottom - pixels.top);
     let factor = long.div_ceil(long_side.max(1)).max(1);
-    let img = scan
-        .straightened_part(s.adjust.straighten, pixels)
-        .downsample(factor);
+    let img = scan.straightened_part(s.adjust.straighten, pixels, factor);
     finished(img, s, negative)
 }
 
@@ -1909,13 +1940,39 @@ mod tests {
     }
 
     #[test]
+    fn a_short_patch_of_clear_film_is_not_passed_over_for_a_smooth_shadow() {
+        // A clear corner too short to trust, and a long smooth shadow at the foot, denser than
+        // it by more than a hole's light would be: the corner is still the best guess.
+        let (w, h) = (1500, 1000);
+        let mut scan = Rgb32::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let d = if x < 100 && y < 70 {
+                    0.0
+                } else if y >= 980 && x < 300 {
+                    0.2
+                } else {
+                    // Coarse enough that it doesn't average out over a cell's quarters.
+                    0.4 + ((x / 7 + y / 7) % 2) as f32 * 0.5
+                };
+                let i = (y * w + x) * 3;
+                scan.data[i..i + 3].copy_from_slice(&pixel([d; 3]));
+            }
+        }
+        let read = detect_base(&scan);
+        assert!(!read.found);
+        assert!((read.rgb[1] - BASE[1]).abs() < 0.005, "{:?}", read.rgb);
+    }
+
+    #[test]
     fn a_short_smooth_patch_of_grainy_picture_is_not_the_base() {
-        let (w, h) = (400, 300);
+        // Wide enough for cells of 8 pixels, whose quarters average the grain out.
+        let (w, h) = (1200, 900);
         let mut scan = Rgb32::new(w, h);
         for y in 0..h {
             for x in 0..w {
                 // Picture with detail everywhere, but for a smooth shadow at the left edge.
-                let d = if x < 40 && (100..145).contains(&y) {
+                let d = if x < 120 && (300..435).contains(&y) {
                     0.0
                 } else {
                     0.2 + ((x * 7 + y * 13) % 11) as f32 * 0.08
@@ -2002,6 +2059,24 @@ mod tests {
                 );
             }
         }
+        // The part is framed by the preview's pixels, so it lies over the preview exactly.
+        let mut odd = s.clone();
+        odd.adjust = Adjust::default();
+        odd.adjust.crop = Some(NRect {
+            x0: 0.1003,
+            y0: 0.0,
+            x1: 0.7,
+            y1: 1.0,
+        });
+        let preview = convert(&analysis_image(&scan), &odd);
+        let over = part_with(&kept, &odd, None, NRect::FULL, usize::MAX, false);
+        assert_eq!(
+            (over.width, over.height),
+            (
+                preview.width * ANALYSIS_FACTOR,
+                preview.height * ANALYSIS_FACTOR
+            )
+        );
         // A part too large for the size asked is averaged down by a whole factor.
         s.adjust = Adjust::default();
         let whole = convert(&scan, &s);
