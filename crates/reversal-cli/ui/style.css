@@ -655,7 +655,9 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   body[data-mode="setup"] :is(#develop-head, #develop) { display: none; }
   body[data-mode="tone"] :is(#setup-head, #setup, #color) { display: none; }
   body[data-mode="color"] :is(#setup-head, #setup, #tone) { display: none; }
-  #modes { grid-area: modes; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: var(--foot); }
+  /* A panel dragged down slides under the bar, with all it shows and its handle's dots: the
+     bar is a layer over them. */
+  #modes { grid-area: modes; position: relative; z-index: 5; display: flex; background: var(--bar); border-top: 1px solid var(--seam); padding-bottom: var(--foot); }
   /* Each tool's icon over its name. A 20 px icon keeps the 1.25 px stroke of the others. */
   #modes button { flex: 1; height: 49px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-quiet); font-size: var(--text-small); line-height: 13px; }
   #modes svg { width: 20px; height: 20px; stroke-width: 1; }

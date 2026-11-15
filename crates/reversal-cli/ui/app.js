@@ -586,22 +586,32 @@ function rowsWithStage(stage) {
   const last = phoneLayout.matches ? rows.length - 2 : rows.length - 1;
   return rows.map((h, i) => (i === 1 ? `${stage}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ");
 }
+// While its edge is lower than the panel is tall, the panel keeps its height, so all of it rides
+// down under the page's foot: left to fit its row, a list would fold up between its head and foot.
+function holdPanel(on) {
+  for (const id of ["roll", "dock", "frame-tools", "crop-tools"]) $(id).style.minHeight = "";
+  if (on) for (const el of panelParts()) el.style.minHeight = `${el.getBoundingClientRect().height}px`;
+}
 const stageRow = () => parseFloat(getComputedStyle(document.body).gridTemplateRows.split(" ")[1]);
 // Shows `height` of the open panel: all of it laid out, down to its least height, and the rest
 // of the way by moving the edge it shares with the image down over it.
 function showPanelHeight(height, { least, full, grows, limit }) {
   const laidOut = Math.max(height, least);
   document.body.style.gridTemplateRows = "";
+  holdPanel(false);
   // At all it has to show, a panel that shows that anyway keeps the height that was set.
   limitPanel(laidOut < full - 1 ? laidOut : grows ? full : limit == null || limit >= full ? limit : null);
   const actual = panelHeight();
-  if (height < actual - 0.5) document.body.style.gridTemplateRows = rowsWithStage(stageRow() + actual - height);
+  if (height >= actual - 0.5) return;
+  holdPanel(true);
+  document.body.style.gridTemplateRows = rowsWithStage(stageRow() + actual - height);
 }
 // Slides the open panel away from where its edge is, and only then puts it away, so what it
 // shows rides down with the edge. `limit` is the height it comes back to from a drag.
 function slidePanelAway(limit = panelLimit()) {
   const body = document.body, from = body.style.gridTemplateRows || rowsWithStage(stageRow());
   body.style.gridTemplateRows = "";
+  holdPanel(true);
   const to = rowsWithStage(stageRow() + panelHeight());
   // Cut short, by a tool chosen or the handle taken hold of again, the panel stays.
   move(body, "size", { gridTemplateRows: [from, to] }, motion("--slide"), {
@@ -609,6 +619,7 @@ function slidePanelAway(limit = panelLimit()) {
     tag: "away",
     after: (finished) => {
       body.style.gridTemplateRows = "";
+      holdPanel(false);
       limitPanel(limit);
       if (finished) showDock(false);
     },
@@ -635,7 +646,10 @@ $("fold-panel").addEventListener("pointerdown", (e) => {
   const full = Math.max(natural, Math.min(panelHeight(), room));
   limitPanel(limit);
   body.dataset.dock = shown ? "open" : "closed";
-  if (caught != null) body.style.gridTemplateRows = rowsWithStage(caught);
+  if (caught != null) {
+    holdPanel(true);
+    body.style.gridTemplateRows = rowsWithStage(caught);
+  }
   panelDrag = { pointer: e.pointerId, y: e.clientY, from, least: Math.min(PANEL_LEAST, natural), full, grows: full > natural + 1, limit, height: from, moved: false };
   $("fold-panel").setPointerCapture(e.pointerId);
 });
@@ -658,7 +672,10 @@ for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
     panelDragged = e.timeStamp;
     // Let go lower than the panel can be, it goes away, back to the height it had.
     if (drag.height < drag.least) slidePanelAway(drag.limit);
-    else document.body.style.gridTemplateRows = "";
+    else {
+      document.body.style.gridTemplateRows = "";
+      holdPanel(false);
+    }
   });
 }
 // A drag's end is no tap, whenever the click for it comes, and wherever: the finger comes up
