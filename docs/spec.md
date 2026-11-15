@@ -278,7 +278,7 @@ An iOS app for iPhone and iPad is a prototype and isn't released. It shows the s
 | Web server | `tiny_http` | One small dependency, no framework |
 | Settings and arguments | `serde`, `serde_json`, `clap` |  |
 | Web UI | Plain HTML, CSS and JS | No frontend build step |
-| Mac app | Swift, Cocoa and WKWebView | arm64, macOS 13 or later, ad hoc signed; building it needs Xcode |
+| Mac app | Swift, Cocoa and WKWebView | arm64, macOS 13 or later, signed with Developer ID and notarized; building it needs Xcode |
 | License | Mozilla Public License 2.0 | Open source, can be sold in app stores, and improvements to existing files stay open; the photos in the README screenshots aren't covered |
 | Tests | `cargo test`, on small synthetic images | CI runs them on Linux and macOS; golden reference images aren't built yet |
 
@@ -289,6 +289,6 @@ An iOS app for iPhone and iPad is a prototype and isn't released. It shows the s
 - **Full strips:** the centered area doesn't suit them, so set a custom measured area and crop there.
 - **Film base:** detection reports no clear film on scans with little or no visible edge, and can miss an uneven one. Set a custom film base, or match it across the roll.
 - **Metadata:** camera EXIF isn't copied to the DNG.
-- **Mac app:** Apple Silicon only, and it can't read DNGs with lossy JPEG compression. It is ad hoc signed, so users approve it with Open Anyway.
+- **Mac app:** Apple Silicon only, and it can't read DNGs with lossy JPEG compression.
 
 [GitHub issues](https://github.com/janwiktor/reversal/issues) track which of these may change.

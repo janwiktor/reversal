@@ -20,6 +20,17 @@ on:
   workflow_dispatch:
   # A release builds its disk image with this workflow.
   workflow_call:
+    secrets:
+      MACOS_CERTIFICATE:
+        required: false
+      MACOS_CERTIFICATE_PASSWORD:
+        required: false
+      NOTARY_KEY:
+        required: false
+      NOTARY_KEY_ID:
+        required: false
+      NOTARY_ISSUER:
+        required: false
 
 permissions:
   contents: read
@@ -59,15 +70,77 @@ jobs:
             dist/build/LibRaw-*
             dist/build/libraw-install-*
           key: libraw-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packaging/macos/libraw.sh') }}
+      # Pull requests build ad hoc signed, so their code never runs with the signing secrets. The rest
+      # sign with Developer ID and notarize once the secrets are set, and a release has to.
+      - name: Set up signing
+        id: signing
+        if: github.event_name != 'pull_request'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$NOTARY_KEY" ]; then
+            if [ "$RELEASE" = true ]; then
+              echo "A release has to be signed and notarized: set the signing secrets." >&2
+              exit 1
+            fi
+            echo "::notice::No signing secrets, so the app is ad hoc signed."
+            exit 0
+          fi
+          secrets="$RUNNER_TEMP/signing"
+          mkdir -m 700 "$secrets"
+          keychain="$secrets/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode >"$secrets/certificate.p12"
+          security import "$secrets/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          rm "$secrets/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "Developer ID Application: .*"$/\1/p' | head -1)"
+          if [ -z "$identity" ]; then
+            echo "MACOS_CERTIFICATE holds no Developer ID Application identity." >&2
+            exit 1
+          fi
+          printf '%s' "$NOTARY_KEY" >"$secrets/notary.p8"
+          {
+            echo "SIGNING_IDENTITY=$identity"
+            echo "NOTARY_KEY=$secrets/notary.p8"
+            echo "NOTARY_KEY_ID=$NOTARY_KEY_ID"
+            echo "NOTARY_ISSUER=$NOTARY_ISSUER"
+            echo "REQUIRE_NOTARIZED=1"
+          } >>"$GITHUB_ENV"
+          echo "keychain=$keychain" >>"$GITHUB_OUTPUT"
+          echo "signed=true" >>"$GITHUB_OUTPUT"
       - name: Build
         run: packaging/macos/build.sh
       - name: Check the disk image
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed == 'true' }}
         run: |
           mount_point="$(mktemp -d)"
           hdiutil attach dist/Reversal-*.dmg -nobrowse -readonly -mountpoint "$mount_point"
           trap 'hdiutil detach "$mount_point"' EXIT
           app="$mount_point/Reversal.app"
           codesign --verify --deep --strict "$app"
+          if [ "$SIGNED" = true ]; then
+            # What Gatekeeper checks on another Mac: Developer ID, the hardened runtime, the ticket.
+            codesign -dvv "$app" 2>&1 | grep '^Authority=Developer ID Application: ' >/dev/null
+            for binary in "$app" "$app/Contents/MacOS/reversal-engine"; do
+              codesign -dvv "$binary" 2>&1 | grep 'flags=.*(runtime)' >/dev/null
+            done
+            xcrun stapler validate dist/Reversal-*.dmg
+            spctl --assess --type open --context context:primary-signature -vv dist/Reversal-*.dmg
+            spctl --assess --type execute -vv "$app"
+          fi
           # Every place the version shows has to agree with Cargo.toml.
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           plist="$app/Contents/Info.plist"
@@ -93,3 +166,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+      - name: Remove the signing keychain
+        if: always() && steps.signing.outputs.keychain != ''
+        env:
+          KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+        run: |
+          security delete-keychain "$KEYCHAIN" || true
+          rm -rf "$RUNNER_TEMP/signing"

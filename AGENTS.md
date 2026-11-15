@@ -108,7 +108,9 @@ open packaging/ios/Reversal.xcodeproj       # iOS app; for a device, set DEVELOP
   (`packaging/macos/libraw.sh`).
 - `.github/workflows/mac-app.yml` builds and checks the disk image on every push to `main`
   except docs-only changes, on pull requests that change packaging or dependencies, and on
-  request. It keeps the image as a run artifact for 7 days.
+  request. It keeps the image as a run artifact for 7 days. Pull requests build it ad hoc signed;
+  the rest sign it with Developer ID and notarize it once the signing secrets are set, and a
+  release fails without them.
 - `.github/workflows/ios-app.yml` builds the iOS app for the simulator, unsigned, on every push to
   `main` except docs-only changes, on pull requests that change its packaging, `reversal-ios` or
   dependencies, and on request. It checks the version, the licenses and what the app links, but
@@ -143,8 +145,13 @@ open packaging/ios/Reversal.xcodeproj       # iOS app; for a device, set DEVELOP
   (`git tag v0.1.0 && git push origin v0.1.0`). Install the disk image from the draft on a Mac that
   hasn't run this version, then publish. Publishing is the maintainer's decision. Releases are
   full releases, not pre-releases, so the newest one shows on the repository page.
-- The Mac app stays ad hoc signed through pre-alpha and alpha, with no Apple certificate; users
-  approve it with Open Anyway, as `Read me first.txt` explains.
+- **The Mac app is signed with Developer ID and notarized** in CI, so it opens on another Mac with
+  no Open Anyway. `build.sh` does it when `SIGNING_IDENTITY` and notary credentials are set, as
+  its header explains, and ad hoc signs otherwise. CI takes them from the repository secrets
+  `MACOS_CERTIFICATE` (the Developer ID Application certificate and key, exported as a .p12, in
+  base64), `MACOS_CERTIFICATE_PASSWORD`, and an App Store Connect API key with the Developer role:
+  `NOTARY_KEY` (the .p8 file's text), `NOTARY_KEY_ID` and `NOTARY_ISSUER`. The app needs no
+  entitlements under the hardened runtime; add only what a new feature proves it needs.
 - **iOS test builds go to TestFlight by hand for now:** in Xcode, choose Any iOS Device, then
   Product > Archive, and Distribute App to App Store Connect from the Organizer. Archive from a
   clean `main`, or a release tag for external testers. The build number is the commit count, and App Store Connect accepts each number
