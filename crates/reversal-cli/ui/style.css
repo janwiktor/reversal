@@ -543,9 +543,14 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
      like the other things that float there. It answers to a finger's size around the dots, and
      steps aside while a tool draws on the image: a crop frame's lower edge is grabbed there. */
   @media (any-pointer: coarse) {
-    #fold-panel { grid-area: stage; align-self: end; justify-self: center; z-index: 4; display: grid; place-items: center; width: 56px; height: 12px; padding: 0; background: none; border: 0; border-radius: 0 0 6px 6px; color: var(--ink-quiet); touch-action: none; -webkit-tap-highlight-color: transparent; transform: translateY(calc(100% + 1px)); }
-    #fold-panel svg { width: 20px; height: 8px; stroke-width: 2.5; }
-    #fold-panel[aria-expanded="false"] { height: 16px; margin-bottom: 4px; border-radius: 8px; background: var(--veil); box-shadow: var(--veil-edge); color: var(--ink); transform: translateY(calc(-1 * var(--stage-foot))); }
+    #fold-panel { grid-area: stage; align-self: end; justify-self: center; z-index: 4; display: grid; place-items: center; width: 56px; height: 16px; padding: 0; background: none; border: 0; border-radius: 8px; color: var(--ink-quiet); touch-action: none; -webkit-tap-highlight-color: transparent; transform: translateY(calc(100% + 1px)); transition: var(--fade) var(--ease); transition-property: transform, background-color, box-shadow, color; }
+    /* Dots to take hold of while the panel shows, and an arrow up to it while it's away: each
+       fades to the other where it is, as the handle moves between its two places. */
+    #fold-panel svg { grid-area: 1 / 1; width: 20px; height: 8px; transition: opacity var(--fade) var(--ease); }
+    #fold-panel .grip { stroke-width: 2.5; }
+    #fold-panel .up { stroke-width: 1.5; }
+    #fold-panel[aria-expanded="true"] .up, #fold-panel[aria-expanded="false"] .grip { opacity: 0; }
+    #fold-panel[aria-expanded="false"] { background: var(--veil); box-shadow: var(--veil-edge); color: var(--ink); transform: translateY(calc(-4px - var(--stage-foot))); }
     #fold-panel[aria-expanded="false"]::after { top: -24px; bottom: -4px; }
     body:is([data-tool="crop"], [data-tool="area"], [data-tool="base"]) #fold-panel { display: none; }
     /* Messages keep above the dots at the foot of the image, and the folder's name clear of them. */
@@ -591,11 +596,11 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
 /* Portrait, from a small tablet up: the image takes the full width, and under it the tools
    in two columns, or the frames list in their place. */
 @media (min-width: 600px) and (orientation: portrait) {
-  body { --panel-h: min(500px, 46vh); grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr); }
+  body { --panel-room: calc(100vh - var(--bar-h) - 120px); --panel-h: min(500px, 46vh); grid-template: "bar" auto "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr); }
   /* With the panel put away, the image is the page's foot. */
   body[data-dock="closed"] { --stage-foot: var(--foot); }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr); }
-  #roll, #dock { max-height: min(var(--panel-h), var(--panel-user, 100vh)); }
+  #roll, #dock { max-height: min(var(--panel-user, var(--panel-h)), var(--panel-room)); }
   #dock { display: grid; grid-template: "devhead sethead" auto "tone setup" auto "tone color" 1fr / 1fr 1fr; align-content: start; overflow-y: auto; }
   #develop { display: contents; }
   /* With no box of its own, #develop dims through its groups. */
@@ -606,13 +611,13 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   #tone { grid-area: tone; }
   #color { grid-area: color; }
   #setup-head, #setup, #color { border-left: 1px solid var(--seam); }
-  /* The handle sits where the line between the columns meets the panel's top edge: the headings
-     keep clear of it, and it covers the line's end with their background. */
+  /* The handle is over the middle of the headings' row, so the row runs across both columns as
+     one strip, with the headings clear of the dots, and the line between the columns starts
+     under it. */
   @media (any-pointer: coarse) {
     #develop-head { padding-right: 28px; }
     #setup-head { padding-left: 34px; }
-    body[data-frames="closed"] #fold-panel[aria-expanded="true"] { width: 36px; background: var(--strip); }
-    body[data-frames="closed"] #fold-panel[aria-expanded="true"]::after { left: -10px; right: -10px; }
+    #setup-head { border-left: 0; }
   }
 }
 /* A phone, held upright: the image, then one panel: the frames, or one group of tools
@@ -623,7 +628,7 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   :root { --stage-edge: 12px; }
   /* The bar at the bottom is the page's foot here. */
   #roll, #dock { padding-bottom: 0; }
-  body { --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where view save" var(--bar-h) "stage stage stage" minmax(0, 1fr) "panel panel panel" auto "crop crop crop" auto "modes modes modes" auto / minmax(0, 1fr) auto auto; }
+  body { --panel-room: calc(100vh - var(--bar-h) - 50px - var(--foot) - 120px); --panel-max: min(248px, 40vh); --frames-h: min(46vh, 400px); --hist-w: 168px; --hist-h: 56px; grid-template: "where view save" var(--bar-h) "stage stage stage" minmax(0, 1fr) "panel panel panel" auto "crop crop crop" auto "modes modes modes" auto / minmax(0, 1fr) auto auto; }
   body[data-frames="closed"] { grid-template-columns: minmax(0, 1fr) auto auto; }
   #bar { display: contents; }
   #where { grid-area: where; margin: 0; padding: 0 6px; background: var(--bar); border-bottom: 1px solid var(--seam); }
@@ -631,14 +636,14 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   #save { grid-area: save; background: var(--bar); border-bottom: 1px solid var(--seam); }
   #frame-tools { grid-area: panel; }
   #crop-tools { grid-area: crop; }
-  #dock { max-height: min(var(--panel-max), var(--panel-user, 100vh)); }
-  #roll { max-height: min(var(--frames-h), var(--panel-user, 100vh)); }
+  #dock { max-height: min(var(--panel-user, var(--panel-max)), var(--panel-room)); }
+  #roll { max-height: min(var(--panel-user, var(--frames-h)), var(--panel-room)); }
   body[data-frames="open"] :is(#frame-tools, #crop-tools), body[data-dock="closed"] :is(#frame-tools, #crop-tools) { display: none; }
   body:not([data-mode="crop"]) :is(#frame-tools, #crop-tools), body[data-mode="crop"] #dock { display: none; }
   #frame-tools { padding: 12px 12px 0; background: var(--panel); border-top: 1px solid var(--seam); }
   #crop-tools { flex-wrap: wrap; gap: 12px 8px; padding: 12px; background: var(--panel); }
   /* Dragged smaller, the Crop panel scrolls under its row of frame tools. */
-  #crop-tools { max-height: calc(var(--panel-user, 100vh) - var(--panel-fixed, 0px)); overflow-y: auto; }
+  #crop-tools { max-height: calc(min(var(--panel-user, 100vh), var(--panel-room)) - var(--panel-fixed, 0px)); overflow-y: auto; }
   #crop-tools .sep { display: none; }
   /* The bar at the bottom already says Crop. */
   #crop-label { display: none; }
