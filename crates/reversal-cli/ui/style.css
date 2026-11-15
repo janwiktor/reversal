@@ -433,7 +433,7 @@ body[data-tool="size"] #overlay { pointer-events: none; }
 #clip-high .clip-end { border-right-width: 0; border-left: 5px solid currentColor; margin: 0 0 0 4px; }
 #hist-fold { display: none; }
 
-/* The panel under the image has a handle to drag it smaller or away. Only a touch screen has
+/* The panel under the image has a handle to drag it taller, shorter or away. Only a touch screen has
    one, and only there: see the layouts below. */
 #fold-panel { display: none; }
 
@@ -538,8 +538,8 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
   .panel-head { border-top: 0; }
   body[data-frames="open"] #dock, body[data-frames="closed"] #roll, body[data-dock="closed"] :is(#roll, #dock) { display: none; }
   /* On a touch screen the panel's handle is three dots over the middle of its top edge, where
-     the panels keep nothing, so it takes no room of its own. A drag on it makes the panel
-     smaller or puts it away, and the dots then stay at the foot of the image, lit, in a box
+     the panels keep nothing, so it takes no room of its own. A drag on it sets the panel's
+     height or puts it away, and the handle then stays at the foot of the image, lit, in a box
      like the other things that float there. It answers to a finger's size around the dots, and
      steps aside while a tool draws on the image: a crop frame's lower edge is grabbed there. */
   @media (any-pointer: coarse) {
@@ -547,6 +547,8 @@ dialog[open], dialog[open]::backdrop { transition: opacity var(--fade) var(--eas
     /* Dots to take hold of while the panel shows, and an arrow up to it while it's away: each
        fades to the other where it is, as the handle moves between its two places. */
     #fold-panel svg { grid-area: 1 / 1; width: 20px; height: 8px; transition: opacity var(--fade) var(--ease); }
+    /* Under a finger it keeps to the edge it's dragged by, and only its look fades. */
+    body[data-panel-drag] #fold-panel { transition-property: background-color, box-shadow, color; }
     #fold-panel .grip { stroke-width: 2.5; }
     #fold-panel .up { stroke-width: 1.5; }
     #fold-panel[aria-expanded="true"] .up, #fold-panel[aria-expanded="false"] .grip { opacity: 0; }
