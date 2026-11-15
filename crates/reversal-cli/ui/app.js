@@ -34,9 +34,10 @@ let lastPath = null;
 let unfinished = [];      // frames a save was cut short before, as the folder lists them
 let folderPath = "";      // the open folder, to name what's saved in it from there
 let fullShown = false;  // the preview on screen is the entire scan, which areas are drawn on
-// The last preview of each kind, as { key, url, clipped }, so going between the picture and its
-// negative shows at once.
+// The last preview of each kind, as { key, url, clipped, job }, so going between the picture and
+// its negative shows at once. `job` is what the engine was asked for.
 const shots = { positive: null, negative: null };
+let shownShot = null;  // the one on screen
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
 
@@ -204,7 +205,7 @@ function slideRow(row, show, now = false) {
 }
 
 // A double click, with a mouse or a finger. A touch screen sends none, so two short taps in one
-// place count as one.
+// place count as one. `run` gets the event that completed it, for where it was.
 const TAP_MS = 300, TAP_SLIP = 10, DOUBLE_TAP_APART = 24;
 function onDouble(el, run) {
   el.addEventListener("dblclick", run);
@@ -216,7 +217,7 @@ function onDouble(el, run) {
     down = null;
     const second = tap && last && e.timeStamp - last.at < DOUBLE_CLICK_MS && near(e, last, DOUBLE_TAP_APART);
     last = second ? null : tap;
-    if (second) run();
+    if (second) run(e);
   });
 }
 
@@ -698,6 +699,7 @@ async function open(name) {
   $("message").textContent = "Opening the raw file…";
   $("message").hidden = false;
   $("view").hidden = true;
+  dropDetail();
   setBusy(true);
   try {
     const data = await ask(`/api/load?file=${encodeURIComponent(name)}`);
@@ -1468,11 +1470,16 @@ addEventListener("blur", releaseNegative);
 // ---------- Tools and overlay ----------
 // Region tools show the whole scan (straightened, mirrored, rotated) with the areas drawn on it.
 function setTool(t) {
+  // A tool opens on the entire scan, which is what it works on. From another tool, the view
+  // stays where it was moved to.
+  if (t && !tool) zoomOut();
   tool = t;
   document.body.dataset.tool = t ?? "";
   cropDraft = t === "crop" ? { ...cropToAdjust() } : null;
   cropDrag = null;
   dragStart = null;
+  // Center size shows its area on the entire scan, so the area is in view.
+  if (t === "size") zoomOut();
   // The crop frame shows once the entire scan is on screen.
   $("crop-layer").hidden = true;
   $("crop-layer").style.cursor = "";
@@ -1778,9 +1785,11 @@ async function refresh() {
     const last = shots[kind];
     let shot = last;
     if (last?.key !== key) {
-      const res = await api("/api/preview", { file, settings: current.settings, full, negative });
+      const job = { file, settings: structuredClone(current.settings), full, negative };
+      const res = await api("/api/preview", job);
       const clipped = Number(res.headers.get("X-Clipped") || 0);
-      shot = { key, url: URL.createObjectURL(await res.blob()), clipped };
+      scanScale = Number(res.headers.get("X-Scale")) || scanScale;
+      shot = { key, url: URL.createObjectURL(await res.blob()), clipped, job };
       if (file !== current?.file) { URL.revokeObjectURL(shot.url); return; }
       shots[kind] = shot;
     }
@@ -1790,6 +1799,9 @@ async function refresh() {
     if (last && last !== shot) URL.revokeObjectURL(last.url);
     if (file !== current?.file) return;
     fullShown = full;
+    shownShot = shot;
+    // A sharper part made for another picture goes, and one for this follows.
+    if (detailShown && detailShown.key !== shot.key) dropDetail();
     $("view").hidden = false;
     $("message").hidden = true;
     fit();
@@ -1820,16 +1832,268 @@ function placeStage() {
 new ResizeObserver(placeStage).observe($("toolbar"));
 // While the padding eases, the stage's content box changes, so this follows it every frame.
 function fit() {
-  const stage = $("stage"), img = $("photo");
+  const img = $("photo");
   if (!img.naturalWidth) return;
-  const s = getComputedStyle(stage);
-  const width = stage.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
-  const height = stage.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom);
-  const scale = Math.max(0, Math.min(width / img.naturalWidth, height / img.naturalHeight));
-  $("view").style.width = `${Math.max(1, img.naturalWidth * scale)}px`;
-  $("view").style.height = `${Math.max(1, img.naturalHeight * scale)}px`;
+  const box = stageBox();
+  const scale = Math.max(0, Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight));
+  fitSize = { width: Math.max(1, img.naturalWidth * scale), height: Math.max(1, img.naturalHeight * scale) };
+  // The zoom stays while the image keeps its size, from frame to frame too, for checking a roll
+  // at one place. Another size is another framing, which starts in full view.
+  const size = `${img.naturalWidth}×${img.naturalHeight}`;
+  if (size !== zoomedSize) {
+    zoomedSize = size;
+    Object.assign(zoom, ZOOM_OUT);
+  }
+  placeView(box);
 }
 new ResizeObserver(fit).observe($("stage"));
+
+// ---------- Zoom ----------
+// The image fits the room between the panels, and zooms from there up to twice the scan's own
+// pixels: a pinch or Control and the wheel zoom around where they point, and a double click or
+// tap goes to 100%, one scan pixel to one of the screen's, and back. Zoomed in, two fingers on a
+// touch screen or trackpad move the image, or a drag with Space held, so one finger or the mouse
+// stays free for the open tool. The stage clips the image, and its bars and messages stay over it.
+// Zooming is only a way of looking: it changes no setting, so nothing is measured or saved for it.
+const ZOOM_OUT = { z: 1, x: 0, y: 0 };
+// How far the image is zoomed from its fit, and how far its center is from the room's, in px.
+const zoom = { ...ZOOM_OUT };
+let fitSize = { width: 1, height: 1 };
+let zoomedSize = "";  // the size of the image the zoom was set on
+let scanScale = 4;    // scan pixels to one of the preview's, each way
+const ZOOM_SNAP = 1.03;      // closer to the fit than this is the fit
+const ZOOM_WHEEL = 0.01;     // zoom per wheel step, as an exponent
+const ZOOM_MIN_GAIN = 1.15;  // a 100% view this close to the fit isn't worth a double click
+
+// The room the image fits: the stage inside its padding, and where its center is on the page.
+function stageBox() {
+  const stage = $("stage"), s = getComputedStyle(stage), r = stage.getBoundingClientRect();
+  const left = parseFloat(s.paddingLeft), top = parseFloat(s.paddingTop);
+  const width = stage.clientWidth - left - parseFloat(s.paddingRight);
+  const height = stage.clientHeight - top - parseFloat(s.paddingBottom);
+  return { width, height, x: r.left + left + width / 2, y: r.top + top + height / 2 };
+}
+// The zoom that shows one scan pixel on one of the screen's, and the most there is.
+const zoomFull = () => $("photo").naturalWidth * scanScale / devicePixelRatio / fitSize.width;
+const zoomMax = () => Math.max(1, 2 * zoomFull());
+// Sizes and moves the image for the zoom, kept within what there is to see: the image never
+// leaves room beside it that it could fill.
+function placeView(box = stageBox()) {
+  const view = $("view");
+  zoom.z = clamp(zoom.z, 1, zoomMax());
+  const width = fitSize.width * zoom.z, height = fitSize.height * zoom.z;
+  const reach = (size, room) => Math.max(0, (size - room) / 2);
+  zoom.x = clamp(zoom.x, -reach(width, box.width), reach(width, box.width));
+  zoom.y = clamp(zoom.y, -reach(height, box.height), reach(height, box.height));
+  view.style.width = `${width}px`;
+  view.style.height = `${height}px`;
+  view.style.transform = `translate(${zoom.x}px, ${zoom.y}px)`;
+  wantDetail();
+}
+// Zooms to `z`, keeping the point of the image at `at` on the page where it is.
+function zoomTo(z, at, eased = false) {
+  const box = stageBox(), view = $("view");
+  z = clamp(z, 1, zoomMax());
+  if (z < ZOOM_SNAP) z = 1;
+  const place = () => ({ width: view.style.width, height: view.style.height, transform: view.style.transform });
+  const from = place(), ratio = z / zoom.z, x = at.x - box.x, y = at.y - box.y;
+  Object.assign(zoom, { z, x: x - (x - zoom.x) * ratio, y: y - (y - zoom.y) * ratio });
+  placeView(box);
+  const to = place();
+  if (eased) move(view, "zoom", { width: [from.width, to.width], height: [from.height, to.height], transform: [from.transform, to.transform] }, motion("--slide"), { after: wantDetail });
+  else endMotion(view, "zoom");
+}
+function zoomOut() {
+  if (zoom.z === 1) return;
+  Object.assign(zoom, ZOOM_OUT);
+  placeView();
+}
+onDouble($("stage"), (e) => {
+  if (!current || !e.target.closest("#view")) return;
+  const full = zoomFull();
+  zoomTo(zoom.z > 1 ? 1 : full > ZOOM_MIN_GAIN ? full : zoomMax(), { x: e.clientX, y: e.clientY }, true);
+});
+// A drawing or a crop drag under way gives way to a move of the image.
+function cancelDrags() {
+  if (dragStart) {
+    dragStart = null;
+    drawOverlay();
+  }
+  if (cropDrag) {
+    setCropView(cropDrag.from);
+    cropDrag = null;
+    $("crop-layer").style.cursor = "";
+  }
+}
+
+// Two fingers on the stage pinch and move the image, wherever on it they land: the stage hears
+// of them before the tool under them does, and ends what one finger had begun there.
+const touches = new Map();  // the fingers on the stage, by pointer
+let pinch = null;           // the zoom when two fingers came down, where between them, and how far apart
+const fingers = () => {
+  const [a, b] = [...touches.values()];
+  return { at: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, apart: Math.hypot(a.x - b.x, a.y - b.y) };
+};
+function touchesChanged() {
+  if (touches.size === 2) {
+    cancelDrags();
+    pinch = { ...zoom, ...fingers() };
+  } else {
+    pinch = null;
+    if (zoom.z < ZOOM_SNAP) zoomOut();
+  }
+}
+$("stage").addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  touchesChanged();
+}, true);
+$("stage").addEventListener("pointermove", (e) => {
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!pinch || !current) return;
+  const now = fingers(), box = stageBox();
+  const z = clamp(pinch.z * now.apart / Math.max(1, pinch.apart), 1, zoomMax()), ratio = z / pinch.z;
+  // The point between the fingers stays between them as they move and spread.
+  Object.assign(zoom, { z, x: now.at.x - box.x - (pinch.at.x - box.x - pinch.x) * ratio, y: now.at.y - box.y - (pinch.at.y - box.y - pinch.y) * ratio });
+  endMotion($("view"), "zoom");
+  placeView(box);
+}, true);
+for (const end of ["pointerup", "pointercancel"]) {
+  // On the window: a finger that began on the stage can come up anywhere.
+  addEventListener(end, (e) => { if (touches.delete(e.pointerId)) touchesChanged(); }, true);
+}
+// A trackpad's pinch comes as a wheel turn with Control held in some browsers and as a gesture in
+// others, and its two-finger move as a plain wheel turn.
+$("stage").addEventListener("wheel", (e) => {
+  if (!current || $("view").hidden || e.target.closest(".float")) return;
+  const lines = e.deltaMode === 1 ? 16 : 1;
+  if (e.ctrlKey) {
+    e.preventDefault();
+    zoomTo(zoom.z * Math.exp(-e.deltaY * lines * ZOOM_WHEEL), { x: e.clientX, y: e.clientY });
+  } else if (zoom.z > 1) {
+    e.preventDefault();
+    zoom.x -= e.deltaX * lines;
+    zoom.y -= e.deltaY * lines;
+    endMotion($("view"), "zoom");
+    placeView();
+  }
+}, { passive: false });
+let gestureFrom = 0;  // the zoom a trackpad's pinch gesture began at; fingers on a screen are followed themselves
+$("stage").addEventListener("gesturestart", () => { gestureFrom = touches.size ? 0 : zoom.z; });
+$("stage").addEventListener("gesturechange", (e) => { if (gestureFrom && !touches.size && current) zoomTo(gestureFrom * e.scale, { x: e.clientX, y: e.clientY }); });
+$("stage").addEventListener("gestureend", () => { gestureFrom = 0; });
+
+// Space held with the pointer over the image turns a drag into a move of it, before any tool
+// hears of the drag. Elsewhere Space keeps its own meaning, as on a button.
+let overStage = false, spaceHeld = false;
+let panDrag = null;  // { pointer, x, y, from: where the image was }
+$("stage").addEventListener("pointerenter", () => { overStage = true; });
+$("stage").addEventListener("pointerleave", () => { overStage = false; });
+function showPan() {
+  if (panDrag) document.body.dataset.pan = "drag";
+  else if (spaceHeld) document.body.dataset.pan = "";
+  else delete document.body.dataset.pan;
+}
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || e.target.matches?.("input[type=text]") || !(overStage || spaceHeld)) return;
+  e.preventDefault();
+  spaceHeld = true;
+  showPan();
+}, true);
+function releaseSpace() {
+  spaceHeld = false;
+  showPan();
+}
+document.addEventListener("keyup", (e) => { if (e.code === "Space") releaseSpace(); }, true);
+addEventListener("blur", releaseSpace);
+$("stage").addEventListener("pointerdown", (e) => {
+  if (!spaceHeld || e.button !== 0 || e.pointerType === "touch" || panDrag) return;
+  e.preventDefault();
+  e.stopPropagation();
+  panDrag = { pointer: e.pointerId, x: e.clientX, y: e.clientY, from: { x: zoom.x, y: zoom.y } };
+  $("stage").setPointerCapture(e.pointerId);
+  showPan();
+}, true);
+$("stage").addEventListener("pointermove", (e) => {
+  if (panDrag?.pointer !== e.pointerId) return;
+  zoom.x = panDrag.from.x + e.clientX - panDrag.x;
+  zoom.y = panDrag.from.y + e.clientY - panDrag.y;
+  endMotion($("view"), "zoom");
+  placeView();
+});
+for (const end of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  $("stage").addEventListener(end, (e) => {
+    if (panDrag?.pointer !== e.pointerId) return;
+    panDrag = null;
+    showPan();
+  });
+}
+
+// The preview has a quarter of the scan's pixels each way, which is all a fitted image shows and
+// is quick to render while a slider moves. Zoomed past those pixels, the part in view comes from
+// the full scan and lies over the preview, which shows meanwhile. It's asked for once the view
+// and the settings have rested a moment, so a slider or a pinch never waits for it, and with some
+// room around it, so a short move needs no new one.
+const DETAIL_PAUSE_MS = 200;
+const DETAIL_GAIN = 1.2;      // screen pixels to one of the preview's, from which the scan shows more
+const DETAIL_MARGIN = 0.15;   // room around the part in view, as a share of it
+const DETAIL_MAX_SIDE = 3200;
+let detailShown = null;  // { key, part, gain }: the preview it was made for, the part it covers, and the gain it's sharp to
+let detailTimer = 0, detailLoading = false, detailAgain = false;
+function wantDetail() {
+  clearTimeout(detailTimer);
+  detailTimer = setTimeout(loadDetail, DETAIL_PAUSE_MS);
+}
+function dropDetail() {
+  const detail = $("detail");
+  detail.hidden = true;
+  if (detail.src) URL.revokeObjectURL(detail.src);
+  detail.removeAttribute("src");
+  detailShown = null;
+}
+async function loadDetail() {
+  if (detailLoading) { detailAgain = true; return; }
+  const shot = shownShot, view = $("view").getBoundingClientRect(), stage = $("stage").getBoundingClientRect();
+  const gain = view.width * devicePixelRatio / $("photo").naturalWidth;
+  // A running save has the engine, and the memory a full scan takes.
+  if (!current || !shot || $("view").hidden || gain < DETAIL_GAIN || batch || motionTag($("view"), "zoom") != null) {
+    if (gain < DETAIL_GAIN) dropDetail();
+    return;
+  }
+  const seen = {
+    x0: clamp((stage.left - view.left) / view.width, 0, 1), y0: clamp((stage.top - view.top) / view.height, 0, 1),
+    x1: clamp((stage.right - view.left) / view.width, 0, 1), y1: clamp((stage.bottom - view.top) / view.height, 0, 1),
+  };
+  if (seen.x1 <= seen.x0 || seen.y1 <= seen.y0) return;
+  const has = detailShown;
+  const covered = has?.key === shot.key && has.part.x0 <= seen.x0 && has.part.y0 <= seen.y0 && has.part.x1 >= seen.x1 && has.part.y1 >= seen.y1;
+  // Sharp enough for this zoom, or as sharp as the scan gets.
+  if (covered && has.gain >= Math.min(gain, scanScale) / DETAIL_GAIN) return;
+  const roomX = (seen.x1 - seen.x0) * DETAIL_MARGIN, roomY = (seen.y1 - seen.y0) * DETAIL_MARGIN;
+  const part = { x0: Math.max(0, seen.x0 - roomX), y0: Math.max(0, seen.y0 - roomY), x1: Math.min(1, seen.x1 + roomX), y1: Math.min(1, seen.y1 + roomY) };
+  const side = Math.max((part.x1 - part.x0) * view.width, (part.y1 - part.y0) * view.height) * devicePixelRatio;
+  const pixels = Math.min(DETAIL_MAX_SIDE, Math.ceil(side));
+  detailLoading = true;
+  try {
+    const res = await api("/api/detail", { ...shot.job, part, pixels });
+    const url = URL.createObjectURL(await res.blob());
+    const detail = $("detail"), old = detail.src;
+    // The picture changed meanwhile: its own detail follows.
+    if (shownShot !== shot) { URL.revokeObjectURL(url); return; }
+    await new Promise((done) => { detail.onload = detail.onerror = done; detail.src = url; });
+    if (old) URL.revokeObjectURL(old);
+    if (shownShot !== shot) { dropDetail(); return; }
+    for (const [side, v] of [["left", part.x0], ["top", part.y0], ["width", part.x1 - part.x0], ["height", part.y1 - part.y0]]) detail.style[side] = `${v * 100}%`;
+    detail.hidden = false;
+    detailShown = { key: shot.key, part, gain: gain * pixels / side };
+  } catch {
+    // The preview stays, as sharp as it is.
+  } finally {
+    detailLoading = false;
+    if (detailAgain) { detailAgain = false; loadDetail(); }
+  }
+}
 
 const histCanvas = document.createElement("canvas");
 // The share of the preview's pixels at one end that's worth a warning, and the share of the DNG's

@@ -127,6 +127,86 @@ impl Rgb32 {
     }
 }
 
+/// A full scan kept for looking at closely: 16 bits a channel, which holds what a sensor
+/// records in half the memory of an [`Rgb32`]. Only parts of it are ever turned back.
+#[derive(Clone, Debug)]
+pub struct Scan16 {
+    pub width: usize,
+    pub height: usize,
+    data: Vec<u16>,
+}
+
+impl Scan16 {
+    const WHITE: f32 = u16::MAX as f32;
+
+    pub fn new(scan: &Rgb32) -> Scan16 {
+        let mut data = vec![0u16; scan.data.len()];
+        for_each_part(&mut data, 3, |start, part| {
+            for (out, &v) in part.iter_mut().zip(&scan.data[start..]) {
+                *out = (v.clamp(0.0, 1.0) * Self::WHITE + 0.5) as u16;
+            }
+        });
+        Scan16 {
+            width: scan.width,
+            height: scan.height,
+            data,
+        }
+    }
+
+    pub fn bytes(&self) -> usize {
+        std::mem::size_of_val(self.data.as_slice())
+    }
+
+    fn get(&self, x: usize, y: usize) -> [f32; 3] {
+        let i = (y * self.width + x) * 3;
+        [0, 1, 2].map(|c| f32::from(self.data[i + c]) / Self::WHITE)
+    }
+
+    /// The pixels of `r` on this scan turned by `degrees`, as [`Rgb32::straighten`] and then
+    /// [`Rgb32::crop`] would give them, without turning the rest.
+    pub fn straightened_part(&self, degrees: f32, r: Rect) -> Rgb32 {
+        let r = r.clamp(self.width, self.height);
+        let (w, h) = (self.width, self.height);
+        let (out_w, out_h) = (r.right - r.left, r.bottom - r.top);
+        let mut out = Rgb32::new(out_w, out_h);
+        if out.data.is_empty() {
+            return out;
+        }
+        let turned = degrees.abs() >= 1e-3;
+        let (s, c) = degrees.to_radians().sin_cos();
+        let (cx, cy) = ((w as f32 - 1.0) / 2.0, (h as f32 - 1.0) / 2.0);
+        for_each_part(&mut out.data, 3, |start, part| {
+            for (i, px) in part.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+                let at = start / 3 + i;
+                let (x, y) = (r.left + at % out_w, r.top + at / out_w);
+                if !turned {
+                    *px = self.get(x, y);
+                    continue;
+                }
+                // Inverse rotation, as in `Rgb32::straighten`.
+                let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+                let sx = (c * dx + s * dy + cx).clamp(0.0, (w - 1) as f32);
+                let sy = (-s * dx + c * dy + cy).clamp(0.0, (h - 1) as f32);
+                let (x0, y0) = (sx.floor() as usize, sy.floor() as usize);
+                let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+                let (fx, fy) = (sx - x0 as f32, sy - y0 as f32);
+                let (a, b, cc, d) = (
+                    self.get(x0, y0),
+                    self.get(x1, y0),
+                    self.get(x0, y1),
+                    self.get(x1, y1),
+                );
+                for k in 0..3 {
+                    let top = a[k] + (b[k] - a[k]) * fx;
+                    let bot = cc[k] + (d[k] - cc[k]) * fx;
+                    px[k] = top + (bot - top) * fy;
+                }
+            }
+        });
+        out
+    }
+}
+
 impl Rgb32 {
     pub fn new(width: usize, height: usize) -> Self {
         Rgb32 {
@@ -313,6 +393,31 @@ pub fn for_each_part<T: Send>(data: &mut [T], unit: usize, f: impl Fn(usize, &mu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_part_of_a_scan_kept_in_16_bits_matches_the_whole_scan_straightened_and_cropped() {
+        let (w, h) = (40, 30);
+        let mut scan = Rgb32::new(w, h);
+        for (i, v) in scan.data.iter_mut().enumerate() {
+            *v = ((i * 37) % 101) as f32 / 101.0;
+        }
+        let kept = Scan16::new(&scan);
+        assert_eq!(kept.bytes(), w * h * 3 * 2);
+        let r = Rect {
+            top: 4,
+            bottom: 21,
+            left: 7,
+            right: 33,
+        };
+        for degrees in [0.0, 3.5, -8.0] {
+            let want = scan.straighten(degrees).crop(r);
+            let got = kept.straightened_part(degrees, r);
+            assert_eq!((got.width, got.height), (want.width, want.height));
+            for (a, b) in got.data.iter().zip(&want.data) {
+                assert!((a - b).abs() < 2.0 / 65535.0, "{degrees}: {a} {b}");
+            }
+        }
+    }
 
     fn numbered(w: usize, h: usize) -> Rgb32 {
         let mut img = Rgb32::new(w, h);

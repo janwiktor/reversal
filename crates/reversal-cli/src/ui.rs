@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use reversal_core::dng;
-use reversal_core::image::{NRect, Rgb32};
+use reversal_core::image::{NRect, Rgb32, Scan16};
 use reversal_core::invert::{self, Adjust, Hints, Settings};
 use reversal_core::render;
 use serde::Deserialize;
@@ -159,6 +159,10 @@ struct State {
     notices: Option<PathBuf>,
     folder: Arc<Folder>,
     cache: HashMap<String, Loaded>,
+    /// The full scan of the frame on screen, for looking at it closely. A frame keeps it from
+    /// being opened, and one that was kept ready to show decodes it again when it's first asked
+    /// for. One at a time: a 24-megapixel scan takes 144 MB.
+    detail: Option<(String, Scan16)>,
     /// The frame last asked for: the one on screen.
     shown: Option<String>,
     batch: Batch,
@@ -175,6 +179,23 @@ struct Job {
     #[serde(default)]
     negative: bool,
 }
+
+#[derive(Deserialize)]
+struct DetailJob {
+    file: String,
+    settings: Settings,
+    #[serde(default)]
+    full: bool,
+    #[serde(default)]
+    negative: bool,
+    /// The part to show, on the picture as the preview shows it.
+    part: NRect,
+    /// The pixels its long side is shown across.
+    pixels: usize,
+}
+
+/// The longest side of a part of a scan rendered for looking at closely.
+const DETAIL_MAX_SIDE: usize = 4096;
 
 #[derive(Deserialize)]
 struct SaveSettings {
@@ -285,6 +306,7 @@ impl Engine {
             .as_ref()
             .and_then(|file| state.cache.remove_entry(file));
         state.cache = shown.into_iter().collect();
+        state.detail = None;
     }
 }
 
@@ -452,6 +474,7 @@ impl State {
             shown: None,
             folder: Arc::new(Folder::new(dir)),
             cache: HashMap::new(),
+            detail: None,
             batch: Batch::default(),
             roll_readings: Arc::default(),
         }
@@ -541,6 +564,10 @@ impl State {
             (Method::Post, "/api/preview") => {
                 let job: Job = read_body(req)?;
                 self.preview(&job)
+            }
+            (Method::Post, "/api/detail") => {
+                let job: DetailJob = read_body(req)?;
+                self.detail(&job)
             }
             (Method::Post, "/api/settings") => {
                 let job: SaveSettings = read_body(req)?;
@@ -656,10 +683,17 @@ impl State {
 
     fn ensure_loaded(&mut self, file: &str) -> Result<&Loaded, (u16, String)> {
         self.shown = Some(file.to_string());
+        if self.detail.as_ref().is_some_and(|(name, _)| name != file) {
+            self.detail = None;
+        }
         if !self.cache.contains_key(file) {
             let path = self.folder.resolve(file)?;
             let t = Instant::now();
             let scan = reversal_core::decode::decode(&path).map_err(|e| (500, e.to_string()))?;
+            // While a save runs, memory goes to the frames it converts.
+            if !self.batch.is_running() {
+                self.detail = Some((file.to_string(), Scan16::new(&scan)));
+            }
             let small = invert::analysis_image(&scan);
             let auto = Settings::new(
                 invert::estimate_on(&small, &Hints::default()),
@@ -702,10 +736,13 @@ impl State {
     fn preview(&mut self, job: &Job) -> Handled {
         let loaded = self.ensure_loaded(&job.file)?;
         let full = job.full.then_some(NRect::FULL);
+        // How many of the scan's pixels one of the preview's stands for, each way.
+        let scale = invert::ANALYSIS_FACTOR.to_string();
         if job.negative {
             let img = invert::negative_with(&loaded.small, &job.settings, full);
             return Ok(Response::new("image/jpeg", render::display_jpeg(&img, 88))
-                .with_header("Cache-Control", "no-store"));
+                .with_header("Cache-Control", "no-store")
+                .with_header("X-Scale", &scale));
         }
         let img = invert::convert_with(&loaded.small, &job.settings, full);
         let clipped =
@@ -714,7 +751,34 @@ impl State {
         let jpeg = render::preview_jpeg(&img, &profile, 88);
         Ok(Response::new("image/jpeg", jpeg)
             .with_header("Cache-Control", "no-store")
+            .with_header("X-Scale", &scale)
             .with_header("X-Clipped", &format!("{clipped:.6}")))
+    }
+
+    /// A part of the frame on screen from its full scan, as the preview would show it there.
+    fn detail(&mut self, job: &DetailJob) -> Handled {
+        if self.batch.is_running() {
+            return Err((409, "busy saving".to_string()));
+        }
+        self.ensure_loaded(&job.file)?;
+        if self.detail.is_none() {
+            let path = self.folder.resolve(&job.file)?;
+            let scan = reversal_core::decode::decode(&path).map_err(|e| (500, e.to_string()))?;
+            self.detail = Some((job.file.clone(), Scan16::new(&scan)));
+        }
+        let Some((_, scan)) = &self.detail else {
+            unreachable!("the scan was just kept");
+        };
+        let full = job.full.then_some(NRect::FULL);
+        let side = job.pixels.clamp(1, DETAIL_MAX_SIDE);
+        let img = invert::part_with(scan, &job.settings, full, job.part, side, job.negative);
+        let jpeg = if job.negative {
+            render::display_jpeg(&img, 88)
+        } else {
+            let (profile, _) = reversal_core::profiles(&job.settings);
+            render::preview_jpeg(&img, &profile, 88)
+        };
+        Ok(Response::new("image/jpeg", jpeg).with_header("Cache-Control", "no-store"))
     }
 
     fn save_settings(&self, job: &SaveSettings) -> Handled {
@@ -732,13 +796,15 @@ impl State {
         ))
     }
 
-    fn export(&self, files: Vec<String>) -> Handled {
+    fn export(&mut self, files: Vec<String>) -> Handled {
         for file in &files {
             self.folder.resolve(file)?;
         }
         if self.batch.is_running() {
             return Err((409, "another task is still running".to_string()));
         }
+        // The save decodes its own scans, and needs the memory.
+        self.detail = None;
         self.folder.saving_starts(&files);
         let folder = self.folder.clone();
         self.batch
