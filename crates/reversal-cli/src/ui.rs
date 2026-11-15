@@ -171,6 +171,9 @@ struct Job {
     settings: Settings,
     #[serde(default)]
     full: bool,
+    /// Show the negative itself, not its positive.
+    #[serde(default)]
+    negative: bool,
 }
 
 #[derive(Deserialize)]
@@ -699,6 +702,11 @@ impl State {
     fn preview(&mut self, job: &Job) -> Handled {
         let loaded = self.ensure_loaded(&job.file)?;
         let full = job.full.then_some(NRect::FULL);
+        if job.negative {
+            let img = invert::negative_with(&loaded.small, &job.settings, full);
+            return Ok(Response::new("image/jpeg", render::display_jpeg(&img, 88))
+                .with_header("Cache-Control", "no-store"));
+        }
         let img = invert::convert_with(&loaded.small, &job.settings, full);
         let clipped =
             dng::clipped_share(&invert::picture_for_clipping(&loaded.small, &job.settings));

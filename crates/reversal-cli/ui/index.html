@@ -17,6 +17,8 @@
   <symbol id="i-hist" viewBox="0 0 16 16"><path d="M1.8 13.2h12.4M2.5 13.2C4 13.2 4.6 5 6.3 5s2 5.2 3.4 5.2 1.6-3.4 2.8-3.4 1.2 6.4 1.8 6.4"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7L13 5.8M13 2.6v3.2H9.8"/></symbol>
   <symbol id="i-crop" viewBox="0 0 16 16"><path d="M4.2 1.8v9.3c0 .4.3.7.7.7h9.3M1.8 4.2h9.3c.4 0 .7.3.7.7v9.3"/></symbol>
+  <!-- A frame cut corner to corner, one half dark: the picture and its negative. -->
+  <symbol id="i-negative" viewBox="0 0 16 16"><rect x="1.8" y="3.2" width="12.4" height="9.6" rx=".7"/><path d="M14.2 3.9v8.2c0 .4-.3.7-.7.7H2.7Z" fill="currentColor"/></symbol>
   <symbol id="i-mirror" viewBox="0 0 16 16"><path d="M8 1.8v12.4M5.8 4.2v7.6L1.8 11.8ZM10.2 4.2v7.6h4Z"/></symbol>
   <!-- An open-end wrench, drawn level and turned to the diagonal. -->
   <symbol id="i-setup" viewBox="0 0 16 16"><path transform="rotate(-45 8 8)" d="M2.5 6.85H8.41A3.3 3.3 0 0 1 14.61 6.9H11.2V9.1H14.61A3.3 3.3 0 0 1 8.41 9.15H2.5A1.15 1.15 0 0 1 2.5 6.85Z"/></symbol>
@@ -38,6 +40,11 @@
     <button type="button" class="icon" id="flip" aria-pressed="false" title="Mirror left-right, for scans made emulsion side up" aria-label="Mirror"><svg aria-hidden="true"><use href="#i-mirror"/></svg></button>
     <!-- In a narrower window, crop and straighten wait behind this button, in a bar of their own. -->
     <button type="button" class="icon" id="crop-open" aria-expanded="false" aria-controls="crop-tools" title="Crop and straighten" aria-label="Crop and straighten"><svg aria-hidden="true"><use href="#i-crop"/></svg></button>
+  </div>
+  <!-- Its own place in the bar, so it stays there in every layout: on a phone the frame tools
+       leave the bar for the Crop panel. -->
+  <div id="view-tools">
+    <button type="button" class="icon" id="negative" aria-pressed="false" aria-keyshortcuts="N" title="Hold to show the original negative. With areas shown, click to keep it (N)" aria-label="Original negative"><svg aria-hidden="true"><use href="#i-negative"/></svg></button>
   </div>
   <div id="crop-tools" role="group" aria-label="Crop and straighten">
     <span class="sep"></span>
@@ -125,7 +132,7 @@
   </div>
   <section id="setup" aria-labelledby="h-setup">
     <div class="row first">
-      <div class="row-label" id="l-film">Film</div>
+      <div class="row-label" id="l-film">Negative</div>
       <div class="seg" id="film-seg" role="group" aria-labelledby="l-film" title="Detected from the scan. Choose the other type to convert this frame as that instead.">
         <button type="button" id="film-color" aria-pressed="true">Color</button>
         <button type="button" id="film-bw" aria-pressed="false">B&amp;W</button>

@@ -34,6 +34,9 @@ let lastPath = null;
 let unfinished = [];      // frames a save was cut short before, as the folder lists them
 let folderPath = "";      // the open folder, to name what's saved in it from there
 let fullShown = false;  // the preview on screen is the entire scan, which areas are drawn on
+// The last preview of each kind, as { key, url, clipped }, so going between the picture and its
+// negative shows at once.
+const shots = { positive: null, negative: null };
 let rendering = false;  // one preview at a time; changes meanwhile ask for one more
 let renderAgain = false;
 
@@ -687,6 +690,7 @@ async function open(name) {
   clearTimeout(areaTimer);
   clearTimeout(straightenTimer);
   straightenUnmeasured = centerSizeUnmeasured = false;
+  negativeKept = false;
   opening = name;
   current = null;  // no edits while nothing is open
   markCurrent(name);
@@ -717,7 +721,7 @@ async function open(name) {
 function setBusy(busy) {
   $("reset").disabled = busy || !current;
   const empty = !current && !opening;
-  for (const part of ["frame-tools", "crop-tools", "develop", "setup"]) $(part).inert = empty;
+  for (const part of ["frame-tools", "view-tools", "crop-tools", "develop", "setup"]) $(part).inert = empty;
   updateSaveButton();
   if (busy && !batch) $("export").disabled = true;
 }
@@ -800,6 +804,7 @@ function showControls(film) {
   showSetupNote();
   press($("base-draw"), customBase);
   press($("show-areas"), tool === "show");
+  press($("negative"), negativeNow());
 }
 
 const sameRect = (a, b) => b && ["x0", "y0", "x1", "y1"].every((k) => Math.abs(a[k] - b[k]) < 1e-4);
@@ -1010,6 +1015,10 @@ document.addEventListener("keydown", (e) => {
       return;
     }
   }
+  if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target.matches("input[type=text]")) {
+    if (!e.repeat) pressNegative();
+    return;
+  }
   // Up and down walk the frames, unless a slider or text box has the keys.
   if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.target.matches("input[type=range], input[type=text]")) {
     e.preventDefault();
@@ -1018,6 +1027,7 @@ document.addEventListener("keydown", (e) => {
     if (next && next.name !== frameNow()) open(next.name);
   }
 });
+document.addEventListener("keyup", (e) => { if (e.key.toLowerCase() === "n") releaseNegative(); });
 // In the app, a right-click shouldn't offer a web page's Reload.
 if (shell) document.addEventListener("contextmenu", (e) => { if (!e.target.matches("input[type=text]") && !e.target.closest("#note, #about")) e.preventDefault(); });
 
@@ -1417,6 +1427,44 @@ async function measureNow(done, clearsWarning) {
   return true;
 }
 
+// ---------- The original negative ----------
+// The scan itself, in place of its positive, framed the same way. Over the picture it's a look
+// to compare with, so it shows while its button or N is held. Where areas are shown or drawn on
+// the entire scan, it's what they're judged on, so there it's a choice that stays, and comes back
+// with the next area tool on any frame.
+const AREA_TOOLS = ["show", "area", "base"];
+const onAreas = () => AREA_TOOLS.includes(tool);
+let negativeOnAreas = false;  // the choice where areas show
+let negativeKeyed = false;    // N is held
+let negativeKept = false;     // turned on from the keyboard, where a button can't be held; until the frame changes
+const negativeNow = () => (onAreas() ? negativeOnAreas : negativeHeld() || negativeKeyed || negativeKept);
+function showNegative() {
+  if (!current) return;
+  syncControls();
+  clearTimeout(timer);
+  refresh();
+}
+function pressNegative() {
+  if (onAreas()) negativeOnAreas = !negativeOnAreas;
+  else negativeKeyed = true;
+  showNegative();
+}
+function releaseNegative() {
+  if (!negativeKeyed) return;
+  negativeKeyed = false;
+  showNegative();
+}
+const negativeHeld = holdable($("negative"), showNegative);
+$("negative").addEventListener("pointerdown", (e) => { if (e.button === 0) showNegative(); });
+$("negative").addEventListener("click", (e) => {
+  // A pointer's click ends a hold, which has shown and hidden the negative already.
+  if (onAreas()) negativeOnAreas = !negativeOnAreas;
+  else if (e.detail === 0) negativeKept = !negativeKept;
+  else return;
+  showNegative();
+});
+addEventListener("blur", releaseNegative);
+
 // ---------- Tools and overlay ----------
 // Region tools show the whole scan (straightened, mirrored, rotated) with the areas drawn on it.
 function setTool(t) {
@@ -1723,16 +1771,23 @@ async function refresh() {
   rendering = true;
   const file = current.file;
   try {
-    const full = !!tool;
-    const res = await api("/api/preview", { file, settings: current.settings, full });
-    const clipped = Number(res.headers.get("X-Clipped") || 0);
-    const blob = await res.blob();
-    if (file !== current?.file) return;
+    const full = !!tool, negative = negativeNow(), kind = negative ? "negative" : "positive";
+    // A negative only changes with how the frame is turned and cropped, and with its film base.
+    const { adjust: a, estimate: e } = current.settings;
+    const key = JSON.stringify([file, full, negative ? [a.straighten, a.crop, a.flip_h, a.rotate, e.base_rgb, e.film] : current.settings]);
+    const last = shots[kind];
+    let shot = last;
+    if (last?.key !== key) {
+      const res = await api("/api/preview", { file, settings: current.settings, full, negative });
+      const clipped = Number(res.headers.get("X-Clipped") || 0);
+      shot = { key, url: URL.createObjectURL(await res.blob()), clipped };
+      if (file !== current?.file) { URL.revokeObjectURL(shot.url); return; }
+      shots[kind] = shot;
+    }
     const img = $("photo");
-    const old = img.src;
     // Not img.decode(): it can stay pending for as long as the page is hidden.
-    await new Promise((done) => { img.onload = img.onerror = done; img.src = URL.createObjectURL(blob); });
-    if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+    if (img.src !== shot.url) await new Promise((done) => { img.onload = img.onerror = done; img.src = shot.url; });
+    if (last && last !== shot) URL.revokeObjectURL(last.url);
     if (file !== current?.file) return;
     fullShown = full;
     $("view").hidden = false;
@@ -1744,7 +1799,8 @@ async function refresh() {
     }
     // A preview requested before a tool opened isn't the entire scan. Another follows it.
     if (full) drawOverlay();
-    histogram(img, clipped);
+    // The histogram stays the picture's while its negative shows.
+    if (!negative) histogram(img, shot.clipped);
   } catch (e) {
     if (file === current?.file) couldNot("update the preview", e);
   } finally {
