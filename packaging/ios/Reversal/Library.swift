@@ -117,10 +117,11 @@ enum Library {
     static func isInInbox(_ url: URL) -> Bool { isInside(url, inbox) }
 
     /// Whether something picked outside the app is a folder, read with the access the pick gave.
+    /// What can't be read counts as one: the engine says if it doesn't open.
     static func isFolder(_ url: URL) -> Bool {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
-        return (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        return (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != false
     }
 
     /// Whether a file or folder lies somewhere in a folder, which itself doesn't count.

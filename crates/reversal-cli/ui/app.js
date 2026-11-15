@@ -179,7 +179,7 @@ function slidePanels(change, grid = panelUnderImage.matches ? document.body : $(
   // doesn't fit yet. The crop bar's two rows both move, and its contents ride their bottom edge.
   const last = phoneLayout.matches ? n - 2 : n - 1;
   const template = grid === document.body
-    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
+    ? (end) => to.map((h, i) => (i === 1 ? `${(end ? to : from)[1]}px` : i === last ? "minmax(0px, 1fr)" : i > 1 && i < last && Math.abs(from[i] - h) >= 1 ? `minmax(0px, ${h}px)` : `${h}px`)).join(" ")
     : (end) => (end ? to : from).map((h) => `${h}px`).join(" ");
   move(grid, "size", { gridTemplateRows: [template(false), template(true)] }, motion("--slide"), { flags: ["moving"] });
 }
@@ -515,9 +515,19 @@ let framesColumn = true;
 const framesShown = () => document.body.dataset.frames === "open";
 function showFrames(on) {
   document.body.dataset.frames = on ? "open" : "closed";
-  expand($("frames-toggle"), on);
-  expand($("fold-frames"), on);
   if (!panelUnderImage.matches) framesColumn = on;
+  showFolds();
+}
+// What the frames button, the handles and a phone's bar of tools say is shown. Under the image the
+// list is in the panel, so it's shown only while the panel is, and the panel's handle is the
+// list's while the list is what the panel shows.
+function showFolds() {
+  const under = panelUnderImage.matches, list = under && framesShown();
+  expand($("frames-toggle"), framesShown() && (dockShown() || !under));
+  expand($("fold-frames"), framesShown());
+  expand($("fold-panel"), dockShown());
+  $("fold-panel").setAttribute("aria-controls", list ? "roll" : under ? "dock" : "hist dock");
+  $("fold-panel").setAttribute("aria-label", list ? "Frames" : "Tools");
   pressModes();
 }
 // On a touch screen the panels fold away, to leave their room to the image: the side panel
@@ -525,9 +535,11 @@ function showFrames(on) {
 // panel's edge. The frames column folds to the left, as it does from its button in the bar.
 const dockShown = () => document.body.dataset.dock === "open";
 function showDock(on) {
+  // A value being typed in a panel that folds away is done: its keyboard would stay otherwise.
+  const folding = !panelUnderImage.matches ? "#dock" : phoneLayout.matches ? "#roll, #dock, #frame-tools, #crop-tools" : "#roll, #dock";
+  if (!on && document.activeElement?.closest(folding)) document.activeElement.blur();
   document.body.dataset.dock = on ? "open" : "closed";
-  expand($("fold-panel"), on);
-  pressModes();
+  showFolds();
 }
 // On a phone the list takes the tools' place, so no group of tools reads as shown, and none
 // while the panel is folded away.
@@ -537,6 +549,8 @@ function pressModes() {
     press(button, toolsShown && button.dataset.mode === document.body.dataset.mode);
   }
 }
+// The page starts on the list, which the handles say from the start.
+showFolds();
 // Under the image, the frame's name brings the list back from a folded panel.
 function toggleFrames() {
   const unfold = panelUnderImage.matches && !dockShown();
@@ -594,7 +608,11 @@ for (const id of ["roll", "dock", "hist", "frame-tools", "crop-tools", "modes", 
     }
   });
 }
-panelUnderImage.addEventListener("change", () => showFrames(panelUnderImage.matches ? !shownName : framesColumn));
+panelUnderImage.addEventListener("change", () => {
+  showFrames(panelUnderImage.matches ? !shownName : framesColumn);
+  // With no frame open, the list under the image is all there is to work with.
+  if (panelUnderImage.matches && !shownName) showDock(true);
+});
 // A motion measured for one layout finishes at once when the layout changes, so what was going
 // goes, and the histogram's rows follow.
 for (const layout of [phoneLayout, panelUnderImage]) {
