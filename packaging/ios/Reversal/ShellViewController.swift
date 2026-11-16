@@ -511,12 +511,31 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
         }
     }
 
+    /// What a save to Photos shows while it runs: only the latest one's.
+    private weak var savingHUD: SaveHUD?
+
     /// Hands DNGs on with the system's share sheet, which has Photos, Files and other apps.
     /// Photos gets them through our own Save to Photos: the sheet's Save Image would save only
     /// the preview inside each DNG.
     private func showExport(_ dngs: [URL]) {
         guard !dngs.isEmpty else { return }
-        let toPhotos = SaveToPhotos { [weak self] title, message in self?.tell(title, message) }
+        var hud: SaveHUD?
+        let toPhotos = SaveToPhotos()
+        toPhotos.report = { [weak self, weak toPhotos] report in
+            guard let self else { return }
+            switch report {
+            case .started(let total, let name):
+                self.savingHUD?.dismiss()
+                hud = SaveHUD(total: total, name: name) { toPhotos?.stop() }
+                self.savingHUD = hud
+                if let scene = self.view.window?.windowScene { hud?.show(in: scene) }
+            case .progress(let done): hud?.update(done: done)
+            case .finished(let saved, let stopped): hud?.finish(saved: saved, stopped: stopped)
+            case .failed(let title, let message):
+                hud?.dismiss()
+                self.tell(title, message)
+            }
+        }
         let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: [toPhotos])
         sheet.excludedActivityTypes = [.saveToCameraRoll]
         anchor(sheet)
