@@ -512,9 +512,13 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     }
 
     /// Hands DNGs on with the system's share sheet, which has Photos, Files and other apps.
+    /// Photos gets them through our own Save to Photos: the sheet's Save Image would save only
+    /// the preview inside each DNG.
     private func showExport(_ dngs: [URL]) {
         guard !dngs.isEmpty else { return }
-        let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: nil)
+        let toPhotos = SaveToPhotos { [weak self] title, message in self?.tell(title, message) }
+        let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: [toPhotos])
+        sheet.excludedActivityTypes = [.saveToCameraRoll]
         anchor(sheet)
         top.present(sheet, animated: true)
     }
