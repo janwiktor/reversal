@@ -8,16 +8,26 @@ import Photos
 import UIKit
 
 final class SaveToPhotos: UIActivity {
+    enum Report {
+        /// Access was granted and the first DNG is on its way. `name` is the first one's file name.
+        case started(total: Int, name: String)
+        /// This many DNGs have been dealt with, saved or not.
+        case progress(Int)
+        /// Every DNG that was tried is in Photos.
+        case finished(saved: Int, stopped: Bool)
+        /// Nothing could be saved, or some DNGs weren't: what to tell the user.
+        case failed(title: String, message: String)
+    }
+
     private var dngs: [URL] = []
-    /// Says what went wrong, with a title and a message. Runs on the main queue.
-    private let failed: (String, String) -> Void
+    /// How the save goes, on the main queue.
+    var report: (Report) -> Void = { _ in }
     /// A roll of DNGs takes a while to copy, and the user may leave the app meanwhile.
     private var background = UIBackgroundTaskIdentifier.invalid
+    private var stopping = false
 
-    init(failed: @escaping (String, String) -> Void) {
-        self.failed = failed
-        super.init()
-    }
+    /// Stops once the DNG being saved is in. Call on the main queue.
+    func stop() { stopping = true }
 
     override class var activityCategory: UIActivity.Category { .action }
     override var activityType: UIActivity.ActivityType? {
@@ -87,40 +97,47 @@ final class SaveToPhotos: UIActivity {
     override func perform() {
         background = UIApplication.shared.beginBackgroundTask { [weak self] in self?.endBackground() }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [self] access in
-            switch access {
-            case .authorized: save(dngs, notSaved: [])
-            case .restricted: finish("Reversal can't add to Photos", "Adding to Photos is restricted on this device")
-            default: finish("Reversal can't add to Photos", "Allow it in Settings, under Privacy & Security, Photos")
+            DispatchQueue.main.async { [self] in
+                switch access {
+                case .authorized:
+                    report(.started(total: dngs.count, name: dngs[0].lastPathComponent))
+                    save(0, notSaved: [])
+                case .restricted:
+                    finish(.failed(title: "Reversal can't add to Photos", message: "Adding to Photos is restricted on this device"))
+                default:
+                    finish(.failed(title: "Reversal can't add to Photos", message: "Allow it in Settings, under Privacy & Security, Photos"))
+                }
             }
         }
     }
 
     /// One DNG at a time, so one that Photos refuses doesn't keep the others out, and the
-    /// message can name it.
-    private func save(_ left: [URL], notSaved: [String]) {
-        guard let dng = left.first else {
-            if notSaved.isEmpty { return finish(nil, nil) }
+    /// message can name it. Runs on the main queue, from the DNG at `index` on.
+    private func save(_ index: Int, notSaved: [String]) {
+        guard index < dngs.count, !stopping else {
+            if notSaved.isEmpty { return finish(.finished(saved: index, stopped: index < dngs.count)) }
             let title = notSaved.count == dngs.count
                 ? "Couldn't save to Photos" : "Couldn't save \(notSaved.count) of \(dngs.count) DNGs to Photos"
-            return finish(title, notSaved.joined(separator: ", "))
+            return finish(.failed(title: title, message: notSaved.joined(separator: ", ")))
         }
+        let dng = dngs[index]
         PHPhotoLibrary.shared().performChanges {
             // The DNG goes in as the photo's original, so Photos keeps every pixel and shows it as raw.
             let options = PHAssetResourceCreationOptions()
             options.originalFilename = dng.lastPathComponent
             PHAssetCreationRequest.forAsset().addResource(with: .photo, fileURL: dng, options: options)
         } completionHandler: { saved, _ in
-            self.save(Array(left.dropFirst()), notSaved: saved ? notSaved : notSaved + [dng.lastPathComponent])
+            DispatchQueue.main.async {
+                self.report(.progress(index + 1))
+                self.save(index + 1, notSaved: saved ? notSaved : notSaved + [dng.lastPathComponent])
+            }
         }
     }
 
-    /// With no title, everything was saved.
-    private func finish(_ title: String?, _ message: String?) {
-        DispatchQueue.main.async {
-            self.activityDidFinish(title == nil)
-            if let title { self.failed(title, message ?? "") }
-            self.endBackground()
-        }
+    private func finish(_ last: Report) {
+        if case .failed = last { activityDidFinish(false) } else { activityDidFinish(true) }
+        report(last)
+        endBackground()
     }
 
     private func endBackground() {
