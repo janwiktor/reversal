@@ -545,6 +545,14 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     /// Says what needs reading, over whatever is on top. `then` runs once it's read.
     private func tell(_ title: String, _ message: String, then: (() -> Void)? = nil) {
+        // UIKit drops an alert presented while something on screen is still going away, such as
+        // the share sheet after one of its actions: wait for it.
+        var going = presentedViewController
+        while let next = going, !next.isBeingDismissed { going = next.presentedViewController }
+        if let coordinator = going?.transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.tell(title, message, then: then) }
+            return
+        }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in then?() })
         top.present(alert, animated: true)
