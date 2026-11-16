@@ -512,9 +512,13 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
     }
 
     /// Hands DNGs on with the system's share sheet, which has Photos, Files and other apps.
+    /// Photos gets them through our own Save to Photos: the sheet's Save Image would save only
+    /// the preview inside each DNG.
     private func showExport(_ dngs: [URL]) {
         guard !dngs.isEmpty else { return }
-        let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: nil)
+        let toPhotos = SaveToPhotos { [weak self] title, message in self?.tell(title, message) }
+        let sheet = UIActivityViewController(activityItems: dngs, applicationActivities: [toPhotos])
+        sheet.excludedActivityTypes = [.saveToCameraRoll]
         anchor(sheet)
         top.present(sheet, animated: true)
     }
@@ -541,6 +545,14 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
 
     /// Says what needs reading, over whatever is on top. `then` runs once it's read.
     private func tell(_ title: String, _ message: String, then: (() -> Void)? = nil) {
+        // UIKit drops an alert presented while something on screen is still going away, such as
+        // the share sheet after one of its actions: wait for it.
+        var going = presentedViewController
+        while let next = going, !next.isBeingDismissed { going = next.presentedViewController }
+        if let coordinator = going?.transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.tell(title, message, then: then) }
+            return
+        }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in then?() })
         top.present(alert, animated: true)
