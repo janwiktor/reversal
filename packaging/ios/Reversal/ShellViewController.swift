@@ -528,7 +528,7 @@ final class ShellViewController: UIViewController, WKScriptMessageHandlerWithRep
                 self.savingHUD?.dismiss()
                 hud = SaveHUD(total: total, name: name) { toPhotos?.stop() }
                 self.savingHUD = hud
-                if let window = self.view.window { hud?.show(in: window) }
+                if let scene = self.view.window?.windowScene { hud?.show(in: scene) }
             case .progress(let done): hud?.update(done: done)
             case .finished(let saved, let stopped): hud?.finish(saved: saved, stopped: stopped)
             case .failed(let title, let message):

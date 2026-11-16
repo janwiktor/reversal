@@ -25,6 +25,9 @@ final class SaveToPhotos: UIActivity {
     /// A roll of DNGs takes a while to copy, and the user may leave the app meanwhile.
     private var background = UIBackgroundTaskIdentifier.invalid
     private var stopping = false
+    /// One save at a time: the share sheet doesn't offer another while one runs, so its panel
+    /// and its Stop stay on screen until it's done.
+    private static var running = false
 
     /// Stops once the DNG being saved is in. Call on the main queue.
     func stop() { stopping = true }
@@ -91,10 +94,11 @@ final class SaveToPhotos: UIActivity {
         items.compactMap { $0 as? URL }.filter { $0.isFileURL && $0.pathExtension.lowercased() == "dng" }
     }
 
-    override func canPerform(withActivityItems items: [Any]) -> Bool { !Self.dngs(in: items).isEmpty }
+    override func canPerform(withActivityItems items: [Any]) -> Bool { !Self.running && !Self.dngs(in: items).isEmpty }
     override func prepare(withActivityItems items: [Any]) { dngs = Self.dngs(in: items) }
 
     override func perform() {
+        Self.running = true
         background = UIApplication.shared.beginBackgroundTask { [weak self] in self?.endBackground() }
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { [self] access in
             DispatchQueue.main.async { [self] in
@@ -115,10 +119,13 @@ final class SaveToPhotos: UIActivity {
     /// message can name it. Runs on the main queue, from the DNG at `index` on.
     private func save(_ index: Int, notSaved: [String]) {
         guard index < dngs.count, !stopping else {
-            if notSaved.isEmpty { return finish(.finished(saved: index, stopped: index < dngs.count)) }
-            let title = notSaved.count == dngs.count
-                ? "Couldn't save to Photos" : "Couldn't save \(notSaved.count) of \(dngs.count) DNGs to Photos"
-            return finish(.failed(title: title, message: notSaved.joined(separator: ", ")))
+            let stopped = index < dngs.count
+            if notSaved.isEmpty { return finish(.finished(saved: index, stopped: stopped)) }
+            // Counts against all the DNGs asked for, since a stopped save didn't try the rest.
+            let saved = index - notSaved.count
+            let title = saved == 0 ? "Couldn't save to Photos" : "Saved \(saved) of \(dngs.count) to Photos"
+            let names = notSaved.joined(separator: ", ")
+            return finish(.failed(title: title, message: (stopped ? "Stopped. " : "") + "Couldn't save " + names))
         }
         let dng = dngs[index]
         PHPhotoLibrary.shared().performChanges {
@@ -135,6 +142,7 @@ final class SaveToPhotos: UIActivity {
     }
 
     private func finish(_ last: Report) {
+        Self.running = false
         if case .failed = last { activityDidFinish(false) } else { activityDidFinish(true) }
         report(last)
         endBackground()

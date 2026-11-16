@@ -2,7 +2,8 @@
 
 // Shows a save to Photos while it runs, and then that it's done. The share sheet has closed by
 // then, and a roll of DNGs takes a while to copy, so without this nothing says it's happening.
-// It floats over the window without blocking it, and the rest of the app stays usable.
+// It floats in a window of its own, over anything the app shows later, and touches outside it
+// reach the app as before.
 
 import UIKit
 
@@ -16,6 +17,8 @@ final class SaveHUD: UIView {
     private let detail = UILabel()
     private let stopButton: UIButton
     private var done = false
+    /// The window it floats in, for as long as it's shown.
+    private var overlay: UIWindow?
 
     /// `name` is the DNG's file name when there's one. `stop` asks the save to stop after the
     /// DNG it's on, which only a save of several can.
@@ -30,6 +33,8 @@ final class SaveHUD: UIView {
         // Stopping waits for the DNG being saved.
         stopButton.addAction(UIAction { [weak self] _ in
             self?.stopButton.isEnabled = false
+            self?.title.text = "Stopping…"
+            UIAccessibility.post(notification: .announcement, argument: "Stopping")
             stop()
         }, for: .primaryActionTriggered)
 
@@ -59,7 +64,7 @@ final class SaveHUD: UIView {
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 40, weight: .regular)
         icon.tintColor = .label
         icon.isHidden = true
-        spinner.startAnimating()
+        if total == 1 { spinner.startAnimating() }
         indicator.isHidden = total > 1
         bar.isHidden = total == 1
 
@@ -112,14 +117,21 @@ final class SaveHUD: UIView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    /// Puts it in the middle of the window, over whatever is shown there.
-    func show(in window: UIWindow) {
+    /// Puts it in the middle of the scene's screen, over whatever is shown there.
+    func show(in scene: UIWindowScene) {
+        let window = Overlay(windowScene: scene)
+        window.windowLevel = .alert + 1
+        let root = UIViewController()
+        root.view = Passthrough()
+        window.rootViewController = root
+        window.isHidden = false
+        overlay = window
         translatesAutoresizingMaskIntoConstraints = false
-        window.addSubview(self)
+        root.view.addSubview(self)
         NSLayoutConstraint.activate([
-            centerXAnchor.constraint(equalTo: window.centerXAnchor),
-            centerYAnchor.constraint(equalTo: window.centerYAnchor),
-            widthAnchor.constraint(lessThanOrEqualTo: window.widthAnchor, constant: -32),
+            centerXAnchor.constraint(equalTo: root.view.centerXAnchor),
+            centerYAnchor.constraint(equalTo: root.view.centerYAnchor),
+            widthAnchor.constraint(lessThanOrEqualTo: root.view.widthAnchor, constant: -32),
         ])
         alpha = 0
         if !UIAccessibility.isReduceMotionEnabled { transform = CGAffineTransform(scaleX: 0.94, y: 0.94) }
@@ -152,17 +164,35 @@ final class SaveHUD: UIView {
         UIAccessibility.post(
             notification: .announcement,
             argument: stopped ? "Stopped. Saved \(saved) of \(total) to Photos" : "Saved to Photos")
+        fadeWhenSeen()
+    }
+
+    /// Fades a moment after the result has been on screen: a save that ends while the app is
+    /// away waits for it to come back.
+    private func fadeWhenSeen() {
+        guard UIApplication.shared.applicationState == .active else {
+            var waiting: NSObjectProtocol?
+            waiting = NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                waiting.map(NotificationCenter.default.removeObserver)
+                self?.fadeWhenSeen()
+            }
+            return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in self?.dismiss() }
     }
 
     /// Goes away at once, for a save that ends with an alert instead.
     func dismiss() {
-        guard superview != nil else { return }
+        guard let overlay, superview != nil else { return }
         isUserInteractionEnabled = false
         UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseIn) {
             self.alpha = 0
         } completion: { _ in
             self.removeFromSuperview()
+            overlay.isHidden = true
+            self.overlay = nil
         }
     }
 
@@ -170,3 +200,13 @@ final class SaveHUD: UIView {
         if done { dismiss() }
     }
 }
+
+/// A window that takes only the touches that land on what it shows.
+private final class Overlay: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit is Passthrough || hit === self ? nil : hit
+    }
+}
+
+private final class Passthrough: UIView {}
