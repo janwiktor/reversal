@@ -346,7 +346,9 @@ fn decoded_negative_converts_to_a_positive_dng_that_reads_back() {
     assert_eq!((positive.width, positive.height), (WIDTH, HEIGHT));
 
     // Removing the mask and fitting the gray curves keeps the gray scale neutral throughout.
-    for patch in 0..PATCH_DENSITY.len() {
+    // The bare film of the first patch lies under the frame's black point, so it is black.
+    assert_eq!(patch_mean(&positive, 0), [0.0; 3]);
+    for patch in 1..PATCH_DENSITY.len() {
         let [r, g, b] = patch_mean(&positive, patch);
         assert!(
             (r - g).abs() < MAX_CAST * g && (b - g).abs() < MAX_CAST * g,

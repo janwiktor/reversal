@@ -5,7 +5,7 @@
     python3 docs/images/conversion-method/figures.py
 
 Standard library only. Every curve is computed from the engine's own formulas and constants,
-copied below from crates/reversal-core/src (engine 0.3.2, conversion model 3). When the engine
+copied below from crates/reversal-core/src (engine 0.5.0, conversion model 5). When the engine
 changes, update the constants here and run the script again.
 
 Each SVG carries its own styles and a white background, so it reads the same wherever it is shown
@@ -133,8 +133,8 @@ def fig_pipeline():
     ]
     row2 = [
         ("Toe", "Shared, near the base", "0.3 · exp(−E / 0.35)", False),
-        ("Back to linear", "Anchor, γ = 0.7, sliders", "in stops per channel", True),
-        ("Saturation", "Around Rec.2020 luma", "gain 1.25 × (1 + s/100)", False),
+        ("Back to linear", "Anchor, γ = 0.7, black", "point, sliders in stops", True),
+        ("Saturation", "Around Rec.2020 luma", "gain 1.12 × (1 + s/100)", False),
         ("Geometry", "Mirror, quarter turns", "after inversion", False),
         ("Write DNG", "16-bit, headroom", "lossless JPEG tiles", False),
     ]
