@@ -6,10 +6,11 @@
 //!   D  = -log10(T / T_base)                      density above base
 //!   E  = equivalent green density of D           per-frame gray curve for red and blue
 //!   E' = crosstalk and toe corrections of E      fixed, in density
-//!   L  = 10^((E' - anchor) / gamma + offsets)    scene-linear positive
+//!   L  = (10^((E' - anchor) / gamma) - k) / (1 - k) · 2^offsets    scene-linear positive
 //! A neutral scene patch lands on the gray curve, so its three E are equal and it stays
 //! neutral at every density. `anchor` sets exposure from the frame's highlights and
-//! average density; `offsets` hold the exposure and color balance sliders. A small
+//! average density; `k` is a color frame's black point, a share of its darkest light;
+//! `offsets` hold the exposure and color balance sliders. A small
 //! saturation step follows.
 //!
 //! Black and white film has one silver image, which blocks every color about equally, so it
@@ -28,17 +29,16 @@ use crate::render::{Look, Tone};
 pub const GAMMA_REF: f32 = 0.7;
 /// Version of the conversion model. Bump when the inversion, `BASE_SATURATION`, the
 /// DNG's stored scale or the tone curve change, since old settings then render differently.
-pub const MODEL_VERSION: u32 = 4;
+pub const MODEL_VERSION: u32 = 5;
 /// Built-in saturation (linear, around Rec.2020 luminance). Matched the chroma of
-/// reference scans (22 frames, 6 rolls).
-pub const BASE_SATURATION: f32 = 1.25;
+/// reference scans (22 frames, 6 rolls) with the black point subtracted.
+pub const BASE_SATURATION: f32 = 1.12;
 /// Slider ±100 ranges.
 pub const EXPOSURE_EV_RANGE: f32 = 3.0;
 pub const BALANCE_EV_RANGE: f32 = 0.6;
 /// Factor the analysis image is downsampled by.
 pub const ANALYSIS_FACTOR: usize = 4;
 const REC2020_LUMA: [f32; 3] = [0.2627, 0.6780, 0.0593];
-const LOG10_2: f32 = std::f32::consts::LOG10_2;
 
 /// Pixels at or above this are light through holes or gaps, not film.
 const CLIPPED: f32 = 0.9;
@@ -138,8 +138,19 @@ const FILM_BW_SPREAD: f32 = 0.02;
 /// about equally. Black and white read 1.000–1.024, color 0.67–0.93, also on near-gray scenes.
 const FILM_BW_RED_SLOPE: f32 = 0.05;
 
-/// Exposure anchor = mean of the 99th percentile and the average of E_g, plus this.
-const ANCHOR_OFFSET: f32 = 0.1027;
+/// Exposure anchor = mean of the 99th percentile and the average of E_g, plus this. Color film
+/// takes less, to stay as bright with its black point subtracted.
+const ANCHOR_OFFSET_COLOR: f32 = 0.0777;
+const ANCHOR_OFFSET_BW: f32 = 0.1027;
+/// Black point of a color frame: this share of its darkest light is subtracted from every
+/// channel, in linear light. Film base is black only for a frame with deep shadows, so counting
+/// from it leaves most frames without black. The whole of the darkest light matched reference
+/// scans worse in brightness (22 frames, 6 rolls).
+const BLACK_SHARE: f32 = 0.5;
+/// A frame's darkest light is that of this percentile of E_g, bare film left out.
+const BLACK_PERCENTILE: f32 = 0.5;
+/// Density above base under which film counts as bare, and says nothing about the scene.
+const BARE_FILM_DENSITY: f32 = 0.03;
 /// Shared film toe, expanded near the base: E' = E - amount · exp(-max(E, floor) / scale).
 const TOE_AMOUNT: f32 = 0.3;
 const TOE_SCALE: f32 = 0.35;
@@ -229,6 +240,10 @@ pub struct Estimate {
     pub gray: [GrayCurve; 2],
     /// Density of `E'` that maps to linear 1.0.
     pub anchor: f32,
+    /// Light of the frame's darkest picture, with the anchor's at 1. [`BLACK_SHARE`] of it is
+    /// subtracted. 0 for black and white, which counts black from the film base.
+    #[serde(default)]
+    pub black: f32,
 }
 
 /// User adjustments. Sliders run −100…+100 with 0 = the automatic result.
@@ -895,23 +910,45 @@ fn fit_anchor(density: &[[f32; 3]], gray: &[GrayCurve; 2]) -> f32 {
         density
             .iter()
             .map(|&d| (equivalent_density(d, gray)[1], d[1])),
+        ANCHOR_OFFSET_COLOR,
     )
 }
 
+/// Light of a color frame's darkest picture, with the anchor's at 1: of a low percentile of E_g,
+/// so that a few stray pixels don't set it.
+fn fit_black(density: &[[f32; 3]], gray: &[GrayCurve; 2], anchor: f32) -> f32 {
+    let mut e: Vec<f32> = density
+        .iter()
+        .filter(|d| d[1] > BARE_FILM_DENSITY)
+        .map(|&d| equivalent_density(d, gray)[1])
+        .collect();
+    if e.is_empty() {
+        return 0.0;
+    }
+    light(percentile(&mut e, BLACK_PERCENTILE), anchor).min(1.0)
+}
+
+/// Scene-linear light of a density `E`, with the anchor's at 1: the toe, then the film gamma.
+#[inline]
+fn light(level: f32, anchor: f32) -> f32 {
+    let toe = TOE_AMOUNT * (-level.max(TOE_FLOOR) / TOE_SCALE).exp();
+    10f32.powf((level - toe - anchor) / GAMMA_REF)
+}
+
 /// The anchor from each pixel's `E` and its density above base.
-fn anchor_of(levels: impl Iterator<Item = (f32, f32)>) -> f32 {
+fn anchor_of(levels: impl Iterator<Item = (f32, f32)>, offset: f32) -> f32 {
     let mut e = Vec::new();
     // Bare film says nothing about the scene.
     let (mut sum, mut n) = (0.0f64, 0usize);
     for (level, above_base) in levels {
         e.push(level);
-        if above_base > 0.03 {
+        if above_base > BARE_FILM_DENSITY {
             sum += level as f64;
             n += 1;
         }
     }
     let mean = if n > 0 { (sum / n as f64) as f32 } else { 0.0 };
-    0.5 * (percentile(&mut e, 99.0) + mean) + ANCHOR_OFFSET
+    0.5 * (percentile(&mut e, 99.0) + mean) + offset
 }
 
 /// Gray curves of a black and white frame, which has none: every channel is itself.
@@ -939,10 +976,13 @@ fn silver_density(d: [f32; 3], weights: [f32; 3]) -> f32 {
 
 fn fit_anchor_silver(density: &[[f32; 3]], base_rgb: [f32; 3]) -> f32 {
     let weights = silver_weights(base_rgb);
-    anchor_of(density.iter().map(|&d| {
-        let silver = silver_density(d, weights);
-        (silver, silver)
-    }))
+    anchor_of(
+        density.iter().map(|&d| {
+            let silver = silver_density(d, weights);
+            (silver, silver)
+        }),
+        ANCHOR_OFFSET_BW,
+    )
 }
 
 /// Where a frame's measurements start: its film base, and density above it on the measured area.
@@ -1125,12 +1165,13 @@ pub fn measure_frame(small: &Rgb32, hints: &Hints, keep: Option<Film>) -> (Estim
     let m = measure(small, hints);
     let reading = m.reading(small);
     let film = hints.film.or(keep).unwrap_or(reading.film);
-    let (gray, anchor) = match film {
+    let (gray, anchor, black) = match film {
         Film::Color => {
             let gray = fit_gray(&m.density);
-            (gray, fit_anchor(&m.density, &gray))
+            let anchor = fit_anchor(&m.density, &gray);
+            (gray, anchor, fit_black(&m.density, &gray, anchor))
         }
-        Film::Bw => (SILVER_GRAY, fit_anchor_silver(&m.density, m.base_rgb)),
+        Film::Bw => (SILVER_GRAY, fit_anchor_silver(&m.density, m.base_rgb), 0.0),
     };
     let estimate = Estimate {
         film,
@@ -1139,6 +1180,7 @@ pub fn measure_frame(small: &Rgb32, hints: &Hints, keep: Option<Film>) -> (Estim
         area: m.area,
         gray,
         anchor,
+        black,
     };
     (estimate, reading)
 }
@@ -1181,9 +1223,11 @@ fn gains_ev(film: Film, a: &Adjust) -> [f32; 3] {
 #[inline]
 fn positive_with(rgb: [f32; 3], e: &Estimate, gains_ev: [f32; 3], weights: [f32; 3]) -> [f32; 3] {
     let d = [0, 1, 2].map(|c| density_above_base(rgb[c], e.base_rgb[c]));
+    // The black point comes off before the sliders' gains, so they keep black where it is. The
+    // anchor's light stays at 1.
+    let black = BLACK_SHARE * e.black;
     let linear = |level: f32, gain_ev: f32| {
-        let toe = TOE_AMOUNT * (-level.max(TOE_FLOOR) / TOE_SCALE).exp();
-        10f32.powf((level - toe - e.anchor) / GAMMA_REF + gain_ev * LOG10_2)
+        (light(level, e.anchor) - black).max(0.0) / (1.0 - black) * 2f32.powf(gain_ev)
     };
     match e.film {
         Film::Color => {
@@ -1380,6 +1424,8 @@ mod tests {
         },
     ];
 
+    const LOG10_2: f32 = std::f32::consts::LOG10_2;
+
     fn est() -> Estimate {
         Estimate {
             film: Film::Color,
@@ -1388,6 +1434,7 @@ mod tests {
             area: NRect::FULL,
             gray: CURVES,
             anchor: 0.7,
+            black: 0.0,
         }
     }
 
@@ -1676,6 +1723,96 @@ mod tests {
             ..e.clone()
         };
         assert!((at(0.8, &e) / at(0.8, &darker) - 2.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn the_black_point_darkens_shadows_and_keeps_the_anchor_and_neutrals() {
+        let plain = est();
+        let e = Estimate {
+            black: 0.1,
+            ..est()
+        };
+        let at = |g: f32, e: &Estimate, a: &Adjust| positive(pixel(neutral(g, &e.gray)), e, a);
+        let none = Adjust::default();
+        // Light at the anchor stays put, and shadows lose the most.
+        let ratio = |g: f32| at(g, &e, &none)[1] / at(g, &plain, &none)[1];
+        let toe = |g: f32| g - TOE_AMOUNT * (-g / TOE_SCALE).exp();
+        let anchor_g = (0..2000)
+            .map(|i| i as f32 * 0.001)
+            .find(|&g| toe(g) >= e.anchor)
+            .unwrap();
+        assert!((ratio(anchor_g) - 1.0).abs() < 1e-2, "{}", ratio(anchor_g));
+        assert!(ratio(0.3) < ratio(0.6) && ratio(0.6) < 1.0);
+        // The frame's darkest light keeps the share that isn't subtracted.
+        let dark_g = (0..2000)
+            .map(|i| i as f32 * 0.001)
+            .find(|&g| light(g, e.anchor) >= e.black)
+            .unwrap();
+        let kept = at(dark_g, &e, &none)[1] / e.black;
+        let want = (1.0 - BLACK_SHARE) / (1.0 - BLACK_SHARE * e.black);
+        assert!((kept - want).abs() < 2e-2, "{kept} {want}");
+        // Darker than the black point is black, not negative, whatever the sliders say.
+        let warm = Adjust {
+            exposure: 50.0,
+            temperature: 100.0,
+            ..Adjust::default()
+        };
+        assert_eq!(at(-0.2, &e, &warm), [0.0; 3]);
+        // A stop of exposure still doubles the light, shadows included.
+        let stop = Adjust {
+            exposure: 100.0 / EXPOSURE_EV_RANGE,
+            ..Adjust::default()
+        };
+        for g in [0.3, 0.8] {
+            let doubled = at(g, &e, &stop)[1] / at(g, &e, &none)[1];
+            assert!((doubled - 2.0).abs() < 1e-3, "{doubled}");
+        }
+        for i in 3..=12 {
+            let p = at(i as f32 * 0.1, &e, &none);
+            assert!((p[0] / p[1] - 1.0).abs() < 5e-3, "{p:?}");
+            assert!((p[2] / p[1] - 1.0).abs() < 5e-3, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_frame_measures_its_black_from_its_darkest_picture() {
+        // Neutral frames: the same highlights over shadows near the base, or well above it.
+        let frame = |shadow: f32| -> Vec<[f32; 3]> {
+            (0..10000)
+                .map(|i| neutral(shadow + (1.1 - shadow) * (i % 100) as f32 / 99.0, &CURVES))
+                .collect()
+        };
+        let black = |density: &[[f32; 3]]| {
+            let anchor = fit_anchor(density, &CURVES);
+            (fit_black(density, &CURVES, anchor), anchor)
+        };
+        let (deep, _) = black(&frame(0.05));
+        let (flat, anchor) = black(&frame(0.4));
+        assert!(flat > 3.0 * deep, "{deep} {flat}");
+        assert!((flat - light(0.4, anchor)).abs() < 0.1 * flat, "{flat}");
+        // A few stray dark pixels and bare film don't set it.
+        let mut stray = frame(0.4);
+        for d in stray.iter_mut().take(20) {
+            *d = neutral(0.05, &CURVES);
+        }
+        for d in stray.iter_mut().skip(20).take(500) {
+            *d = [0.0; 3];
+        }
+        let (with_stray, _) = black(&stray);
+        assert!((with_stray / flat - 1.0).abs() < 0.1, "{with_stray} {flat}");
+        assert_eq!(fit_black(&[], &CURVES, 0.7), 0.0);
+    }
+
+    #[test]
+    fn black_and_white_counts_black_from_the_film_base() {
+        let scan = synthetic_scan();
+        let hints = |film| Hints {
+            film: Some(film),
+            ..Hints::default()
+        };
+        assert_eq!(estimate(&scan, &hints(Film::Bw)).black, 0.0);
+        let color = estimate(&scan, &hints(Film::Color)).black;
+        assert!(color > 0.0 && color < 1.0, "{color}");
     }
 
     #[test]

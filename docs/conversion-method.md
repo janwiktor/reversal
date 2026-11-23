@@ -1,6 +1,6 @@
 # Reversal: Conversion Method
 
-*Technical whitepaper · engine 0.3.2, conversion model 3 · November 2026*
+*Technical whitepaper · engine 0.5.0, conversion model 5 · November 2026*
 
 *Author note: this is a working draft that documents current conversion model Reversal uses, and the testing done to validate its performance. As of November 2026, the sample size of scans, film stocks, cameras and light sources used, is very limited. My intention is to expand the scope of tests and publish the dataset alongside the paper as I gain confidence in the method. - Jan*
 
@@ -98,10 +98,10 @@ measured exactly as drawn.
 
 | Value | How it is measured |
 | --- | --- |
-| Film base | The scan is split into small cells. Cells whose levels vary by less than 5% and lie within 7% of the brightest even cells count as clear film, and the base is the median of the largest rectangle of them. Rectangles at the film's edges are tried first, then a strip across the scan. Base detection skips cells near clipped light. When nothing looks like clear film, the app says so and asks users to draw the area manually or match from other frames in the roll. Roll analysis uses the median of the bases of selected frames, which the app also uses to flag a frame whose own base is over 6% off in any channel. |
+| Film base | The scan is split into small cells. Cells whose levels vary by less than 5% and lie within 7% of the brightest even cells count as clear film, and the base is the median of the largest rectangle of them. Rectangles at the film's edges are tried first, then a strip across the scan. Base detection skips cells near clipped light. Light through sprocket holes that the scan didn't clip is brighter than film and as even: when the brightest patches are too short for a film edge, stand 0.1 in density clear of the rest and have even film around them, the search goes on below them. On grainy film, where no cell is even pixel by pixel, a patch counts as even when its grain averages out over it. When nothing looks like clear film, the app says so and asks users to draw the area manually or match from other frames in the roll. Roll analysis uses the median of the bases of selected frames, which the app also uses to flag a frame whose own base is over 6% off in any channel. |
 | Measured area | The centered 85% of each side, adjustable, or an area the user draws. Holder pixels are left out (below). |
 | Film type | Color or black and white, from how the three densities rise together (section 5). |
-| Gray curves and exposure anchor | Fitted to the measured area (steps 4 and 7). |
+| Gray curves, exposure anchor and black point | Fitted to the measured area (steps 4 and 7). |
 
 **Film base.** Taking the largest even patch, rather than the median of the brightest 3% of pixels,
 keeps holes, edge markings and picture detail out of the reading. On 25 frames the brightest-pixel
@@ -253,17 +253,17 @@ E' = E - 0.3\, e^{-\max(E,\,-0.3)/0.35}
 ```
 
 ```math
-L_c = 10^{\,(E'_c - A)/\gamma \;+\; o_c \log_{10} 2}, \qquad \gamma = 0.7
+L_c = \frac{\max\left(10^{\,(E'_c - A)/\gamma} - k,\ 0\right)}{1 - k}\; 2^{\,o_c}, \qquad \gamma = 0.7
 ```
 
-`A` is the exposure anchor and `o` the slider offsets in stops. *Frame white* is L = 1, where
-E′ = A with the sliders at 0. Below E = −0.3 the toe is constant. One density unit corresponds to
+`A` is the exposure anchor, `k` the frame's black point and `o` the slider offsets in stops. *Frame
+white* is L = 1, where E′ = A with the sliders at 0. Below E = −0.3 the toe is constant. One density unit corresponds to
 1 / (0.7 × log<sub>10</sub>2) ≈ 4.75 stops of scene exposure. At the base the toe lowers values by
 0.3 density, about 1.4 stops, and spreads neighboring shadow values 1.86 times further apart; its
 effect fades to a factor of 1.12 at a density of 0.7.
 
 The anchor is the mean of the 99th percentile and the average of the green equivalent density after
-crosstalk and before the toe, plus 0.1027. The average leaves out bare film (less than 0.03 above
+crosstalk and before the toe, plus 0.0777 for color and 0.1027 for black and white. The average leaves out bare film (less than 0.03 above
 base). In a test on the three groups of the main test set (the 14 original frames and each harder
 roll), this mix gave brightness error 9.6–15.9 across the groups, against 11.3–17.8 for the highlights
 alone and 9.0–23.1 for the average alone; in that test, the best anchor chosen per frame with
@@ -271,7 +271,22 @@ hindsight reached about 8.
 The mix was kept for its better worst case. A center-weighted average was within about 1 of the plain
 average and was dropped.
 
-Both parts have a long record. The toe is the low-exposure region of the characteristic curve, where
+**Black point.** The film base is black only for a frame with deep shadows. A frame whose darkest
+content sits well above the base would otherwise never reach black, and looks flat and desaturated.
+So a color frame sets its own black point: `k` is half the light of the frame's darkest picture,
+taken at the 0.5th percentile of green equivalent density over the measured area, bare film left
+out, and it is subtracted from every channel alike, in linear light. Anything darker, such as bare
+film beside the picture, becomes black. Dividing by 1 − k keeps frame white where it is, and the
+sliders' gains apply after the subtraction, so they don't move black. On the main test set, with
+the anchor's offset and the saturation gain set again for it, color error fell from 7.56 to 7.29
+and brightness error from 8.73 to 8.46, and under the Neutral curve from 7.17 to 6.95 and
+from 8.78 to 8.31. Color improved on 19 of the 22 frames. The conversions' 1st percentile of L\*
+sat 4.6 above the references', from 10.8. Subtracting three quarters or all of the darkest light scored better in color and
+worse in brightness, and percentiles from 0.1 to 2 scored alike. A film gamma set per frame from the
+frame's density range, and a lower gamma for every frame, both scored worse. The share, the offset
+and the gain were chosen on the same frames they are scored on.
+
+Toe and gamma have a long record. The toe is the low-exposure region of the characteristic curve, where
 contrast falls below its mid-scale value (Hurter & Driffield, 1890; James, 1977); a film patent
 specifies toe contrast as a ratio to mid-scale contrast (Brewer et al., 1998). Dividing density by the film's
 gamma and taking the antilog is the same form as the Cineon log-to-linear conversion, which uses a
@@ -288,14 +303,14 @@ were chosen on the 14 original test frames, and lowered brightness error on all 
 **Figure 5. From density to scene stops.** Output in stops from frame white against green equivalent
 density, with the anchor set to an illustrative 1.0. The dashed line is the model without a toe.
 Exposure, Temperature and Tint move the line up or down per channel, in stops, without changing its
-slope.
+slope. The figure leaves out the black point, which bends the low end of the line down to black.
 
 ### Step 8: Saturation gain and slider adjustments
 
 Saturation is linear, around Rec.2020 luminance with weights 0.2627, 0.6780 and 0.0593
-(International Telecommunication Union, 2015). A built-in gain of 1.25 brings the chroma ratio of the
-main test set to the reference's. The Saturation slider scales that gain, from 0 at −100, which gives
-black and white, to 2.5 at +100. Negative results clip to zero. Applying the same correction in
+(International Telecommunication Union, 2015). A built-in gain of 1.12 brings the chroma ratio of the
+main test set to the reference's; without the black point it took 1.25. The Saturation slider scales that gain, from 0 at −100, which gives
+black and white, to 2.24 at +100. Negative results clip to zero. Applying the same correction in
 linear light after inversion, rather than in density, scored color error 7.77 against 8.66 on a
 separate set of 8 hand-finished scans of one film stock.
 
@@ -315,8 +330,9 @@ E = \sum_c w_c D_c, \qquad w_c = \frac{T_{\text{base},c}}{\sum_k T_{\text{base},
 ```
 
 Shot noise in density falls as the signal grows, so this weights each channel roughly by the
-inverse of its noise variance, treating the channels' noise as independent. Toe, anchor and γ are the
-same as for color. The positive has that one value in all three channels, and only Exposure changes
+inverse of its noise variance, treating the channels' noise as independent. Toe and γ are the
+same as for color, and the anchor is measured the same way with its own offset, but no black point is subtracted: black stays at the film base, since the black
+point was tested on color frames only. The positive has that one value in all three channels, and only Exposure changes
 the pixels. No black and white reference scans were available, so the
 conversion was checked by eye on 6 frames from 6 rolls and two cameras.
 
@@ -427,8 +443,8 @@ are Reversal's own and rest on the tests summarized above.
 | 4. Gray curves | Layers have different characteristic curves (Eastman Kodak Company, 2026); gray balance as a function of green density, estimated from near-neutral scene pixels (Terashita, 2000a, 2000b); per-frame balance from the frame's own densities (Yamana, 1995) | Quadratic with one bend through the base, fitted per frame; narrowing band; light pull toward an average |
 | 5. Crosstalk | Linear masking of unwanted dye absorptions in density, the same form (Hanson & Brewer, 1954, 1955; Hunt, 2004; Yule, 1967); scanner sensitivity shifted toward a dye's peak (Moore et al., 1991) | Matrix values, fitted to one camera and one light, acting on red–green and blue–green differences |
 | 6. Toe | Toe region of the characteristic curve; toe contrast as a ratio to mid-scale (Brewer et al., 1998; Hurter & Driffield, 1890; James, 1977) | Exponential form and its constants 0.3, 0.35 and −0.3 |
-| 7. Back to linear | Antilog of density over negative gamma, as in Cineon (Kennel, 1995; Kennel & Snider, 1993) | γ = 0.7 instead of the conventional 0.6; anchor from the 99th percentile and the mean |
-| 8. Saturation | Rec.2020 luminance weights (International Telecommunication Union, 2015) | Gain of 1.25, matched to the reference scans |
+| 7. Back to linear | Antilog of density over negative gamma, as in Cineon (Kennel, 1995; Kennel & Snider, 1993) | γ = 0.7 instead of the conventional 0.6; anchor from the 99th percentile and the mean; black point at half the frame's darkest light |
+| 8. Saturation | Rec.2020 luminance weights (International Telecommunication Union, 2015) | Gain of 1.12, matched to the reference scans |
 | 10. DNG and profiles | DNG tags and profiles (Adobe Inc., 2023); lossless JPEG (International Telecommunication Union, 1992); extended tone operator (Reinhard et al., 2002) | Frame white at 0.2 of full scale; curve shapes, slopes and roll-off; tag choices settled by tests in editors |
 
 No source found gives the specific curve shapes or constants of steps 4 to 7 for camera scans.
@@ -438,6 +454,7 @@ No source found gives the specific curve shapes or constants of steps 4 to 7 for
 - **One camera, one light for crosstalk.** The matrix was fitted to a Nikon D5100 and one light source, so other setups may drift in hue, greens most of all.
 - **Scores rest on one reference look.** The reference scans are based on subjective evaluation and converted using standard image processing software, and the 14 original frames were used both to fit the model and to score it.
 - **Holder detection** needs an opaque holder that reaches the scan's edge. A picture with dense areas touching the edge, as on a scan filled edge to edge, can lose them from the measuring; a drawn area replaces the mask.
+- **The black point clips.** Light under a color frame's black point is stored as black, and no slider brings it back. That is bare film, and picture more than a stop darker than the frame's darkest half percent. A frame with little density range, such as fog, gets a high black point and so more contrast.
 - **Multi-frame film strips** need a drawn measured area and a crop.
 - **Film base detection** reports no clear film on scans that show little of the film's edge.
 - **Camera EXIF** is not copied to the DNG.
@@ -448,7 +465,7 @@ Further detail on the product and on each test is in the [Product Spec](spec.md)
 ## Appendix A. Formulas
 
 Everything below is per pixel, on linear camera RGB `T` and the frame's film base `T_base`, with the
-constants of engine 0.3.2.
+constants of engine 0.5.0.
 
 **Equivalent density (step 4).** With `D` the red or blue density above base and that channel's
 curve `f(g) = bend·g² + slope·g`, the equivalent green density is
@@ -487,10 +504,20 @@ E_g' = E_g - 0.0460\,x - 0.1033\,y, \quad E_r' = E_g' + 1.1532\,x + 0.3195\,y, \
 **Exposure anchor (step 7).** Over the measured pixels, with `E_g'` before the toe:
 
 ```math
-A = \tfrac12\left(P_{99}(E_g') + \operatorname{mean}_{D_g > 0.03}(E_g')\right) + 0.1027
+A = \tfrac12\left(P_{99}(E_g') + \operatorname{mean}_{D_g > 0.03}(E_g')\right) + 0.0777
 ```
 
-For black and white, the silver density `E` of section 5 takes the place of `E_g'`.
+For black and white, the silver density `E` of section 5 takes the place of `E_g'`, and the offset
+is 0.1027.
+
+**Black point (step 7).** For color, over the measured pixels with `D_g > 0.03`, with `toe` the toe
+of step 6:
+
+```math
+k = \tfrac12 \min\left(10^{\,(\operatorname{toe}(P_{0.5}(E_g')) - A)/\gamma},\ 1\right)
+```
+
+For black and white, `k = 0`.
 
 **Sliders (step 7).** With slider values `S` from −100 to +100, the offsets in stops are
 
@@ -500,7 +527,7 @@ o_g = 3\tfrac{S_\text{exp}}{100} - 0.6\tfrac{S_\text{tint}}{100}, \quad
 o_b = 3\tfrac{S_\text{exp}}{100} - 0.6\tfrac{S_\text{temp}}{100} + 0.3\tfrac{S_\text{tint}}{100}
 ```
 
-and the saturation gain is `1.25 · (1 + S_sat/100)`, applied as `Y + gain · (L − Y)` with `Y` the
+and the saturation gain is `1.12 · (1 + S_sat/100)`, applied as `Y + gain · (L − Y)` with `Y` the
 Rec.2020 luminance, clipped at 0.
 
 **Profile tone curve (step 10).** For a stored value `x` in [0, 1], with look slope `σ₀` (Neutral 1.5,

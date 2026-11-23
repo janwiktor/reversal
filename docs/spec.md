@@ -85,17 +85,17 @@ Conversion happens in density and writes a scene-linear positive. Film records l
 4. **Gray curves.** Per frame, red and blue map onto green density with a one-bend curve through the base, so neutrals stay neutral at every density.
 5. **Crosstalk.** A fixed correction on the red–green and blue–green density differences. Neutrals pass unchanged. It was fitted to a D5100 and one light source.
 6. **Toe.** A small toe shared by all channels, expanded near the base.
-7. **Back to linear.** Exposure anchor and film gamma turn density into scene-linear RGB, with the exposure and color sliders as per-channel offsets in stops.
-8. **Saturation.** Linear, around Rec.2020 luminance, 1.25 by default.
+7. **Back to linear.** Exposure anchor and film gamma turn density into scene-linear RGB. A color frame then sets its own black point: half of its darkest light is subtracted from every channel, since film base is black only for a frame with deep shadows. The exposure and color sliders follow as per-channel gains in stops.
+8. **Saturation.** Linear, around Rec.2020 luminance, 1.12 by default.
 9. **Geometry and writing.** Straighten and crop come before inversion, mirror and quarter turns after. Measuring reads the straightened scan too, so the areas match what's shown. Then the DNG is written.
 
 Steps 3 to 7 per channel c:
 
 ```latex
-L_c = 10^{\,(E'_c - A)/\gamma \,+\, o_c \log_{10} 2}, \qquad E'_c = \mathrm{toe}(\mathrm{crosstalk}(g_c(D_c))), \qquad D_c = -\log_{10}(T_c / T_{\mathrm{base},c})
+L_c = \frac{\max(10^{\,(E'_c - A)/\gamma} - k,\ 0)}{1 - k}\, 2^{\,o_c}, \qquad E'_c = \mathrm{toe}(\mathrm{crosstalk}(g_c(D_c))), \qquad D_c = -\log_{10}(T_c / T_{\mathrm{base},c})
 ```
 
-Here T is the signal, T\_base the film base, g\_c the frame's gray curve (identity for green), A the exposure anchor, γ = 0.7 and o\_c the sliders in stops.
+Here T is the signal, T\_base the film base, g\_c the frame's gray curve (identity for green), A the exposure anchor, k the black point, γ = 0.7 and o\_c the sliders in stops.
 
 ### Black and white
 
@@ -105,7 +105,7 @@ Silver blocks every color about equally, so a black and white negative needs no 
 E = \sum_c w_c D_c, \qquad w_c = \frac{T_{\mathrm{base},c}}{\sum_k T_{\mathrm{base},k}}
 ```
 
-Toe, exposure anchor and γ are the same as for color, so Exposure behaves the same. The positive is that one value in all three channels of linear Rec.2020, and only Exposure acts on the pixels.
+Toe and γ are the same as for color, and the exposure anchor is measured the same way, so Exposure behaves the same. No black point is subtracted: black stays at the film base. The positive is that one value in all three channels of linear Rec.2020, and only Exposure acts on the pixels.
 
 ### Automatic measurement
 
@@ -116,6 +116,7 @@ Toe, exposure anchor and γ are the same as for color, so Exposure behaves the s
 | Measured area | The centered 85% of each side, leaving out the film holder: cells far denser than film (green density above 1.2) connected to the scan's edge, plus a small margin for the holder's soft edge. Dense cells that reach the middle of the scan are picture, and nothing is left out on that frame, so a custom area is the fix when dense picture joins the holder. This only affects measuring, not how the holder renders | Size from 50 to 100%, or drawn by hand. A drawn area is measured exactly as drawn, holder included |
 | Gray curves | Fitted to the frame's own near-neutral pixels, with no reference. The band narrows from ±0.15 to ±0.04 density, bins count equally, and the fit is pulled lightly toward an average across rolls | None; there are no RGB or CMY controls |
 | Exposure anchor | The mean of the 99th percentile and the average of equivalent green density | The Exposure slider |
+| Black point | Color only. Half the light of the frame's darkest picture: the 0.5th percentile of equivalent green density in the measured area, bare film left out. Light under it is stored as black | None |
 
 Measurement runs on the scan downsampled by 4. Pixels of light through holes and gaps are left out.
 
