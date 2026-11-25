@@ -278,10 +278,10 @@ taken at the 0.5th percentile of green equivalent density over the measured area
 out, and it is subtracted from every channel alike, in linear light. Anything darker, such as bare
 film beside the picture, becomes black. Dividing by 1 − k keeps frame white where it is, and the
 sliders' gains apply after the subtraction, so they don't move black. On the main test set, with
-the anchor's offset and the saturation gain set again for it, color error fell from 7.56 to 7.29
-and brightness error from 8.73 to 8.46, and under the Neutral curve from 7.17 to 6.95 and
-from 8.78 to 8.31. Color improved on 19 of the 22 frames. The conversions' 1st percentile of L\*
-sat 4.6 above the references', from 10.8. Subtracting three quarters or all of the darkest light scored better in color and
+the anchor's offset and the saturation gain set again for it, color error fell from 7.60 to 7.34
+and brightness error from 8.78 to 8.52, and under the Neutral curve from 7.21 to 7.00 and
+from 8.84 to 8.38. Color improved on 19 of the 22 frames. The conversions' 1st percentile of L\*
+sat 4.5 above the references', from 10.7. Subtracting three quarters or all of the darkest light scored better in color and
 worse in brightness, and percentiles from 0.1 to 2 scored alike. A film gamma set per frame from the
 frame's density range, and a lower gamma for every frame, both scored worse. The share, the offset
 and the gain were chosen on the same frames they are scored on.
