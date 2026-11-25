@@ -8,18 +8,18 @@
 
 Reversal takes a RAW scan of a negative and writes a positive, losslessly compressed DNG. It bakes the inversion into the pixels but keeps them 16-bit, linear Rec.2020, so every RAW tool treats the file as an ordinary positive image. Conversion happens in density and writes a scene-linear positive, with the film base subtracted exactly.
 
-Open it in a RAW editor of your choice, on desktop or mobile, with no plugin or color profile to install. Your edits stay on the DNG, with no need to export massive TIFFs or lossy JPEGs for basic edits.
+Open it in a RAW editor of your choice, on mobile or desktop, with no plugin or color profile to install. Your edits stay on the DNG, with no need to export massive TIFFs or lossy JPEGs for basic editing.
 
 ![Reversal showing a converted color negative, with a list of frames on the left and tone and color controls on the right](docs/images/screenshot.webp)
 
 ## Status
 
-Reversal is pre-alpha, so expect rough edges and changes. Submit feedback via [GitHub issues](https://github.com/janwiktor/reversal/issues).
+Reversal is alpha, so expect rough edges and changes. Submit feedback via [GitHub issues](https://github.com/janwiktor/reversal/issues).
 
-- **Platforms:** a Mac app, or self-hosted from source as a command line and local web UI. The app for iPhone and iPad is a prototype. Not released yet, you can only build it from source for now.
+- **Platforms:** a Mac app, an iOS app via TestFlight, or self-hosted from source as a command line and local web UI.
 - **Film:** color and black and white negatives, detected per frame. Slide film is out of scope.
-- **Cameras:** limited testing, on files from a single DSLR (Nikon D5100 NEF) and one light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
-- **Editors:** DNG rendering is benchmarked against Adobe Camera Raw only. Other tools may show the same file differently.
+- **Cameras:** limited testing, on files from two cameras (Nikon NEF, Fujifilm RAF) and one full spectrum light source. Other cameras that LibRaw reads should open, but the color correction was fitted to this setup.
+- **Editors:** DNG rendering is benchmarked against Adobe Camera Raw and Apple Photos only. Other tools and engines may display the output file differently.
 
 ### What's next
 
@@ -28,11 +28,13 @@ First of all: testing, and testing, and more testing. More file types, cameras, 
 Feature ideas live in [GitHub issues](https://github.com/janwiktor/reversal/issues).
 
 ## Principles
+Why in the overabundance of vibe-coded software I decided to create this.
+
 ### 🎯 Solve one problem well
-Make editing film scans in RAW editors feel like any other photo. Color-accurate film negative reversal. Camera RAW scan files to positive lossless DNG. This app is not going to be an all-in-one end-to-end studio for image processing.
+Make editing film scans in RAW editors feel like any other photo. Color-accurate film negative reversal. Camera RAW scan files to positive lossless DNG. This app is not going to be an all-in-one end-to-end studio for image processing (try [NegPy!](https://github.com/marcinz606/NegPy))
 
 ### 🧩 Modular and portable
-Color conversion core can drive a web, desktop, or mobile app, with device appropriate GUIs each. Plug it into your mobile or desktop workflow, and continue editing in your preferred RAW editing tool.
+Color conversion core can drive a web, desktop, or mobile app, with device-appropriate GUIs each. Plug it into your mobile or desktop workflow, and continue editing in your preferred RAW editing tool.
 
 ### 💨 Lightweight and fast
 The right amount of software to do the job, with minimal but quality UI. Process a batch of scans quickly, then hand over.
@@ -44,7 +46,7 @@ The right amount of software to do the job, with minimal but quality UI. Process
 3. **Detects color and black and white stocks** by how color channels move together. Black and white becomes one silver density, written gray, with black and white profiles. Setup shows the result and lets you choose the other.
 4. **Writes a scene-linear positive:** a 16-bit LinearRaw DNG in linear Rec.2020, with spare highlight range that a RAW editor can recover.
 
-Your source files are never changed. Each DNG stores its conversion settings in its metadata, and the web UI also saves them in a settings file next to the DNG, so a frame reopens as you left it.
+Your source files are never altered. Each DNG stores its conversion settings in its metadata, and the web UI also saves them in a settings file next to the DNG, so a frame reopens as you left it.
 
 ## Install
 
@@ -96,7 +98,7 @@ DEVELOPMENT_TEAM = ABCDE12345
 
 ## Use
 
-In the Mac app, choose a folder of scans. Without the app, open the web UI on a folder; it runs locally at http://127.0.0.1:8787.
+In the Mac app, choose a folder of scans. Without the app, open the web UI on a folder; it runs locally by default at http://127.0.0.1:8787.
 
 ```bash
 ./target/release/reversal ui path/to/scans
